@@ -1,0 +1,189 @@
+CREATE TABLE active_workouts (
+    id TEXT NOT NULL PRIMARY KEY,
+    started_at INTEGER NOT NULL,
+    routine_id TEXT,
+    routine_snapshot_name TEXT,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE active_exercises (
+    id TEXT NOT NULL PRIMARY KEY,
+    active_workout_id TEXT NOT NULL,
+    exercise_catalog_id TEXT NOT NULL,
+    display_name_snapshot TEXT NOT NULL,
+    is_bodyweight INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED',
+    rest_seconds INTEGER NOT NULL DEFAULT 120,
+    rest_auto_start INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY(active_workout_id) REFERENCES active_workouts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE exercise_sets (
+    id TEXT NOT NULL PRIMARY KEY,
+    workout_id TEXT NOT NULL,
+    exercise_instance_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    set_kind TEXT NOT NULL,
+    weight_kg REAL,
+    reps INTEGER,
+    duration_ms INTEGER,
+    logged_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    edited_at INTEGER
+);
+
+CREATE TABLE active_session_state (
+    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+    active_workout_id TEXT,
+    started_at INTEGER,
+    rest_ends_at INTEGER,
+    rest_started_at INTEGER,
+    rest_origin_set_id TEXT,
+    last_opened_route TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE routines (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_completed_workout_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    archived_at INTEGER
+);
+
+CREATE TABLE routine_exercises (
+    id TEXT NOT NULL PRIMARY KEY,
+    routine_id TEXT NOT NULL,
+    exercise_catalog_id TEXT NOT NULL,
+    display_name_snapshot TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    rest_seconds INTEGER NOT NULL DEFAULT 120,
+    rest_auto_start INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
+);
+
+CREATE TABLE routine_set_templates (
+    id TEXT NOT NULL PRIMARY KEY,
+    routine_exercise_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    target_weight_kg REAL,
+    target_reps INTEGER,
+    target_duration_ms INTEGER,
+    set_kind TEXT NOT NULL,
+    FOREIGN KEY(routine_exercise_id) REFERENCES routine_exercises(id) ON DELETE CASCADE
+);
+
+CREATE TABLE completed_workouts (
+    id TEXT NOT NULL PRIMARY KEY,
+    source_active_workout_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    routine_id TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE exercise_catalog (
+    id TEXT NOT NULL PRIMARY KEY,
+    canonical_name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    muscle_group TEXT NOT NULL,
+    equipment TEXT NOT NULL,
+    movement_pattern TEXT NOT NULL,
+    exercise_type TEXT NOT NULL,
+    experience_level TEXT NOT NULL,
+    body_region TEXT NOT NULL,
+    is_bodyweight INTEGER NOT NULL,
+    logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED',
+    is_user_created INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    archived_at INTEGER,
+    source_seed_version TEXT,
+    user_notes TEXT
+);
+
+CREATE TABLE exercise_seed_imports (
+    id TEXT NOT NULL PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    imported_at INTEGER NOT NULL,
+    row_count INTEGER NOT NULL,
+    rejected_row_count INTEGER NOT NULL,
+    warnings TEXT NOT NULL
+);
+
+CREATE TABLE user_preferences (
+    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+    weight_unit TEXT NOT NULL,
+    date_format TEXT,
+    default_rest_seconds INTEGER NOT NULL,
+    rest_sound_enabled INTEGER NOT NULL DEFAULT 1,
+    weight_step_lb REAL NOT NULL DEFAULT 5.0,
+    weight_step_kg REAL NOT NULL DEFAULT 2.5,
+    android_auto_backup_allowed INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE personal_records (
+    id TEXT NOT NULL PRIMARY KEY,
+    exercise_catalog_id TEXT NOT NULL,
+    record_kind TEXT NOT NULL,
+    reps INTEGER,
+    weight_kg REAL,
+    value REAL NOT NULL,
+    source_workout_id TEXT NOT NULL,
+    source_set_id TEXT NOT NULL,
+    achieved_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE progress_points (
+    id TEXT NOT NULL PRIMARY KEY,
+    exercise_catalog_id TEXT NOT NULL,
+    source_workout_id TEXT NOT NULL,
+    source_set_id TEXT,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    weight_kg REAL,
+    reps INTEGER,
+    recorded_at INTEGER NOT NULL
+);
+
+CREATE TABLE export_snapshots (
+    id TEXT NOT NULL PRIMARY KEY,
+    export_type TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    weight_unit TEXT NOT NULL,
+    row_count INTEGER NOT NULL,
+    format_version INTEGER NOT NULL
+);
+
+CREATE TABLE active_workout_ux_sessions (
+    active_workout_id TEXT NOT NULL PRIMARY KEY,
+    focused_exercise_instance_id TEXT,
+    focused_draft_id TEXT,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(active_workout_id) REFERENCES active_workouts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE active_set_drafts (
+    draft_id TEXT NOT NULL PRIMARY KEY,
+    active_workout_id TEXT NOT NULL,
+    exercise_instance_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    set_kind TEXT NOT NULL,
+    reps INTEGER,
+    weight_kg REAL,
+    duration_ms INTEGER,
+    timer_started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(active_workout_id) REFERENCES active_workouts(id) ON DELETE CASCADE,
+    FOREIGN KEY(exercise_instance_id) REFERENCES active_exercises(id) ON DELETE CASCADE
+);

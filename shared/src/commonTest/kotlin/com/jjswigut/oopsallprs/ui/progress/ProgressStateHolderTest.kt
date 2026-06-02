@@ -1,0 +1,97 @@
+package com.jjswigut.oopsallprs.ui.progress
+
+import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.testing.FoundationHarness
+import com.jjswigut.oopsallprs.testing.instant
+import com.jjswigut.oopsallprs.testing.successValue
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class ProgressStateHolderTest {
+    @Test
+    fun refreshBuildsEmptyStateAndRecentRowsNewestFirst() = runTest {
+        val harness = FoundationHarness()
+        val holder = ProgressStateHolder(harness.store, harness.store, harness.store)
+
+        holder.refresh()
+
+        assertTrue(holder.state.value.recentRows.isEmpty())
+        assertEquals("Finish workouts to build PRs here.", holder.state.value.emptyMessage)
+
+        harness.finishWeightedWorkout(loggedAtMs = 1_300, finishedAtMs = 2_000)
+        harness.finishBodyweightWorkout(reps = 15, loggedAtMs = 3_300, finishedAtMs = 4_000)
+        holder.refresh()
+
+        val state = holder.state.value
+        assertEquals(4, state.recentRows.size)
+        assertEquals("Pull-Up", state.recentRows.first().exerciseName)
+        assertEquals("15 reps", state.recentRows.first().valueLabel)
+        assertEquals("Pull-Up", state.latestPr?.exerciseName)
+        assertEquals("15 reps", state.latestPr?.valueLabel)
+    }
+
+    @Test
+    fun groupsRecordsByExerciseAndKeepsSelectionInState() = runTest {
+        val harness = FoundationHarness()
+        harness.finishWeightedWorkout(loggedAtMs = 1_300, finishedAtMs = 2_000)
+        harness.finishBodyweightWorkout(reps = 15, loggedAtMs = 3_300, finishedAtMs = 4_000)
+        val holder = ProgressStateHolder(harness.store, harness.store, harness.store)
+        holder.refresh()
+
+        holder.selectExercise(harness.weightedReference.exerciseCatalogId)
+
+        val selected = holder.state.value.selectedExercise
+        assertEquals("Bench Press", selected?.exerciseName)
+        assertEquals(3, selected?.records?.size)
+        assertEquals("Bench Press", selected?.latestRecord?.exerciseName)
+        assertTrue(selected?.records.orEmpty().all { it.exerciseName == "Bench Press" })
+
+        holder.clearExerciseSelection()
+
+        assertNull(holder.state.value.selectedExercise)
+        assertNull(holder.state.value.selectedExerciseId)
+    }
+}
+
+private suspend fun FoundationHarness.finishWeightedWorkout(
+    reps: Int = 5,
+    weightKg: Double = 100.0,
+    loggedAtMs: Long,
+    finishedAtMs: Long
+) {
+    val workout = lifecycle.startEmpty(instant(loggedAtMs - 300)).successValue()
+    val exercise = setLogging.addExercise(workout.id, weightedReference, instant(loggedAtMs - 200)).successValue()
+    setLogging.confirmSet(
+        workout.id,
+        exercise.id,
+        SetKind.WEIGHTED,
+        reps,
+        WeightKg(weightKg),
+        0,
+        instant(loggedAtMs)
+    ).successValue()
+    routines.finishWorkout(workout.id, instant(finishedAtMs)).successValue()
+}
+
+private suspend fun FoundationHarness.finishBodyweightWorkout(
+    reps: Int,
+    loggedAtMs: Long,
+    finishedAtMs: Long
+) {
+    val workout = lifecycle.startEmpty(instant(loggedAtMs - 300)).successValue()
+    val exercise = setLogging.addExercise(workout.id, bodyweightReference, instant(loggedAtMs - 200)).successValue()
+    setLogging.confirmSet(
+        workout.id,
+        exercise.id,
+        SetKind.BODYWEIGHT,
+        reps,
+        null,
+        0,
+        instant(loggedAtMs)
+    ).successValue()
+    routines.finishWorkout(workout.id, instant(finishedAtMs)).successValue()
+}

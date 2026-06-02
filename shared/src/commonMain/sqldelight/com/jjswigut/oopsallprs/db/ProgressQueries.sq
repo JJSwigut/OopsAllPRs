@@ -1,0 +1,29 @@
+deletePersonalRecords:
+DELETE FROM personal_records;
+
+insertPersonalRecord:
+INSERT OR REPLACE INTO personal_records(id, exercise_catalog_id, record_kind, reps, weight_kg, value, source_workout_id, source_set_id, achieved_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectPersonalRecords:
+SELECT * FROM personal_records
+ORDER BY achieved_at DESC;
+
+deleteProgressPoints:
+DELETE FROM progress_points;
+
+insertProgressPoint:
+INSERT OR REPLACE INTO progress_points(id, exercise_catalog_id, source_workout_id, source_set_id, metric, value, weight_kg, reps, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectProgressPoints:
+SELECT * FROM progress_points
+ORDER BY recorded_at ASC;
+
+insertExportSnapshot:
+INSERT OR REPLACE INTO export_snapshots(id, export_type, created_at, weight_unit, row_count, format_version)
+VALUES (?, ?, ?, ?, ?, ?);
+
+selectExportSnapshots:
+SELECT * FROM export_snapshots
+ORDER BY created_at DESC;

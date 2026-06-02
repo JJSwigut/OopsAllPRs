@@ -1,0 +1,38 @@
+insertActiveExercise:
+INSERT OR REPLACE INTO active_exercises(id, active_workout_id, exercise_catalog_id, display_name_snapshot, is_bodyweight, position, logging_mode, rest_seconds, rest_auto_start)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectActiveExercises:
+SELECT * FROM active_exercises
+WHERE active_workout_id = ?
+ORDER BY position ASC;
+
+upsertExerciseSet:
+INSERT OR REPLACE INTO exercise_sets(id, workout_id, exercise_instance_id, position, set_kind, weight_kg, reps, duration_ms, logged_at, created_at, updated_at, edited_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectSetsForWorkout:
+SELECT * FROM exercise_sets
+WHERE workout_id = ?
+ORDER BY exercise_instance_id ASC, position ASC;
+
+selectLoggedSets:
+SELECT * FROM exercise_sets
+WHERE workout_id = ? AND logged_at IS NOT NULL
+ORDER BY exercise_instance_id ASC, position ASC;
+
+selectSetForWorkout:
+SELECT * FROM exercise_sets
+WHERE workout_id = ? AND id = ?;
+
+deleteSetForWorkout:
+DELETE FROM exercise_sets
+WHERE workout_id = ? AND id = ?;
+
+deleteSetsForWorkout:
+DELETE FROM exercise_sets
+WHERE workout_id = ?;
+
+deleteActiveExercisesForWorkout:
+DELETE FROM active_exercises
+WHERE active_workout_id = ?;

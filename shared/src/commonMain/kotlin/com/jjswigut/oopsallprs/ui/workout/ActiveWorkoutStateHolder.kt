@@ -1,0 +1,649 @@
+package com.jjswigut.oopsallprs.ui.workout
+
+import com.jjswigut.oopsallprs.domain.model.ActivePrFeedback
+import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
+import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
+import com.jjswigut.oopsallprs.domain.model.ExerciseReference
+import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
+import com.jjswigut.oopsallprs.domain.model.ExerciseSet
+import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.OrderedPosition
+import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
+import com.jjswigut.oopsallprs.domain.model.RestConfiguration
+import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.domain.model.foundationFailure
+import com.jjswigut.oopsallprs.domain.model.foundationSuccess
+import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
+import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
+import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
+import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
+import com.jjswigut.oopsallprs.domain.validation.FoundationError
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+
+data class ActiveWorkoutState(
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null,
+    val lastLoggedSet: ExerciseSet? = null,
+    val workout: ActiveWorkoutView? = null,
+    val focusSnapshot: ActiveWorkoutFocus? = null,
+    val editDraft: LoggedSetEditDraft? = null,
+    val isDiscardConfirmationVisible: Boolean = false,
+    val canUndoLastSet: Boolean = false
+)
+
+class ActiveWorkoutStateHolder(
+    private val setLogging: SetLoggingUseCases,
+    private val lifecycle: WorkoutLifecycleUseCases,
+    private val activeUx: ActiveWorkoutUxRepository? = null,
+    private val activePrFeedback: ActivePrFeedbackUseCase? = null,
+    private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null
+) {
+    private val drafts = linkedMapOf<FoundationId, SetRowDraft>()
+    private val prFeedbackBySetId = linkedMapOf<FoundationId, ActivePrFeedback>()
+    private var activeWorkoutId: FoundationId? = null
+    private var focus: ActiveWorkoutFocus? = null
+
+    private val _state = MutableStateFlow(ActiveWorkoutState())
+    val state: StateFlow<ActiveWorkoutState> = _state
+
+    suspend fun hydrate(
+        workoutId: FoundationId,
+        restoredFocus: ActiveWorkoutFocus? = null,
+        now: Instant = Clock.System.now()
+    ) {
+        activeWorkoutId = workoutId
+        val workout = lifecycle.activeWorkout(workoutId)
+        if (workout == null) {
+            _state.value = ActiveWorkoutState(errorMessage = "Active workout not found")
+            return
+        }
+
+        hydrateDrafts(workout)
+        focus = restoredFocus ?: activeUx?.loadUxSession(workoutId)?.toFocus()
+        val session = lifecycle.restoreActiveSession(now)?.takeIf { it.activeWorkoutId == workoutId }
+        publish(workout, now, session)
+        persistVisibleDraftsAndFocus(now)
+        recomputeVisiblePrFeedback(workout, now)
+    }
+
+    suspend fun addExercise(
+        workoutId: FoundationId,
+        reference: ExerciseReference
+    ): FoundationResult<FoundationId> {
+        val result = setLogging.addExercise(workoutId, reference)
+        return when (result) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                activeWorkoutId = workoutId
+                val now = Clock.System.now()
+                val draftId = FoundationId("draft-${result.value.id.value}-0")
+                previousDefaults?.valueFor(
+                    exerciseCatalogId = result.value.reference.exerciseCatalogId,
+                    isBodyweight = result.value.reference.isBodyweight,
+                    loggingMode = result.value.reference.loggingMode,
+                    setIndex = 0
+                )?.let { previous ->
+                    drafts[result.value.id] = SetRowDraft(
+                        draftId = draftId,
+                        exerciseInstanceId = result.value.id,
+                        position = OrderedPosition(0),
+                        setKind = result.value.reference.loggingMode.defaultSetKind(),
+                        reps = previous.reps,
+                        weight = previous.weight,
+                        durationMs = previous.durationMs
+                    )
+                }
+                focus = ActiveWorkoutFocus(
+                    exerciseInstanceId = result.value.id,
+                    draftId = draftId,
+                    updatedAt = now
+                )
+                persistFocus(now)
+                hydrate(workoutId, focus, now)
+                foundationSuccess(result.value.id)
+            }
+        }
+    }
+
+    suspend fun confirmFocusedDraft(): FoundationResult<ExerciseSet> {
+        val exerciseId = focus?.exerciseInstanceId
+            ?: return foundationFailure(FoundationError.Validation("No focused set to log"))
+        return confirmDraft(exerciseId)
+    }
+
+    suspend fun confirmDraft(exerciseInstanceId: FoundationId): FoundationResult<ExerciseSet> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val view = _state.value.workout
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val block = view.exerciseBlocks.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }
+            ?: return foundationFailure(FoundationError.NotFound("Exercise not found: $exerciseInstanceId"))
+        val draft = block.draft
+        if (draft.isPending) {
+            return foundationFailure(FoundationError.Conflict("Set is already saving"))
+        }
+        validateDraft(draft)?.let { error ->
+            setDraft(draft.copy(inlineError = error.message))
+            return foundationFailure(error)
+        }
+
+        setDraft(draft.copy(isPending = true, inlineError = null))
+        _state.value = _state.value.copy(isSaving = true, errorMessage = null)
+        val loggedAt = Clock.System.now()
+        val result = setLogging.confirmSet(
+            activeWorkoutId = workoutId,
+            exerciseInstanceId = exerciseInstanceId,
+            setKind = draft.setKind,
+            reps = draft.reps ?: 0,
+            weight = draft.weight,
+            durationMs = draft.effectiveDurationMs().takeIf { draft.setKind == SetKind.TIMED },
+            position = draft.position.value,
+            loggedAt = loggedAt
+        )
+
+        return when (result) {
+            is FoundationResult.Failure -> {
+                setDraft(draft.copy(isPending = false, inlineError = result.error.message))
+                _state.value = _state.value.copy(isSaving = false, errorMessage = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                activeUx?.clearExerciseDrafts(workoutId, exerciseInstanceId)
+                drafts.remove(exerciseInstanceId)
+                val savedWorkout = lifecycle.activeWorkout(workoutId)
+                if (savedWorkout != null) {
+                    derivePrFeedback(savedWorkout, exerciseInstanceId, result.value)
+                }
+                if (block.rest.isEnabled) {
+                    lifecycle.startRestTimer(
+                        activeWorkoutId = workoutId,
+                        originSetId = result.value.id,
+                        durationSeconds = block.rest.durationSeconds,
+                        now = result.value.loggedAt ?: loggedAt
+                    )
+                }
+                _state.value = _state.value.copy(isSaving = false, lastLoggedSet = result.value, errorMessage = null)
+                hydrate(workoutId, focus)
+                result
+            }
+        }
+    }
+
+    suspend fun updateDraftReps(exerciseInstanceId: FoundationId, reps: Int?) {
+        updateDraft(exerciseInstanceId) { it.copy(reps = reps, inlineError = null) }
+    }
+
+    suspend fun updateDraftWeight(exerciseInstanceId: FoundationId, weight: WeightKg?) {
+        updateDraft(exerciseInstanceId) { it.copy(weight = weight, inlineError = null) }
+    }
+
+    suspend fun updateDraftDuration(exerciseInstanceId: FoundationId, durationMs: Long?) {
+        updateDraft(exerciseInstanceId) {
+            it.copy(durationMs = durationMs?.coerceAtLeast(0L), timerStartedAt = null, previewDurationMs = null, inlineError = null)
+        }
+    }
+
+    suspend fun adjustDraftDuration(exerciseInstanceId: FoundationId, deltaMs: Long) {
+        updateDraft(exerciseInstanceId) {
+            val next = ((it.effectiveDurationMs() ?: 0L) + deltaMs).coerceAtLeast(0L)
+            it.copy(durationMs = next, timerStartedAt = null, previewDurationMs = null, inlineError = null)
+        }
+    }
+
+    suspend fun toggleDraftTimer(exerciseInstanceId: FoundationId, now: Instant = Clock.System.now()) {
+        updateDraft(exerciseInstanceId) { draft ->
+            if (draft.timerStartedAt == null) {
+                draft.copy(timerStartedAt = now, previewDurationMs = null, inlineError = null)
+            } else {
+                draft.copy(durationMs = draft.effectiveDurationMs(), timerStartedAt = null, previewDurationMs = null, inlineError = null)
+            }
+        }
+    }
+
+    suspend fun adjustExerciseRest(exerciseInstanceId: FoundationId, deltaSeconds: Int): FoundationResult<FoundationId> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val block = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }
+            ?: return foundationFailure(FoundationError.NotFound("Exercise not found: $exerciseInstanceId"))
+        val current = block.rest
+        val base = if (current.durationSeconds > 0) current.durationSeconds else RestConfiguration.DEFAULT_SECONDS
+        val nextRest = current.copy(
+            durationSeconds = (base + deltaSeconds).coerceAtLeast(0),
+            autoStart = true
+        )
+        return when (val result = setLogging.updateExerciseRest(workoutId, exerciseInstanceId, nextRest)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(exerciseInstanceId)
+            }
+        }
+    }
+
+    suspend fun toggleExerciseRest(exerciseInstanceId: FoundationId): FoundationResult<FoundationId> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val block = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }
+            ?: return foundationFailure(FoundationError.NotFound("Exercise not found: $exerciseInstanceId"))
+        val nextRest = if (block.rest.isEnabled) {
+            RestConfiguration.disabled()
+        } else {
+            RestConfiguration.default()
+        }
+        return when (val result = setLogging.updateExerciseRest(workoutId, exerciseInstanceId, nextRest)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(exerciseInstanceId)
+            }
+        }
+    }
+
+    suspend fun adjustActiveRest(deltaSeconds: Int, now: Instant = Clock.System.now()): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = lifecycle.adjustRestTimer(workoutId, deltaSeconds, now)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus, now)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun skipActiveRest(now: Instant = Clock.System.now()): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = lifecycle.clearRestTimer(workoutId, now)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus, now)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun refreshTimers(now: Instant = Clock.System.now()) {
+        val workoutId = activeWorkoutId ?: return
+        val workout = lifecycle.activeWorkout(workoutId) ?: return
+        val session = lifecycle.restoreActiveSession(now)?.takeIf { it.activeWorkoutId == workoutId }
+        publish(workout, now, session)
+    }
+
+    suspend fun setFocus(exerciseInstanceId: FoundationId, now: Instant = Clock.System.now()) {
+        val draft = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }?.draft
+        if (draft != null) {
+            focus = ActiveWorkoutFocus(exerciseInstanceId, draft.draftId, now)
+            persistFocus(now)
+            _state.value = _state.value.copy(focusSnapshot = focus, workout = _state.value.workout?.copy(focus = focus))
+        }
+    }
+
+    fun beginEditSet(setId: FoundationId) {
+        val view = _state.value.workout ?: return
+        val block = view.exerciseBlocks.firstNotNullOfOrNull { candidate ->
+            candidate.loggedRows.firstOrNull { it.setId == setId }?.let { row -> candidate to row }
+        } ?: return
+        val (exercise, row) = block
+        _state.value = _state.value.copy(
+            editDraft = LoggedSetEditDraft(
+                setId = row.setId,
+                exerciseName = exercise.displayName,
+                rowDraft = SetRowDraft(
+                    draftId = FoundationId("edit-${row.setId.value}"),
+                    exerciseInstanceId = exercise.exerciseInstanceId,
+                    position = row.position,
+                    setKind = row.setKind,
+                    reps = row.reps,
+                    weight = row.weight,
+                    durationMs = row.durationMs
+                )
+            ),
+            isDiscardConfirmationVisible = false,
+            errorMessage = null
+        )
+    }
+
+    fun cancelEditSet() {
+        _state.value = _state.value.copy(editDraft = null, errorMessage = null)
+    }
+
+    fun updateEditReps(reps: Int?) {
+        updateEditDraft { it.copy(reps = reps, inlineError = null) }
+    }
+
+    fun updateEditWeight(weight: WeightKg?) {
+        updateEditDraft { it.copy(weight = weight, inlineError = null) }
+    }
+
+    fun updateEditDuration(durationMs: Long?) {
+        updateEditDraft { it.copy(durationMs = durationMs?.coerceAtLeast(0L), inlineError = null) }
+    }
+
+    suspend fun confirmEditSet(now: Instant = Clock.System.now()): FoundationResult<ExerciseSet> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val edit = _state.value.editDraft
+            ?: return foundationFailure(FoundationError.Validation("No logged set selected for editing"))
+        validateDraft(edit.rowDraft)?.let { error ->
+            _state.value = _state.value.copy(
+                editDraft = edit.copy(rowDraft = edit.rowDraft.copy(inlineError = error.message)),
+                errorMessage = error.message
+            )
+            return foundationFailure(error)
+        }
+
+        val pendingEdit = edit.copy(rowDraft = edit.rowDraft.copy(isPending = true, inlineError = null))
+        _state.value = _state.value.copy(editDraft = pendingEdit, isSaving = true, errorMessage = null)
+        return when (
+            val result = setLogging.editLoggedSet(
+                activeWorkoutId = workoutId,
+                setId = edit.setId,
+                reps = edit.rowDraft.reps ?: 0,
+                weight = edit.rowDraft.weight,
+                durationMs = edit.rowDraft.effectiveDurationMs().takeIf { edit.rowDraft.setKind == SetKind.TIMED },
+                now = now
+            )
+        ) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(
+                    editDraft = edit.copy(rowDraft = edit.rowDraft.copy(isPending = false, inlineError = result.error.message)),
+                    isSaving = false,
+                    errorMessage = result.error.message
+                )
+                result
+            }
+            is FoundationResult.Success -> {
+                prFeedbackBySetId.remove(edit.setId)
+                _state.value = _state.value.copy(editDraft = null, isSaving = false, lastLoggedSet = result.value, errorMessage = null)
+                hydrate(workoutId, focus, now)
+                result
+            }
+        }
+    }
+
+    suspend fun deleteLoggedSet(setId: FoundationId, now: Instant = Clock.System.now()): FoundationResult<ExerciseSet> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        _state.value = _state.value.copy(isSaving = true, errorMessage = null)
+        return when (val result = setLogging.deleteLoggedSet(workoutId, setId, now)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(isSaving = false, errorMessage = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                prFeedbackBySetId.remove(setId)
+                lifecycle.clearRestIfOrigin(workoutId, setId, now)
+                _state.value = _state.value.copy(
+                    isSaving = false,
+                    editDraft = _state.value.editDraft?.takeIf { it.setId != setId },
+                    lastLoggedSet = _state.value.lastLoggedSet?.takeIf { it.id != setId },
+                    errorMessage = null
+                )
+                hydrate(workoutId, focus, now)
+                result
+            }
+        }
+    }
+
+    suspend fun undoLastLoggedSet(now: Instant = Clock.System.now()): FoundationResult<ExerciseSet> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        _state.value = _state.value.copy(isSaving = true, errorMessage = null)
+        return when (val result = setLogging.undoLastLoggedSet(workoutId, now)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(isSaving = false, errorMessage = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                prFeedbackBySetId.remove(result.value.id)
+                lifecycle.clearRestIfOrigin(workoutId, result.value.id, now)
+                _state.value = _state.value.copy(
+                    isSaving = false,
+                    editDraft = _state.value.editDraft?.takeIf { it.setId != result.value.id },
+                    lastLoggedSet = _state.value.lastLoggedSet?.takeIf { it.id != result.value.id },
+                    errorMessage = null
+                )
+                hydrate(workoutId, focus, now)
+                result
+            }
+        }
+    }
+
+    fun requestDiscard() {
+        _state.value = _state.value.copy(isDiscardConfirmationVisible = true, editDraft = null, errorMessage = null)
+    }
+
+    fun cancelDiscard() {
+        _state.value = _state.value.copy(isDiscardConfirmationVisible = false, errorMessage = null)
+    }
+
+    suspend fun confirmDiscard(now: Instant = Clock.System.now()): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        _state.value = _state.value.copy(isSaving = true, errorMessage = null)
+        return when (val result = lifecycle.discard(workoutId, now)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(isSaving = false, errorMessage = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                activeWorkoutId = null
+                focus = null
+                drafts.clear()
+                prFeedbackBySetId.clear()
+                _state.value = ActiveWorkoutState()
+                result
+            }
+        }
+    }
+
+    fun snapshotFocus(): ActiveWorkoutFocus? = focus
+
+    internal fun restoreDraftForTest(draft: SetRowDraft) {
+        drafts[draft.exerciseInstanceId] = draft
+        _state.value.workout?.let { view ->
+            _state.value = _state.value.copy(
+                workout = view.copy(
+                    exerciseBlocks = view.exerciseBlocks.map { block ->
+                        if (block.exerciseInstanceId == draft.exerciseInstanceId) {
+                            block.copy(draft = draft, inlineError = draft.inlineError)
+                        } else {
+                            block
+                        }
+                    }
+                )
+            )
+        }
+    }
+
+    private suspend fun hydrateDrafts(workout: ActiveWorkout) {
+        val validExerciseIds = workout.exercises.map { it.id }.toSet()
+        val persisted = activeUx?.loadSetDrafts(workout.id).orEmpty()
+        persisted
+            .filter { it.exerciseInstanceId in validExerciseIds }
+            .forEach { draft ->
+                drafts[draft.exerciseInstanceId] = draft.toRowDraft()
+            }
+        drafts.entries.removeAll { it.key !in validExerciseIds }
+    }
+
+    private suspend fun updateDraft(
+        exerciseInstanceId: FoundationId,
+        transform: (SetRowDraft) -> SetRowDraft
+    ) {
+        val current = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }?.draft
+            ?: return
+        setDraft(transform(current))
+    }
+
+    private suspend fun setDraft(draft: SetRowDraft) {
+        drafts[draft.exerciseInstanceId] = draft
+        persistDraft(draft)
+        _state.value.workout?.let { view ->
+            _state.value = _state.value.copy(
+                workout = view.copy(
+                    exerciseBlocks = view.exerciseBlocks.map { block ->
+                        if (block.exerciseInstanceId == draft.exerciseInstanceId) {
+                            block.copy(draft = draft, inlineError = draft.inlineError)
+                        } else {
+                            block
+                        }
+                    }
+                )
+            )
+        }
+    }
+
+    private fun updateEditDraft(transform: (SetRowDraft) -> SetRowDraft) {
+        val edit = _state.value.editDraft ?: return
+        _state.value = _state.value.copy(editDraft = edit.copy(rowDraft = transform(edit.rowDraft)))
+    }
+
+    private fun validateDraft(draft: SetRowDraft): FoundationError? =
+        when {
+            draft.setKind == SetKind.TIMED && (draft.effectiveDurationMs() == null || draft.effectiveDurationMs()!! <= 0L) -> FoundationError.Validation("Timed sets require a positive duration")
+            draft.setKind != SetKind.TIMED && (draft.reps == null || draft.reps <= 0) -> FoundationError.Validation("Logged sets require positive reps")
+            draft.setKind == SetKind.WEIGHTED && draft.weight == null -> FoundationError.Validation("Weighted sets require a weight")
+            draft.setKind == SetKind.WEIGHTED && draft.weight != null && draft.weight.value < 0.0 -> FoundationError.Validation("Weighted sets cannot have negative weight")
+            draft.setKind == SetKind.BODYWEIGHT && draft.weight != null && draft.weight.value < 0.0 -> FoundationError.Validation("Bodyweight added load cannot be negative")
+            else -> null
+        }
+
+    private fun publish(workout: ActiveWorkout, now: Instant, activeSession: com.jjswigut.oopsallprs.domain.model.ActiveSessionState? = null) {
+        val view = workout.toView(drafts, focus, prFeedbackBySetId, activeSession, now, _state.value.errorMessage)
+        view.exerciseBlocks.forEach { block ->
+            if (!drafts.containsKey(block.exerciseInstanceId)) {
+                drafts[block.exerciseInstanceId] = block.draft
+            }
+        }
+        focus = view.focus
+        _state.value = _state.value.copy(
+            workout = view,
+            focusSnapshot = view.focus,
+            errorMessage = view.errorMessage,
+            canUndoLastSet = workout.exercises.any { exercise -> exercise.sets.any { it.isLogged } }
+        )
+    }
+
+    private suspend fun persistVisibleDraftsAndFocus(now: Instant) {
+        drafts.values.forEach { draft ->
+            persistDraft(draft)
+        }
+        persistFocus(now)
+    }
+
+    private suspend fun persistDraft(draft: SetRowDraft, now: Instant = Clock.System.now()) {
+        val workoutId = activeWorkoutId ?: return
+        val result = activeUx?.saveSetDraft(
+            PersistedSetDraft(
+                draftId = draft.draftId,
+                activeWorkoutId = workoutId,
+                exerciseInstanceId = draft.exerciseInstanceId,
+                position = draft.position,
+                setKind = draft.setKind,
+                reps = draft.reps,
+                weight = draft.weight,
+                durationMs = draft.durationMs,
+                timerStartedAt = draft.timerStartedAt,
+                updatedAt = now
+            )
+        )
+        if (result is FoundationResult.Failure) {
+            _state.value = _state.value.copy(errorMessage = result.error.message)
+        }
+    }
+
+    private suspend fun persistFocus(now: Instant = Clock.System.now()) {
+        val workoutId = activeWorkoutId ?: return
+        val current = focus ?: return
+        val result = activeUx?.saveUxSession(
+            ActiveWorkoutUxSession(
+                activeWorkoutId = workoutId,
+                focusedExerciseInstanceId = current.exerciseInstanceId,
+                focusedDraftId = current.draftId,
+                updatedAt = now
+            )
+        )
+        if (result is FoundationResult.Failure) {
+            _state.value = _state.value.copy(errorMessage = result.error.message)
+        }
+    }
+
+    private suspend fun derivePrFeedback(
+        workout: ActiveWorkout,
+        exerciseInstanceId: FoundationId,
+        set: ExerciseSet
+    ) {
+        val exercise = workout.exercises.firstOrNull { it.id == exerciseInstanceId } ?: return
+        val feedback = activePrFeedback?.feedbackFor(workout, exercise, set) ?: return
+        prFeedbackBySetId[feedback.setId] = feedback
+    }
+
+    private suspend fun recomputeVisiblePrFeedback(workout: ActiveWorkout, now: Instant) {
+        val previous = prFeedbackBySetId.toMap()
+        val next = linkedMapOf<FoundationId, ActivePrFeedback>()
+        workout.exercises.forEach { exercise ->
+            exercise.sets.filter { it.isLogged }.forEach { set ->
+                val feedback = activePrFeedback?.feedbackFor(workout, exercise, set)
+                val existing = previous[set.id]
+                if (existing != null) {
+                    next[set.id] = existing
+                } else if (feedback != null) {
+                    next[set.id] = feedback
+                }
+            }
+        }
+        prFeedbackBySetId.clear()
+        prFeedbackBySetId.putAll(next)
+        if (previous != prFeedbackBySetId) {
+            publish(workout, now, lifecycle.restoreActiveSession(now))
+        }
+    }
+
+    private fun ActiveWorkoutUxSession.toFocus(): ActiveWorkoutFocus? {
+        val exerciseId = focusedExerciseInstanceId ?: return null
+        val draftId = focusedDraftId ?: return null
+        return ActiveWorkoutFocus(exerciseId, draftId, updatedAt)
+    }
+
+    private fun PersistedSetDraft.toRowDraft(): SetRowDraft =
+        SetRowDraft(
+            draftId = draftId,
+            exerciseInstanceId = exerciseInstanceId,
+            position = position,
+            setKind = setKind,
+            reps = reps,
+            weight = weight,
+            durationMs = durationMs,
+            timerStartedAt = timerStartedAt
+        )
+}
+
+private fun ExerciseLoggingMode.defaultSetKind(): SetKind =
+    when (this) {
+        ExerciseLoggingMode.BODYWEIGHT -> SetKind.BODYWEIGHT
+        ExerciseLoggingMode.TIMED -> SetKind.TIMED
+        ExerciseLoggingMode.WEIGHTED -> SetKind.WEIGHTED
+    }

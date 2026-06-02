@@ -1,0 +1,31 @@
+
+# Visual brainstorm companion
+.superpowers/
+
+# Kotlin / Gradle / Android
+.gradle/
+.kotlin/
+build/
+out/
+*.class
+*.jar
+*.iml
+local.properties
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# Logs / local env
+*.log
+.env*
+
+# Swift / iOS local build output
+.build/
+DerivedData/
+*.swiftpm/
+Packages/

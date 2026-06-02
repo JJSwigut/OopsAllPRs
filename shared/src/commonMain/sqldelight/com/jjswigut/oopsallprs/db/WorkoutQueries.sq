@@ -1,0 +1,71 @@
+insertActiveWorkout:
+INSERT OR REPLACE INTO active_workouts(id, started_at, routine_id, routine_snapshot_name, status, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+selectActiveWorkout:
+SELECT * FROM active_workouts
+WHERE id = ?;
+
+selectCurrentActiveWorkout:
+SELECT * FROM active_workouts
+WHERE status = 'ACTIVE'
+ORDER BY updated_at DESC
+LIMIT 1;
+
+updateWorkoutStatus:
+UPDATE active_workouts
+SET status = ?, updated_at = ?
+WHERE id = ?;
+
+deleteActiveWorkout:
+DELETE FROM active_workouts
+WHERE id = ?;
+
+upsertSessionState:
+INSERT OR REPLACE INTO active_session_state(singleton_id, active_workout_id, started_at, rest_ends_at, rest_started_at, rest_origin_set_id, last_opened_route, updated_at)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?);
+
+selectSessionState:
+SELECT * FROM active_session_state
+WHERE singleton_id = 1;
+
+clearSessionState:
+DELETE FROM active_session_state
+WHERE singleton_id = 1;
+
+upsertActiveWorkoutUxSession:
+INSERT OR REPLACE INTO active_workout_ux_sessions(active_workout_id, focused_exercise_instance_id, focused_draft_id, updated_at)
+VALUES (?, ?, ?, ?);
+
+selectActiveWorkoutUxSession:
+SELECT * FROM active_workout_ux_sessions
+WHERE active_workout_id = ?;
+
+upsertActiveSetDraft:
+INSERT OR REPLACE INTO active_set_drafts(draft_id, active_workout_id, exercise_instance_id, position, set_kind, reps, weight_kg, duration_ms, timer_started_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectActiveSetDrafts:
+SELECT * FROM active_set_drafts
+WHERE active_workout_id = ?
+ORDER BY exercise_instance_id ASC, position ASC;
+
+clearActiveExerciseDrafts:
+DELETE FROM active_set_drafts
+WHERE active_workout_id = ? AND exercise_instance_id = ?;
+
+clearActiveWorkoutUx:
+DELETE FROM active_workout_ux_sessions
+WHERE active_workout_id = ?;
+
+clearActiveWorkoutDrafts:
+DELETE FROM active_set_drafts
+WHERE active_workout_id = ?;
+
+selectUserPreferences:
+SELECT * FROM user_preferences
+WHERE singleton_id = 1;
+
+upsertUserPreferences:
+INSERT OR REPLACE INTO user_preferences(singleton_id, weight_unit, date_format, default_rest_seconds, rest_sound_enabled, weight_step_lb, weight_step_kg, android_auto_backup_allowed, created_at, updated_at)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?);

@@ -1,0 +1,2 @@
+ALTER TABLE user_preferences ADD COLUMN weight_step_lb REAL NOT NULL DEFAULT 5.0;
+ALTER TABLE user_preferences ADD COLUMN weight_step_kg REAL NOT NULL DEFAULT 2.5;

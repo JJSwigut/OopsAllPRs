@@ -1,0 +1,26 @@
+ALTER TABLE exercise_sets ADD COLUMN duration_ms INTEGER;
+
+ALTER TABLE active_set_drafts ADD COLUMN duration_ms INTEGER;
+ALTER TABLE active_set_drafts ADD COLUMN timer_started_at INTEGER;
+
+ALTER TABLE routine_set_templates ADD COLUMN target_duration_ms INTEGER;
+
+ALTER TABLE exercise_catalog ADD COLUMN logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED';
+UPDATE exercise_catalog
+SET logging_mode = 'BODYWEIGHT'
+WHERE is_bodyweight != 0;
+UPDATE exercise_catalog
+SET logging_mode = 'TIMED'
+WHERE lower(movement_pattern) = 'static hold'
+   OR lower(exercise_type) = 'static hold'
+   OR lower(canonical_name) LIKE '%plank%'
+   OR lower(canonical_name) LIKE '%wall sit%'
+   OR lower(canonical_name) LIKE '%dead hang%'
+   OR lower(canonical_name) LIKE '%hollow hold%'
+   OR lower(canonical_name) LIKE '%l-sit%'
+   OR lower(canonical_name) LIKE '%l sit%';
+
+ALTER TABLE active_exercises ADD COLUMN logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED';
+UPDATE active_exercises
+SET logging_mode = 'BODYWEIGHT'
+WHERE is_bodyweight != 0;

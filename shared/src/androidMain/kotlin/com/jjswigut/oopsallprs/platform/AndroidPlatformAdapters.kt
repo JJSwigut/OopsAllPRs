@@ -1,0 +1,146 @@
+package com.jjswigut.oopsallprs.platform
+
+import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
+import android.os.Build
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import com.jjswigut.oopsallprs.db.WorkoutDatabase
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+
+actual class PlatformDatabaseDriverFactory actual constructor(private val context: Any?) {
+    actual fun createDriver(): SqlDriver {
+        val androidContext = context as? Context
+            ?: error("Android database driver requires an android.content.Context")
+        return AndroidSqliteDriver(WorkoutDatabase.Schema, androidContext, "oops_all_prs.db")
+    }
+}
+
+actual class LocalSettingsStore actual constructor(private val context: Any?) {
+    private val preferences by lazy {
+        val androidContext = context as? Context
+            ?: error("Android settings store requires an android.content.Context")
+        androidContext.getSharedPreferences("oops_all_prs_settings", Context.MODE_PRIVATE)
+    }
+
+    actual fun getString(key: String): String? = preferences.getString(key, null)
+
+    actual fun putString(key: String, value: String) {
+        preferences.edit().putString(key, value).apply()
+    }
+}
+
+actual class RestNotificationScheduler actual constructor(private val context: Any?) : RestAlertScheduler {
+    actual override fun schedule(restEndsAt: Instant, soundEnabled: Boolean) {
+        val androidContext = context as? Context ?: return
+        val intent = restTimerIntent(androidContext).putExtra(RestTimerReceiver.EXTRA_SOUND_ENABLED, soundEnabled)
+        val pendingIntent = PendingIntent.getBroadcast(
+            androidContext,
+            REST_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = androidContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, restEndsAt.toEpochMilliseconds(), pendingIntent)
+    }
+
+    actual override fun cancel() {
+        val androidContext = context as? Context ?: return
+        val pendingIntent = PendingIntent.getBroadcast(
+            androidContext,
+            REST_REQUEST_CODE,
+            restTimerIntent(androidContext),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = androidContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.cancel(pendingIntent)
+    }
+
+    private fun restTimerIntent(context: Context): Intent =
+        Intent(context, RestTimerReceiver::class.java).setAction(RestTimerReceiver.ACTION_REST_DONE)
+}
+
+class RestTimerReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != ACTION_REST_DONE) return
+        val soundEnabled = intent.getBooleanExtra(EXTRA_SOUND_ENABLED, true)
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = if (soundEnabled) CHANNEL_SOUND else CHANNEL_SILENT
+        notificationManager.ensureRestChannel(channelId, soundEnabled)
+        val notification = android.app.Notification.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Rest complete")
+            .setContentText("Time for the next set.")
+            .setAutoCancel(true)
+            .build()
+        try {
+            notificationManager.notify(REST_NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            // Notification permission may be denied; shared state still recovers on return.
+        }
+    }
+
+    private fun NotificationManager.ensureRestChannel(channelId: String, soundEnabled: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || getNotificationChannel(channelId) != null) return
+        val channel = NotificationChannel(
+            channelId,
+            "Rest timer",
+            if (soundEnabled) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
+        )
+        if (soundEnabled) {
+            val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val attributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            channel.setSound(sound, attributes)
+        } else {
+            channel.setSound(null, null)
+        }
+        createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val ACTION_REST_DONE = "com.jjswigut.oopsallprs.REST_DONE"
+        const val EXTRA_SOUND_ENABLED = "sound_enabled"
+    }
+}
+
+actual class FileExportHandoff actual constructor(private val context: Any?) {
+    actual fun share(fileName: String, content: String) {
+        val androidContext = context as? Context
+            ?: error("Android export handoff requires an android.content.Context")
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            putExtra(Intent.EXTRA_TEXT, content)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = Intent.createChooser(sendIntent, fileName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        androidContext.startActivity(chooser)
+    }
+}
+
+actual class HapticFeedback actual constructor(context: Any?) {
+    actual fun setLogged() = Unit
+    actual fun warning() = Unit
+}
+
+actual class PlatformClock actual constructor() {
+    actual fun now(): Instant = Clock.System.now()
+}
+
+private const val REST_REQUEST_CODE = 9217
+private const val REST_NOTIFICATION_ID = 9218
+private const val CHANNEL_SOUND = "rest_timer_sound"
+private const val CHANNEL_SILENT = "rest_timer_silent"

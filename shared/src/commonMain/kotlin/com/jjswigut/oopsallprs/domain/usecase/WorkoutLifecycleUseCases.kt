@@ -1,0 +1,253 @@
+package com.jjswigut.oopsallprs.domain.usecase
+
+import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
+import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
+import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
+import com.jjswigut.oopsallprs.domain.model.ExerciseReference
+import com.jjswigut.oopsallprs.domain.model.ExerciseSet
+import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.OrderedPosition
+import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.foundationFailure
+import com.jjswigut.oopsallprs.domain.model.foundationSuccess
+import com.jjswigut.oopsallprs.domain.model.newFoundationId
+import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
+import com.jjswigut.oopsallprs.domain.repository.SessionRepository
+import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
+import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
+import com.jjswigut.oopsallprs.domain.validation.FoundationError
+import com.jjswigut.oopsallprs.platform.RestAlertScheduler
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+
+class WorkoutLifecycleUseCases(
+    private val workouts: WorkoutRepository,
+    private val sessions: SessionRepository,
+    private val routines: RoutineRepository,
+    private val activeUx: ActiveWorkoutUxRepository? = null,
+    private val preferences: PreferencesRepository? = null,
+    private val notifications: RestAlertScheduler? = null,
+    private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null
+) {
+    suspend fun startEmpty(now: Instant = Clock.System.now()): FoundationResult<ActiveWorkout> {
+        currentActiveWorkout()?.let {
+            return foundationFailure(FoundationError.Conflict("An active workout is already in progress"))
+        }
+        val workout = ActiveWorkout(
+            id = newFoundationId("workout"),
+            startedAt = now,
+            createdAt = now,
+            updatedAt = now
+        )
+        return when (val created = workouts.createActiveWorkout(workout)) {
+            is FoundationResult.Failure -> created
+            is FoundationResult.Success -> {
+                sessions.save(
+                    ActiveSessionState(
+                        workout.id,
+                        workout.startedAt,
+                        lastOpenedRoute = ACTIVE_WORKOUT_ROUTE,
+                        updatedAt = now
+                    )
+                )
+                foundationSuccess(created.value)
+            }
+        }
+    }
+
+    suspend fun startFromRoutine(routineId: FoundationId, now: Instant = Clock.System.now()): FoundationResult<ActiveWorkout> {
+        currentActiveWorkout()?.let {
+            return foundationFailure(FoundationError.Conflict("An active workout is already in progress"))
+        }
+        val routine = routines.routine(routineId)
+            ?: return foundationFailure(FoundationError.NotFound("Routine not found: $routineId"))
+        val workoutId = newFoundationId("workout")
+        val activeExercises = routine.exercises.map { exercise ->
+            val activeExerciseId = newFoundationId("active-exercise")
+            val loggingMode = exercise.plannedSets.loggingMode()
+            val isBodyweight = loggingMode == ExerciseLoggingMode.BODYWEIGHT || loggingMode == ExerciseLoggingMode.TIMED
+            val previous = previousDefaults?.snapshotFor(exercise.exerciseCatalogId, isBodyweight, loggingMode)
+            ActiveExercise(
+                id = activeExerciseId,
+                activeWorkoutId = workoutId,
+                reference = ExerciseReference(exercise.exerciseCatalogId, exercise.displayNameSnapshot, isBodyweight, loggingMode),
+                position = exercise.position,
+                sets = exercise.plannedSets.map { planned ->
+                    val previousValue = previous?.valueForSetIndex(planned.position.value)
+                    ExerciseSet(
+                        id = newFoundationId("set"),
+                        exerciseInstanceId = activeExerciseId,
+                        position = planned.position,
+                        setKind = planned.setKind,
+                        weight = planned.targetWeight ?: previousValue?.weight,
+                        reps = (planned.targetReps ?: previousValue?.reps).takeIf { planned.setKind != SetKind.TIMED },
+                        durationMs = (planned.targetDurationMs ?: previousValue?.durationMs).takeIf { planned.setKind == SetKind.TIMED },
+                        loggedAt = null,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                },
+                rest = exercise.rest
+            )
+        }
+        val workout = ActiveWorkout(
+            id = workoutId,
+            startedAt = now,
+            routineId = routine.id,
+            routineSnapshotName = routine.name,
+            exercises = activeExercises,
+            createdAt = now,
+            updatedAt = now
+        )
+        return when (val created = workouts.createActiveWorkout(workout)) {
+            is FoundationResult.Failure -> created
+            is FoundationResult.Success -> {
+                sessions.save(
+                    ActiveSessionState(
+                        workout.id,
+                        workout.startedAt,
+                        lastOpenedRoute = ACTIVE_WORKOUT_ROUTE,
+                        updatedAt = now
+                    )
+                )
+                foundationSuccess(created.value)
+            }
+        }
+    }
+
+    suspend fun restoreActiveSession(now: Instant = Clock.System.now()): ActiveSessionState? {
+        val state = sessions.load() ?: return null
+        val restEndsAt = state.restEndsAt
+        return if (restEndsAt != null && restEndsAt <= now) {
+            val cleared = state.withoutRest(now)
+            sessions.save(cleared)
+            notifications?.cancel()
+            cleared
+        } else {
+            state
+        }
+    }
+
+    suspend fun activeWorkout(activeWorkoutId: FoundationId): ActiveWorkout? =
+        workouts.activeWorkout(activeWorkoutId)
+
+    suspend fun currentActiveWorkout(): ActiveWorkout? =
+        workouts.currentActiveWorkout()
+
+    suspend fun updateRestTimer(
+        activeWorkoutId: FoundationId,
+        originSetId: FoundationId?,
+        restEndsAt: Instant,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState> {
+        val workout = workouts.activeWorkout(activeWorkoutId)
+            ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
+        val current = sessions.load()
+        val state = ActiveSessionState(
+            activeWorkoutId = workout.id,
+            startedAt = workout.startedAt,
+            restEndsAt = restEndsAt,
+            restStartedAt = now,
+            restOriginSetId = originSetId,
+            lastOpenedRoute = current?.lastOpenedRoute,
+            updatedAt = now
+        )
+        notifications?.schedule(restEndsAt, preferences?.restSoundEnabled() ?: true)
+        return sessions.save(state)
+    }
+
+    suspend fun startRestTimer(
+        activeWorkoutId: FoundationId,
+        originSetId: FoundationId,
+        durationSeconds: Int,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState> {
+        if (durationSeconds <= 0) {
+            return clearRestTimer(activeWorkoutId, now)
+        }
+        val endsAt = Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + durationSeconds * 1_000L)
+        return updateRestTimer(activeWorkoutId, originSetId, endsAt, now)
+    }
+
+    suspend fun adjustRestTimer(
+        activeWorkoutId: FoundationId,
+        deltaSeconds: Int,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState> {
+        val current = sessions.load()
+            ?: return foundationFailure(FoundationError.NotFound("Active session not found"))
+        if (current.activeWorkoutId != activeWorkoutId || current.restEndsAt == null) {
+            return foundationFailure(FoundationError.NotFound("Active rest not found"))
+        }
+        val nextEndsAt = Instant.fromEpochMilliseconds(current.restEndsAt.toEpochMilliseconds() + deltaSeconds * 1_000L)
+        if (nextEndsAt <= now) {
+            return clearRestTimer(activeWorkoutId, now)
+        }
+        return updateRestTimer(activeWorkoutId, current.restOriginSetId, nextEndsAt, now)
+    }
+
+    suspend fun clearRestTimer(
+        activeWorkoutId: FoundationId,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState> {
+        val current = sessions.load()
+            ?: return foundationFailure(FoundationError.NotFound("Active session not found"))
+        if (current.activeWorkoutId != activeWorkoutId) {
+            return foundationFailure(FoundationError.NotFound("Active session not found for workout: $activeWorkoutId"))
+        }
+        notifications?.cancel()
+        return sessions.save(current.withoutRest(now))
+    }
+
+    suspend fun clearRestIfOrigin(
+        activeWorkoutId: FoundationId,
+        originSetId: FoundationId,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState?> {
+        val current = sessions.load() ?: return foundationSuccess(null)
+        if (current.activeWorkoutId != activeWorkoutId || current.restOriginSetId != originSetId) {
+            return foundationSuccess(current)
+        }
+        notifications?.cancel()
+        return when (val saved = sessions.save(current.withoutRest(now))) {
+            is FoundationResult.Failure -> saved
+            is FoundationResult.Success -> foundationSuccess(saved.value)
+        }
+    }
+
+    suspend fun saveLastOpenedRoute(
+        route: String,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveSessionState> {
+        val current = sessions.load()
+        val next = current?.copy(lastOpenedRoute = route, updatedAt = now)
+            ?: ActiveSessionState(
+                activeWorkoutId = null,
+                startedAt = null,
+                lastOpenedRoute = route,
+                updatedAt = now
+            )
+        return sessions.save(next)
+    }
+
+    suspend fun discard(activeWorkoutId: FoundationId, now: Instant = Clock.System.now()): FoundationResult<Unit> {
+        notifications?.cancel()
+        sessions.clear(now)
+        activeUx?.clearWorkoutUx(activeWorkoutId, now)
+        return workouts.discardActiveWorkout(activeWorkoutId, now)
+    }
+
+    private companion object {
+        const val ACTIVE_WORKOUT_ROUTE = "active-workout"
+    }
+}
+
+private fun List<com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate>.loggingMode(): ExerciseLoggingMode =
+    when {
+        any { it.setKind == SetKind.TIMED } -> ExerciseLoggingMode.TIMED
+        any { it.setKind == SetKind.BODYWEIGHT } -> ExerciseLoggingMode.BODYWEIGHT
+        else -> ExerciseLoggingMode.WEIGHTED
+    }

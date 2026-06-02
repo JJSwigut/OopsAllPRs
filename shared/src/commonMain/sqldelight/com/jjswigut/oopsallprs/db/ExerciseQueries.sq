@@ -1,0 +1,41 @@
+insertExercise:
+INSERT OR REPLACE INTO exercise_catalog(id, canonical_name, display_name, muscle_group, equipment, movement_pattern, exercise_type, experience_level, body_region, is_bodyweight, logging_mode, is_user_created, created_at, updated_at, archived_at, source_seed_version, user_notes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectExercises:
+SELECT * FROM exercise_catalog
+WHERE archived_at IS NULL
+ORDER BY display_name ASC;
+
+selectExerciseById:
+SELECT * FROM exercise_catalog
+WHERE id = ?
+LIMIT 1;
+
+selectUserCreatedExercises:
+SELECT * FROM exercise_catalog
+WHERE archived_at IS NULL AND is_user_created = 1
+ORDER BY display_name ASC;
+
+searchExercises:
+SELECT * FROM exercise_catalog
+WHERE archived_at IS NULL AND canonical_name LIKE ?
+ORDER BY display_name ASC;
+
+selectExerciseByCanonicalName:
+SELECT * FROM exercise_catalog
+WHERE canonical_name = ? AND archived_at IS NULL
+LIMIT 1;
+
+archiveUserExercise:
+UPDATE exercise_catalog
+SET archived_at = ?, updated_at = ?
+WHERE id = ? AND is_user_created = 1;
+
+insertSeedImport:
+INSERT OR REPLACE INTO exercise_seed_imports(id, source_name, source_hash, imported_at, row_count, rejected_row_count, warnings)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+selectSeedImports:
+SELECT * FROM exercise_seed_imports
+ORDER BY imported_at DESC;

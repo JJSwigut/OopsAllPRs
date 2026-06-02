@@ -1,0 +1,55 @@
+insertCompletedWorkout:
+INSERT OR REPLACE INTO completed_workouts(id, source_active_workout_id, started_at, finished_at, duration_ms, routine_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+selectCompletedWorkout:
+SELECT * FROM completed_workouts
+WHERE id = ?;
+
+selectCompletedWorkouts:
+SELECT * FROM completed_workouts
+ORDER BY finished_at DESC;
+
+deleteCompletedWorkout:
+DELETE FROM completed_workouts
+WHERE id = ?;
+
+insertRoutine:
+INSERT OR REPLACE INTO routines(id, name, source_completed_workout_id, created_at, updated_at, archived_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+insertRoutineExercise:
+INSERT OR REPLACE INTO routine_exercises(id, routine_id, exercise_catalog_id, display_name_snapshot, position, rest_seconds, rest_auto_start)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+insertRoutineSetTemplate:
+INSERT OR REPLACE INTO routine_set_templates(id, routine_exercise_id, position, target_weight_kg, target_reps, target_duration_ms, set_kind)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+selectRoutine:
+SELECT * FROM routines
+WHERE id = ? AND archived_at IS NULL;
+
+selectRoutines:
+SELECT * FROM routines
+WHERE archived_at IS NULL
+ORDER BY updated_at DESC;
+
+archiveRoutine:
+UPDATE routines
+SET archived_at = ?, updated_at = ?
+WHERE id = ?;
+
+selectRoutineExercises:
+SELECT * FROM routine_exercises
+WHERE routine_id = ?
+ORDER BY position ASC;
+
+selectRoutineSetTemplates:
+SELECT * FROM routine_set_templates
+WHERE routine_exercise_id = ?
+ORDER BY position ASC;
+
+deleteRoutineExercises:
+DELETE FROM routine_exercises
+WHERE routine_id = ?;

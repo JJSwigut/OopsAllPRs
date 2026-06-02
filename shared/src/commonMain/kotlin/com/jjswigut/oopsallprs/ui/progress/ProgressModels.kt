@@ -1,0 +1,327 @@
+package com.jjswigut.oopsallprs.ui.progress
+
+import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.PersonalRecord
+import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
+import com.jjswigut.oopsallprs.domain.model.ProgressMetric
+import com.jjswigut.oopsallprs.domain.model.ProgressPoint
+import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.ui.common.shortDateLabel
+import com.jjswigut.oopsallprs.ui.history.CompletedSetSummary
+import com.jjswigut.oopsallprs.ui.history.CompletedWorkoutSummary
+import com.jjswigut.oopsallprs.ui.history.formatDurationMs
+import com.jjswigut.oopsallprs.ui.history.toSummary
+import kotlinx.datetime.Instant
+import kotlin.math.abs
+import kotlin.math.round
+import kotlin.math.roundToInt
+import kotlin.math.roundToLong
+
+data class ProgressPrRow(
+    val recordId: FoundationId,
+    val exerciseCatalogId: FoundationId,
+    val exerciseName: String,
+    val kind: PersonalRecordKind,
+    val kindLabel: String,
+    val valueLabel: String,
+    val detailLabel: String,
+    val sourceWorkoutId: FoundationId,
+    val sourceSetId: FoundationId,
+    val achievedAt: Instant,
+    val achievedDateLabel: String
+)
+
+data class ProgressExerciseGroup(
+    val exerciseCatalogId: FoundationId,
+    val exerciseName: String,
+    val records: List<ProgressPrRow>,
+    val latestRecord: ProgressPrRow?,
+    val trendRows: List<ProgressTrendRow>,
+    val chart: ProgressChartState,
+    val latestAchievedAt: Instant?
+)
+
+data class ProgressTrendRow(
+    val pointId: FoundationId,
+    val exerciseCatalogId: FoundationId,
+    val metric: ProgressMetric,
+    val metricLabel: String,
+    val valueLabel: String,
+    val sourceWorkoutId: FoundationId,
+    val sourceSetId: FoundationId?,
+    val sourceRecordId: FoundationId?,
+    val recordedAt: Instant
+)
+
+data class ProgressEvidence(
+    val recordId: FoundationId,
+    val title: String,
+    val recordKindLabel: String,
+    val recordValueLabel: String,
+    val sourceWorkoutId: FoundationId,
+    val sourceSetId: FoundationId,
+    val workoutSummary: CompletedWorkoutSummary?,
+    val sourceExerciseName: String?,
+    val sourceSetLabel: String?,
+    val achievedDateLabel: String,
+    val message: String,
+    val isAvailable: Boolean
+)
+
+internal fun buildRecentPrRows(
+    records: List<PersonalRecord>,
+    workouts: List<CompletedWorkout>,
+    weightUnit: WeightUnit
+): List<ProgressPrRow> {
+    val names = buildExerciseNameLookup(workouts)
+    return records
+        .sortedWith(
+            compareByDescending<PersonalRecord> { it.achievedAt }
+                .thenBy { it.exerciseCatalogId.value }
+                .thenBy { it.recordKind.name }
+        )
+        .map { record ->
+            record.toProgressPrRow(
+                exerciseName = names[record.exerciseCatalogId] ?: fallbackExerciseName(record.exerciseCatalogId),
+                weightUnit = weightUnit
+            )
+        }
+}
+
+internal fun buildExerciseGroups(
+    records: List<PersonalRecord>,
+    points: List<ProgressPoint>,
+    workouts: List<CompletedWorkout>,
+    weightUnit: WeightUnit
+): List<ProgressExerciseGroup> {
+    val names = buildExerciseNameLookup(workouts)
+    val sourceRecordByPoint = points.associate { point ->
+        point.id to records.firstOrNull { record ->
+            record.exerciseCatalogId == point.exerciseCatalogId &&
+                record.sourceWorkoutId == point.sourceWorkoutId &&
+                record.sourceSetId == point.sourceSetId &&
+                record.recordKind == point.metric.toRecordKind()
+        }?.id
+    }
+    val trendRowsByExercise = points
+        .groupBy { it.exerciseCatalogId }
+        .mapValues { (_, exercisePoints) ->
+            exercisePoints
+                .sortedWith(compareBy<ProgressPoint> { it.recordedAt }.thenBy { it.metric.name }.thenBy { it.id.value })
+                .map { point ->
+                    point.toTrendRow(
+                        exerciseName = names[point.exerciseCatalogId] ?: fallbackExerciseName(point.exerciseCatalogId),
+                        weightUnit = weightUnit,
+                        sourceRecordId = sourceRecordByPoint[point.id]
+                    )
+                }
+        }
+    val exerciseIds = (records.map { it.exerciseCatalogId } + points.map { it.exerciseCatalogId }).distinct()
+    return exerciseIds
+        .map { exerciseId ->
+            val exerciseRecords = records.filter { it.exerciseCatalogId == exerciseId }
+            val exerciseName = names[exerciseId] ?: fallbackExerciseName(exerciseId)
+            val rows = exerciseRecords
+                .sortedWith(compareBy<PersonalRecord> { it.recordKind.sortOrder() }.thenBy { it.reps ?: Int.MAX_VALUE })
+                .map { it.toProgressPrRow(exerciseName, weightUnit) }
+            val chart = buildProgressChartState(
+                points = points,
+                records = records,
+                exerciseCatalogId = exerciseId,
+                selectedMetric = null,
+                weightUnit = weightUnit
+            )
+            val latestPointAt = chart.points.maxByOrNull { it.recordedAt }?.recordedAt
+            ProgressExerciseGroup(
+                exerciseCatalogId = exerciseId,
+                exerciseName = exerciseName,
+                records = rows,
+                latestRecord = rows.maxByOrNull { it.achievedAt },
+                trendRows = trendRowsByExercise[exerciseId].orEmpty(),
+                chart = chart,
+                latestAchievedAt = rows.maxByOrNull { it.achievedAt }?.achievedAt ?: latestPointAt
+            )
+        }
+        .sortedWith(
+            compareByDescending<ProgressExerciseGroup> { it.latestAchievedAt?.toEpochMilliseconds() ?: Long.MIN_VALUE }
+                .thenBy { it.exerciseName }
+        )
+}
+
+internal fun buildProgressEvidence(
+    record: PersonalRecord,
+    records: List<PersonalRecord>,
+    workouts: List<CompletedWorkout>,
+    weightUnit: WeightUnit
+): ProgressEvidence {
+    val row = record.toProgressPrRow(
+        exerciseName = buildExerciseNameLookup(workouts)[record.exerciseCatalogId]
+            ?: fallbackExerciseName(record.exerciseCatalogId),
+        weightUnit = weightUnit
+    )
+    val workout = workouts.firstOrNull { it.id == record.sourceWorkoutId }
+    val summary = workout?.toSummary(records)
+    val sourceExercise = summary
+        ?.exercises
+        ?.firstOrNull { exercise -> exercise.setRows.any { it.setId == record.sourceSetId } }
+    val sourceSet = sourceExercise?.setRows?.firstOrNull { it.setId == record.sourceSetId }
+    val isAvailable = summary != null && sourceExercise != null && sourceSet != null
+    return ProgressEvidence(
+        recordId = record.id,
+        title = row.exerciseName,
+        recordKindLabel = row.kindLabel,
+        recordValueLabel = row.valueLabel,
+        sourceWorkoutId = record.sourceWorkoutId,
+        sourceSetId = record.sourceSetId,
+        workoutSummary = summary,
+        sourceExerciseName = sourceExercise?.displayName,
+        sourceSetLabel = sourceSet?.formatSetLabel(weightUnit),
+        achievedDateLabel = row.achievedDateLabel,
+        message = if (isAvailable) {
+            "Recorded from completed workout."
+        } else {
+            "Source workout or set is no longer available locally."
+        },
+        isAvailable = isAvailable
+    )
+}
+
+internal fun PersonalRecord.toProgressPrRow(
+    exerciseName: String,
+    weightUnit: WeightUnit
+): ProgressPrRow =
+    ProgressPrRow(
+        recordId = id,
+        exerciseCatalogId = exerciseCatalogId,
+        exerciseName = exerciseName,
+        kind = recordKind,
+        kindLabel = recordKind.label(),
+        valueLabel = valueLabel(weightUnit),
+        detailLabel = detailLabel(weightUnit),
+        sourceWorkoutId = sourceWorkoutId,
+        sourceSetId = sourceSetId,
+        achievedAt = achievedAt,
+        achievedDateLabel = achievedAt.shortDateLabel()
+    )
+
+private fun ProgressPoint.toTrendRow(
+    exerciseName: String,
+    weightUnit: WeightUnit,
+    sourceRecordId: FoundationId?
+): ProgressTrendRow =
+    ProgressTrendRow(
+        pointId = id,
+        exerciseCatalogId = exerciseCatalogId,
+        metric = metric,
+        metricLabel = metric.label(),
+        valueLabel = valueLabel(weightUnit, exerciseName),
+        sourceWorkoutId = sourceWorkoutId,
+        sourceSetId = sourceSetId,
+        sourceRecordId = sourceRecordId,
+        recordedAt = recordedAt
+    )
+
+private fun PersonalRecord.valueLabel(weightUnit: WeightUnit): String =
+    when (recordKind) {
+        PersonalRecordKind.WEIGHT_FOR_REPS -> {
+            val weightLabel = weight?.format(weightUnit) ?: WeightKg(value).format(weightUnit)
+            val repsLabel = reps?.let { " x $it" }.orEmpty()
+            "$weightLabel$repsLabel"
+        }
+        PersonalRecordKind.BODYWEIGHT_REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
+        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> WeightKg(value).format(weightUnit)
+        PersonalRecordKind.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
+        PersonalRecordKind.TIME -> value.roundToLong().formatDurationMs()
+    }
+
+private fun PersonalRecord.detailLabel(weightUnit: WeightUnit): String =
+    when (recordKind) {
+        PersonalRecordKind.WEIGHT_FOR_REPS -> reps?.let { "$it reps" }.orEmpty()
+        PersonalRecordKind.BODYWEIGHT_REPS -> "Bodyweight"
+        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> sourceSetDetail(weightUnit)
+        PersonalRecordKind.VOLUME -> sourceSetDetail(weightUnit)
+        PersonalRecordKind.TIME -> "Time"
+    }
+
+private fun ProgressPoint.valueLabel(weightUnit: WeightUnit, exerciseName: String): String =
+    when (metric) {
+        ProgressMetric.BEST_SET -> {
+            val weightLabel = weight?.format(weightUnit) ?: WeightKg(value).format(weightUnit)
+            val repsLabel = reps?.let { " x $it" }.orEmpty()
+            "$weightLabel$repsLabel"
+        }
+        ProgressMetric.BODYWEIGHT_REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
+        ProgressMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} e1RM"
+        ProgressMetric.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
+        ProgressMetric.TIME -> value.roundToLong().formatDurationMs()
+    } + " • $exerciseName"
+
+private fun PersonalRecord.sourceSetDetail(weightUnit: WeightUnit): String {
+    val weightLabel = weight?.format(weightUnit)
+    val repsLabel = reps?.let { " x $it" }
+    return listOfNotNull(weightLabel, repsLabel).joinToString("")
+}
+
+private fun PersonalRecordKind.label(): String =
+    when (this) {
+        PersonalRecordKind.WEIGHT_FOR_REPS -> "Best weight"
+        PersonalRecordKind.BODYWEIGHT_REPS -> "Bodyweight reps"
+        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM"
+        PersonalRecordKind.VOLUME -> "Best volume"
+        PersonalRecordKind.TIME -> "Best time"
+    }
+
+private fun PersonalRecordKind.sortOrder(): Int =
+    when (this) {
+        PersonalRecordKind.WEIGHT_FOR_REPS -> 0
+        PersonalRecordKind.BODYWEIGHT_REPS -> 1
+        PersonalRecordKind.TIME -> 2
+        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> 3
+        PersonalRecordKind.VOLUME -> 4
+    }
+
+private fun CompletedSetSummary.formatSetLabel(weightUnit: WeightUnit): String {
+    if (setKind == com.jjswigut.oopsallprs.domain.model.SetKind.TIMED) {
+        return "Set ${position + 1}: ${durationMs.formatDurationMs()}"
+    }
+    val weightLabel = weight?.let { " • ${it.format(weightUnit)}" }.orEmpty()
+    return "Set ${position + 1}: ${(reps ?: 0).coerceAtLeast(0)} reps$weightLabel"
+}
+
+internal fun WeightKg.format(unit: WeightUnit): String =
+    "${displayValue(unit).formatCompact()} ${unit.abbreviation()}"
+
+private fun WeightUnit.abbreviation(): String =
+    when (this) {
+        WeightUnit.KILOGRAMS -> "kg"
+        WeightUnit.POUNDS -> "lb"
+    }
+
+private fun Double.formatCompact(): String {
+    val oneDecimal = round(this * 10.0) / 10.0
+    val whole = oneDecimal.roundToInt()
+    return if (abs(oneDecimal - whole.toDouble()) < 0.0001) whole.toString() else oneDecimal.toString()
+}
+
+private fun buildExerciseNameLookup(workouts: List<CompletedWorkout>): Map<FoundationId, String> {
+    val names = linkedMapOf<FoundationId, String>()
+    workouts.sortedBy { it.finishedAt }.forEach { workout ->
+        workout.exercises.forEach { exercise ->
+            names[exercise.exerciseCatalogId] = exercise.displayNameSnapshot
+        }
+    }
+    return names
+}
+
+private fun fallbackExerciseName(exerciseId: FoundationId): String = "Exercise ${exerciseId.value}"
+
+private fun ProgressMetric.toRecordKind(): PersonalRecordKind =
+    when (this) {
+        ProgressMetric.BEST_SET -> PersonalRecordKind.WEIGHT_FOR_REPS
+        ProgressMetric.BODYWEIGHT_REPS -> PersonalRecordKind.BODYWEIGHT_REPS
+        ProgressMetric.ESTIMATED_ONE_REP_MAX -> PersonalRecordKind.ESTIMATED_ONE_REP_MAX
+        ProgressMetric.VOLUME -> PersonalRecordKind.VOLUME
+        ProgressMetric.TIME -> PersonalRecordKind.TIME
+    }

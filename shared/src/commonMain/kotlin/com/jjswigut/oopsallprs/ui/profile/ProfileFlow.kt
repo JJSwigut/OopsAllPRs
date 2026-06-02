@@ -1,0 +1,407 @@
+package com.jjswigut.oopsallprs.ui.profile
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.jjswigut.oopsallprs.dev.DeveloperSeedOutcome
+import com.jjswigut.oopsallprs.dev.DeveloperSeedScenario
+import com.jjswigut.oopsallprs.dev.DeveloperSeedState
+import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.WeightStepPreference
+import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.domain.model.formatWeightStep
+import com.jjswigut.oopsallprs.ds.component.FitButton
+import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
+import com.jjswigut.oopsallprs.ds.component.FitCard
+import com.jjswigut.oopsallprs.ds.component.FitDialog
+import com.jjswigut.oopsallprs.ds.component.FitRoller
+import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
+import com.jjswigut.oopsallprs.ds.component.FitToggle
+import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
+import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
+import com.jjswigut.oopsallprs.ui.navigation.PaletteMode
+
+@Composable
+fun ProfileFlow(
+    state: ProfileState,
+    onWeightUnitSelected: (WeightUnit) -> Unit,
+    onWeightStepClick: () -> Unit,
+    onWeightStepDraftChange: (Double) -> Unit,
+    onWeightStepSave: () -> Unit,
+    onWeightStepCancel: () -> Unit,
+    onDefaultRestSelected: (Int) -> Unit,
+    onRestSoundChanged: (Boolean) -> Unit,
+    onPaletteModeSelected: (PaletteMode) -> Unit,
+    onHapticsChanged: (Boolean) -> Unit,
+    onReduceMotionChanged: (Boolean) -> Unit,
+    onExportRequested: (ExportType) -> Unit,
+    onManageExercises: () -> Unit,
+    developerSeedState: DeveloperSeedState? = null,
+    onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+    ) {
+        UnitsCard(
+            state = state,
+            onWeightUnitSelected = onWeightUnitSelected,
+            onWeightStepClick = onWeightStepClick
+        )
+        RestPreferencesCard(state, onDefaultRestSelected, onRestSoundChanged)
+        ExportCard(state, onExportRequested)
+        LocalStatusCard(state.localStatus, onManageExercises)
+        developerSeedState?.let { seedState ->
+            DeveloperSeedCard(seedState, onDeveloperSeedSelected)
+        }
+        InteractionCard(
+            state = state,
+            onPaletteModeSelected = onPaletteModeSelected,
+            onHapticsChanged = onHapticsChanged,
+            onReduceMotionChanged = onReduceMotionChanged
+        )
+    }
+
+    if (state.isWeightStepPickerVisible) {
+        WeightStepDialog(
+            state = state,
+            onDraftChange = onWeightStepDraftChange,
+            onSave = onWeightStepSave,
+            onCancel = onWeightStepCancel
+        )
+    }
+}
+
+@Composable
+private fun DeveloperSeedCard(
+    state: DeveloperSeedState,
+    onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Developer")
+            state.scenarios.forEach { row ->
+                val isLoading = state.loadingScenario == row.scenario
+                FitButton(
+                    text = if (isLoading) "Loading" else row.label,
+                    onClick = { onDeveloperSeedSelected(row.scenario) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state.loadingScenario == null,
+                    style = FitButtonStyle.Secondary
+                )
+                FoundationMutedText(row.description)
+            }
+            state.lastResult?.let { result ->
+                FoundationText(
+                    text = "${result.outcome.displayLabel()}: ${result.message}",
+                    style = FitTheme.type.caption.copy(
+                        color = when (result.outcome) {
+                            DeveloperSeedOutcome.FAILED -> FitTheme.colors.danger
+                            DeveloperSeedOutcome.LOADED,
+                            DeveloperSeedOutcome.SKIPPED -> FitTheme.colors.onSurface
+                        }
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestPreferencesCard(
+    state: ProfileState,
+    onDefaultRestSelected: (Int) -> Unit,
+    onRestSoundChanged: (Boolean) -> Unit
+) {
+    val options = listOf(60, 120, 180, 300)
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Rest")
+            FitSegmentedControl(
+                options = listOf("1m", "2m", "3m", "5m"),
+                selectedIndex = options.indexOf(state.defaultRestSeconds).takeIf { it >= 0 } ?: 1,
+                onSelect = { index -> onDefaultRestSelected(options[index]) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            ToggleRow(
+                label = "Rest sound",
+                value = if (state.restSoundEnabled) "On" else "Off",
+                checked = state.restSoundEnabled,
+                onCheckedChange = onRestSoundChanged
+            )
+            FoundationMutedText("New exercises use ${state.defaultRestSeconds / 60}m rest.")
+        }
+    }
+}
+
+@Composable
+private fun UnitsCard(
+    state: ProfileState,
+    onWeightUnitSelected: (WeightUnit) -> Unit,
+    onWeightStepClick: () -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Units")
+            FitSegmentedControl(
+                options = listOf("Pounds", "Kilograms"),
+                selectedIndex = if (state.weightUnit == WeightUnit.POUNDS) 0 else 1,
+                onSelect = { index ->
+                    onWeightUnitSelected(if (index == 0) WeightUnit.POUNDS else WeightUnit.KILOGRAMS)
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    FoundationText("Weight step")
+                    FoundationMutedText("${formatWeightStep(state.weightStep)} ${state.weightUnit.abbreviation()}")
+                }
+                FitButton(
+                    text = "Change",
+                    onClick = onWeightStepClick,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            FoundationMutedText("Exports use ${state.weightUnit.displayName()}.")
+        }
+    }
+}
+
+@Composable
+private fun WeightStepDialog(
+    state: ProfileState,
+    onDraftChange: (Double) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val unitLabel = state.weightUnit.abbreviation()
+    FitDialog(onDismissRequest = onCancel) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            SectionLabel("Weight step")
+            FoundationMutedText("${formatWeightStep(state.draftWeightStep)} $unitLabel")
+            FitRoller(
+                value = state.draftWeightStep.toFloat(),
+                onValueChange = { onDraftChange(it.toDouble()) },
+                min = WeightStepPreference.MIN_STEP.toFloat(),
+                max = state.weightUnit.maxWeightStep().toFloat(),
+                step = 0.25f,
+                unit = unitLabel,
+                format = { formatWeightStep(it.toDouble()) }
+            )
+            state.weightStepError?.let { error ->
+                FoundationText(
+                    text = error,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = "Cancel",
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = "Save",
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportCard(
+    state: ProfileState,
+    onExportRequested: (ExportType) -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Export")
+            ExportButton("Workouts", state.isExporting) { onExportRequested(ExportType.WORKOUTS) }
+            ExportButton("Routines", state.isExporting) { onExportRequested(ExportType.ROUTINES) }
+            ExportButton("Exercises", state.isExporting) { onExportRequested(ExportType.EXERCISES) }
+            ExportButton("PRs", state.isExporting) { onExportRequested(ExportType.PERSONAL_RECORDS) }
+            state.lastExport?.let { result ->
+                FoundationMutedText(
+                    "${result.type.displayName()} export: ${result.rowCount} rows, ${result.weightUnit.abbreviation()}"
+                )
+                FoundationMutedText(result.fileName)
+            }
+            state.exportError?.let { message ->
+                FoundationText(
+                    text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalStatusCard(
+    status: LocalReadinessStatus,
+    onManageExercises: () -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Data")
+            StatusRow("Storage", status.storageLabel)
+            StatusRow("Sync", status.syncLabel)
+            StatusRow("Backup", status.backupLabel)
+            StatusRow("Rest alerts", status.restNotificationLabel)
+            StatusRow("Export", status.exportLabel)
+            StatusRow("Alpha", status.alphaGateLabel)
+            FitButton(
+                text = "Manage exercises",
+                onClick = onManageExercises,
+                modifier = Modifier.fillMaxWidth(),
+                style = FitButtonStyle.Secondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun InteractionCard(
+    state: ProfileState,
+    onPaletteModeSelected: (PaletteMode) -> Unit,
+    onHapticsChanged: (Boolean) -> Unit,
+    onReduceMotionChanged: (Boolean) -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Preferences")
+            FitSegmentedControl(
+                options = listOf("Dark", "Light"),
+                selectedIndex = if (state.paletteMode == PaletteMode.LIGHT) 1 else 0,
+                onSelect = { index -> onPaletteModeSelected(if (index == 1) PaletteMode.LIGHT else PaletteMode.DARK) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            ToggleRow(
+                label = "Haptics",
+                value = if (state.hapticsEnabled) "On" else "Off",
+                checked = state.hapticsEnabled,
+                onCheckedChange = onHapticsChanged
+            )
+            ToggleRow(
+                label = "Reduce motion",
+                value = if (state.reduceMotion) "On" else "Off",
+                checked = state.reduceMotion,
+                onCheckedChange = onReduceMotionChanged
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportButton(
+    label: String,
+    disabled: Boolean,
+    onClick: () -> Unit
+) {
+    FitButton(
+        text = if (disabled) "Exporting" else label,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !disabled,
+        style = FitButtonStyle.Secondary
+    )
+}
+
+@Composable
+private fun StatusRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+    ) {
+        FoundationMutedText(label, modifier = Modifier.weight(1f))
+        FoundationText(
+            text = value,
+            modifier = Modifier.weight(2f),
+            style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface)
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    value: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            FoundationText(
+                text = label,
+                style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface)
+            )
+            FoundationMutedText(value)
+        }
+        FitToggle(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            label = label
+        )
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    FoundationText(
+        text = text,
+        style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+    )
+}
+
+private fun WeightUnit.displayName(): String =
+    when (this) {
+        WeightUnit.POUNDS -> "pounds"
+        WeightUnit.KILOGRAMS -> "kilograms"
+    }
+
+private fun WeightUnit.abbreviation(): String =
+    when (this) {
+        WeightUnit.POUNDS -> "lb"
+        WeightUnit.KILOGRAMS -> "kg"
+    }
+
+private fun WeightUnit.maxWeightStep(): Double =
+    when (this) {
+        WeightUnit.POUNDS -> WeightStepPreference.MAX_POUNDS_STEP
+        WeightUnit.KILOGRAMS -> WeightStepPreference.MAX_KILOGRAMS_STEP
+    }
+
+private fun ExportType.displayName(): String =
+    when (this) {
+        ExportType.WORKOUTS -> "Workout"
+        ExportType.ROUTINES -> "Routine"
+        ExportType.EXERCISES -> "Exercise"
+        ExportType.PERSONAL_RECORDS -> "PR"
+    }
+
+private fun DeveloperSeedOutcome.displayLabel(): String =
+    when (this) {
+        DeveloperSeedOutcome.LOADED -> "Loaded"
+        DeveloperSeedOutcome.SKIPPED -> "Skipped"
+        DeveloperSeedOutcome.FAILED -> "Failed"
+    }
