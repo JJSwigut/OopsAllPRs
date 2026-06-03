@@ -9,6 +9,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.jjswigut.oopsallprs.domain.model.FoundationId
@@ -186,6 +190,26 @@ private fun ActiveWorkoutBottomBar(
     val focusedBlock = workout.exerciseBlocks.firstOrNull {
         it.exerciseInstanceId == workout.focus?.exerciseInstanceId
     } ?: workout.exerciseBlocks.firstOrNull()
+    var calculatorTarget by remember(workout.workoutId) { mutableStateOf<LoadCalculatorTarget?>(null) }
+    var preferredBarWeights by remember(workout.workoutId) { mutableStateOf<Map<WeightUnit, Double>>(emptyMap()) }
+
+    calculatorTarget?.let { target ->
+        LoadCalculatorDialog(
+            kind = target.kind,
+            exerciseName = target.exerciseName,
+            weightUnit = weightUnit,
+            initialBarWeight = preferredBarWeights[weightUnit] ?: defaultBarbellState(weightUnit).barWeight,
+            onBarWeightSelected = { selected ->
+                preferredBarWeights = preferredBarWeights + (weightUnit to selected)
+            },
+            onApply = { weight ->
+                onFocusExercise(target.exerciseInstanceId)
+                onDraftWeightChange(target.exerciseInstanceId, weight)
+                calculatorTarget = null
+            },
+            onDismiss = { calculatorTarget = null }
+        )
+    }
 
     FitCard(
         modifier = modifier,
@@ -324,7 +348,14 @@ private fun ActiveWorkoutBottomBar(
                         onLogSet(block.exerciseInstanceId)
                     },
                     weightStepAmount = weightStepAmount,
-                    weightUnit = weightUnit
+                    weightUnit = weightUnit,
+                    loadCalculatorKind = block.loadCalculatorKind,
+                    onOpenLoadCalculator = block.loadCalculatorKind?.let { kind ->
+                        {
+                            onFocusExercise(block.exerciseInstanceId)
+                            calculatorTarget = LoadCalculatorTarget(block.exerciseInstanceId, block.displayName, kind)
+                        }
+                    }
                 )
             }
             Row(
@@ -368,6 +399,12 @@ private fun ActiveWorkoutBottomBar(
         }
     }
 }
+
+private data class LoadCalculatorTarget(
+    val exerciseInstanceId: FoundationId,
+    val exerciseName: String,
+    val kind: LoadCalculatorKind
+)
 
 @Composable
 private fun RestTimerPanel(

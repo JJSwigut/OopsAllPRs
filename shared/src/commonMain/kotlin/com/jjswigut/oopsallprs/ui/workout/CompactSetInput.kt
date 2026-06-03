@@ -1,15 +1,24 @@
 package com.jjswigut.oopsallprs.ui.workout
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightStepPreference
 import com.jjswigut.oopsallprs.domain.model.WeightKg
@@ -93,6 +102,8 @@ fun CompactSetInput(
     onLog: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
     weightStepAmount: Double = weightStep(weightUnit),
+    loadCalculatorKind: LoadCalculatorKind? = null,
+    onOpenLoadCalculator: (() -> Unit)? = null,
     actionLabel: String = "Log set",
     pendingLabel: String = "Logging...",
     modifier: Modifier = Modifier
@@ -125,6 +136,7 @@ fun CompactSetInput(
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (draft.setKind == SetKind.WEIGHTED || draft.weight != null) {
+                    val canOpenCalculator = loadCalculatorKind != null && onOpenLoadCalculator != null
                     NumericStepper(
                         label = "Weight ${weightUnitLabel(weightUnit)}",
                         value = formatDisplayWeight(draft.weight, weightUnit),
@@ -136,7 +148,19 @@ fun CompactSetInput(
                                 ?.takeIf { it >= 0.0 }
                                 ?.let { onWeightChange(WeightKg.fromDisplay(it, weightUnit)) }
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingContent = if (canOpenCalculator) {
+                            {
+                                FitIconButton(
+                                    onClick = { onOpenLoadCalculator?.invoke() },
+                                    contentDescription = "Open weight calculator"
+                                ) {
+                                    CalculatorGlyph()
+                                }
+                            }
+                        } else {
+                            null
+                        }
                     )
                 }
             }
@@ -203,7 +227,8 @@ private fun NumericStepper(
     onIncrease: () -> Unit,
     keyboardType: KeyboardType,
     onTextChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    trailingContent: (@Composable () -> Unit)? = null
 ) {
     Column(
         modifier = modifier,
@@ -235,7 +260,49 @@ private fun NumericStepper(
             ) {
                 BasicText("+", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
             }
+            Box(
+                modifier = Modifier.sizeIn(
+                    minWidth = FitTheme.size.touchMin,
+                    minHeight = FitTheme.size.touchMin
+                ),
+                contentAlignment = Alignment.Center
+            ) {
+                trailingContent?.invoke()
+            }
         }
+    }
+}
+
+@Composable
+private fun CalculatorGlyph() {
+    val color = FitTheme.colors.onSurface
+    Canvas(modifier = Modifier.size(18.dp)) {
+        val stroke = Stroke(width = 1.7.dp.toPx())
+        val width = size.width
+        val height = size.height
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(width * 0.18f, height * 0.08f),
+            size = Size(width * 0.64f, height * 0.84f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = stroke
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(width * 0.28f, height * 0.18f),
+            size = Size(width * 0.44f, height * 0.18f),
+            cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx()),
+            style = stroke
+        )
+        val left = width * 0.32f
+        val right = width * 0.68f
+        val top = height * 0.50f
+        val bottom = height * 0.76f
+        drawLine(color, Offset(left, top), Offset(right, top), strokeWidth = stroke.width)
+        drawLine(color, Offset(left, bottom), Offset(right, bottom), strokeWidth = stroke.width)
+        drawLine(color, Offset(left, top), Offset(left, bottom), strokeWidth = stroke.width)
+        drawLine(color, Offset(width * 0.50f, top), Offset(width * 0.50f, bottom), strokeWidth = stroke.width)
+        drawLine(color, Offset(right, top), Offset(right, bottom), strokeWidth = stroke.width)
     }
 }
 

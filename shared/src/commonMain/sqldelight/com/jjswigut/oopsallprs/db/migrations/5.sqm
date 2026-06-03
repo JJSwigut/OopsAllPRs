@@ -1,0 +1,1 @@
+ALTER TABLE active_exercises ADD COLUMN equipment_snapshot TEXT;

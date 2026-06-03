@@ -11,14 +11,16 @@ data class ExercisePickerResultRow(
     val subtitle: String,
     val isBodyweight: Boolean,
     val loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
-    val isUserCreated: Boolean
+    val isUserCreated: Boolean,
+    val equipment: String? = null
 ) {
     fun toReference(): ExerciseReference =
         ExerciseReference(
             exerciseCatalogId = exerciseCatalogId,
             displayNameSnapshot = displayName,
             isBodyweight = isBodyweight,
-            loggingMode = loggingMode
+            loggingMode = loggingMode,
+            equipmentSnapshot = equipment
         )
 }
 
@@ -36,5 +38,6 @@ fun ExerciseCatalogItem.toPickerRow(): ExercisePickerResultRow =
         subtitle = exerciseContextSubtitle(muscleGroup, equipment, isBodyweight),
         isBodyweight = isBodyweight,
         loggingMode = loggingMode,
+        equipment = equipment,
         isUserCreated = isUserCreated
     )

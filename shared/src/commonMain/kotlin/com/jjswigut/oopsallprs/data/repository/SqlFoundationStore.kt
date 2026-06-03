@@ -148,6 +148,7 @@ class SqlFoundationStore(
                     active_workout_id = workout.sourceActiveWorkoutId.value,
                     exercise_catalog_id = exercise.exerciseCatalogId.value,
                     display_name_snapshot = exercise.displayNameSnapshot,
+                    equipment_snapshot = null,
                     is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
@@ -617,6 +618,7 @@ class SqlFoundationStore(
                     active_workout_id = exercise.activeWorkoutId.value,
                     exercise_catalog_id = exercise.reference.exerciseCatalogId.value,
                     display_name_snapshot = exercise.reference.displayNameSnapshot,
+                    equipment_snapshot = exercise.reference.equipmentSnapshot,
                     is_bodyweight = exercise.reference.isBodyweight.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.reference.loggingMode.name,
@@ -658,7 +660,8 @@ class SqlFoundationStore(
                 exerciseCatalogId = FoundationId(exercise_catalog_id),
                 displayNameSnapshot = display_name_snapshot,
                 isBodyweight = is_bodyweight.toBooleanFlag(),
-                loggingMode = ExerciseLoggingMode.valueOf(logging_mode)
+                loggingMode = ExerciseLoggingMode.valueOf(logging_mode),
+                equipmentSnapshot = equipment_snapshot ?: exerciseQueries.selectExerciseById(exercise_catalog_id).executeAsOneOrNull()?.equipment
             ),
             position = OrderedPosition(position.toInt()),
             sets = sets.sortedBy { it.position.value },

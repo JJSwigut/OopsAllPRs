@@ -13,6 +13,7 @@ CREATE TABLE active_exercises (
     active_workout_id TEXT NOT NULL,
     exercise_catalog_id TEXT NOT NULL,
     display_name_snapshot TEXT NOT NULL,
+    equipment_snapshot TEXT,
     is_bodyweight INTEGER NOT NULL,
     position INTEGER NOT NULL,
     logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED',

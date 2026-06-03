@@ -4,7 +4,8 @@ data class ExerciseReference(
     val exerciseCatalogId: FoundationId,
     val displayNameSnapshot: String,
     val isBodyweight: Boolean,
-    val loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED
+    val loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
+    val equipmentSnapshot: String? = null
 )
 
 data class ActiveExercise(

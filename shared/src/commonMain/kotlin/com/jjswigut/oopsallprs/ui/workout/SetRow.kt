@@ -25,6 +25,8 @@ fun SetRow(
     onLog: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
     weightStepAmount: Double = weightStep(weightUnit),
+    loadCalculatorKind: LoadCalculatorKind? = null,
+    onOpenLoadCalculator: (() -> Unit)? = null,
     actionLabel: String = "Log set",
     pendingLabel: String = "Logging...",
     modifier: Modifier = Modifier
@@ -38,6 +40,8 @@ fun SetRow(
         onLog = onLog,
         weightUnit = weightUnit,
         weightStepAmount = weightStepAmount,
+        loadCalculatorKind = loadCalculatorKind,
+        onOpenLoadCalculator = onOpenLoadCalculator,
         actionLabel = actionLabel,
         pendingLabel = pendingLabel,
         modifier = modifier

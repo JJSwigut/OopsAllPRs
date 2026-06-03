@@ -1,6 +1,6 @@
 insertActiveExercise:
-INSERT OR REPLACE INTO active_exercises(id, active_workout_id, exercise_catalog_id, display_name_snapshot, is_bodyweight, position, logging_mode, rest_seconds, rest_auto_start)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO active_exercises(id, active_workout_id, exercise_catalog_id, display_name_snapshot, equipment_snapshot, is_bodyweight, position, logging_mode, rest_seconds, rest_auto_start)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectActiveExercises:
 SELECT * FROM active_exercises
