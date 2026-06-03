@@ -5,6 +5,20 @@ plugins {
     alias(libs.plugins.kotlinPluginCompose)
 }
 
+val ciVersionCode = providers.gradleProperty("android.injected.version.code")
+    .orElse(providers.environmentVariable("ANDROID_VERSION_CODE"))
+    .map(String::toInt)
+    .getOrElse(1)
+val ciVersionName = providers.gradleProperty("android.injected.version.name")
+    .orElse(providers.environmentVariable("ANDROID_VERSION_NAME"))
+    .getOrElse("1.0")
+val releaseSigningConfigured = listOf(
+    "ANDROID_UPLOAD_KEYSTORE_PATH",
+    "ANDROID_UPLOAD_KEYSTORE_PASSWORD",
+    "ANDROID_UPLOAD_KEY_ALIAS",
+    "ANDROID_UPLOAD_KEY_PASSWORD",
+).all { !System.getenv(it).isNullOrBlank() }
+
 android {
     namespace = "com.jjswigut.oopsallprs.android"
     compileSdk = 35
@@ -13,9 +27,20 @@ android {
         applicationId = "com.jjswigut.oopsallprs.android"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = ciVersionCode
+        versionName = ciVersionName
         manifestPlaceholders["appLabel"] = "Oops All PRs"
+    }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH"))
+                storePassword = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -31,6 +56,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

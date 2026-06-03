@@ -1,0 +1,181 @@
+name: Deploy Stores
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: Release gate checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Gradle checks
+        run: ./gradlew --no-daemon check :androidApp:assembleRelease
+
+  android:
+    name: Android internal testing
+    needs: tests
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
+      ANDROID_PLAY_TRACK: internal
+      ANDROID_RELEASE_STATUS: completed
+      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+      ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Prepare Android signing
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_KEYSTORE_PASSWORD ANDROID_UPLOAD_KEY_ALIAS ANDROID_UPLOAD_KEY_PASSWORD GOOGLE_PLAY_SERVICE_ACCOUNT_JSON; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing required Android deploy secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          keystore_path="$RUNNER_TEMP/android-upload-keystore.jks"
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "ANDROID_UPLOAD_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
+      - name: Set Android version
+        run: |
+          version_code=$((GITHUB_RUN_NUMBER + 1000))
+          echo "ANDROID_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=1.0.$version_code" >> "$GITHUB_ENV"
+
+      - name: Upload Android bundle to Play internal testing
+        run: bundle exec fastlane android internal
+
+  ios:
+    name: iOS TestFlight
+    needs: tests
+    runs-on: macos-latest
+    env:
+      IOS_BUNDLE_ID: com.jjswigut.oopsallprs.ios
+      IOS_MARKETING_VERSION: "1.0"
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+    steps:
+      - name: Check iOS deploy secrets
+        id: ios-secrets
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_BASE64 IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_DISTRIBUTION_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            printf '::notice::Skipping iOS deploy. Missing secrets: %s\n' "${missing[*]}"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        if: steps.ios-secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        if: steps.ios-secrets.outputs.ready == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: steps.ios-secrets.outputs.ready == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Ruby
+        if: steps.ios-secrets.outputs.ready == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Install Apple signing assets
+        if: steps.ios-secrets.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          cert_path="$RUNNER_TEMP/ios-distribution.p12"
+          profile_path="$RUNNER_TEMP/ios-app-store.mobileprovision"
+          profile_plist="$RUNNER_TEMP/ios-app-store.plist"
+          keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
+
+          printf '%s' "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$profile_path"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          security cms -D -i "$profile_path" > "$profile_plist"
+          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$profile_plist")
+          profile_name=$(/usr/libexec/PlistBuddy -c 'Print Name' "$profile_plist")
+          cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+          echo "IOS_PROVISIONING_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
+
+      - name: Set iOS build number
+        if: steps.ios-secrets.outputs.ready == 'true'
+        run: echo "IOS_BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 1000))" >> "$GITHUB_ENV"
+
+      - name: Upload iOS build to TestFlight
+        if: steps.ios-secrets.outputs.ready == 'true'
+        run: bundle exec fastlane ios beta

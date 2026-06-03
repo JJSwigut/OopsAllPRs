@@ -1,0 +1,88 @@
+opt_out_usage
+
+default_platform(:android)
+
+platform :android do
+  desc "Build and upload the Android app bundle to Google Play internal testing"
+  lane :internal do
+    version_code = ENV.fetch("ANDROID_VERSION_CODE")
+    version_name = ENV.fetch("ANDROID_VERSION_NAME", "1.0.#{version_code}")
+    package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
+    track = ENV.fetch("ANDROID_PLAY_TRACK", "internal")
+
+    UI.user_error!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required") if ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"].to_s.strip.empty?
+
+    gradle(
+      project_dir: ".",
+      task: ":androidApp:bundleRelease",
+      properties: {
+        "android.injected.version.code" => version_code,
+        "android.injected.version.name" => version_name,
+      }
+    )
+
+    upload_to_play_store(
+      package_name: package_name,
+      json_key_data: ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+      aab: "androidApp/build/outputs/bundle/release/androidApp-release.aab",
+      track: track,
+      release_status: ENV.fetch("ANDROID_RELEASE_STATUS", "completed"),
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end
+
+platform :ios do
+  desc "Build the iOS app and upload it to TestFlight"
+  lane :beta do
+    app_identifier = ENV.fetch("IOS_BUNDLE_ID", "com.jjswigut.oopsallprs.ios")
+    build_number = ENV.fetch("IOS_BUILD_NUMBER")
+    marketing_version = ENV.fetch("IOS_MARKETING_VERSION", "1.0")
+    provisioning_profile_name = ENV.fetch("IOS_PROVISIONING_PROFILE_NAME")
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+      key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_BASE64"),
+      is_key_content_base64: true,
+      duration: 1200,
+      in_house: false
+    )
+
+    sh("./gradlew :shared:linkReleaseFrameworkIosArm64")
+
+    build_app(
+      project: "iosApp/OopsAllPRs.xcodeproj",
+      scheme: "OopsAllPRs",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "iosApp/build/fastlane",
+      xcargs: [
+        "DEVELOPMENT_TEAM=#{ENV.fetch('APPLE_TEAM_ID')}",
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY=\"Apple Distribution\"",
+        "PROVISIONING_PROFILE_SPECIFIER=\"#{provisioning_profile_name}\"",
+        "CURRENT_PROJECT_VERSION=#{build_number}",
+        "MARKETING_VERSION=#{marketing_version}",
+      ].join(" "),
+      export_options: {
+        method: "app-store",
+        signingStyle: "manual",
+        teamID: ENV.fetch("APPLE_TEAM_ID"),
+        provisioningProfiles: {
+          app_identifier => provisioning_profile_name,
+        },
+      }
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
+      skip_waiting_for_build_processing: true
+    )
+  end
+end
