@@ -100,6 +100,7 @@ fun AppShell(
 
     LaunchedEffect(Unit) {
         appState.hydrate()
+        scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
     }
 
     LaunchedEffect(shellState.selectedDestination) {
@@ -107,7 +108,10 @@ fun AppShell(
             TopLevelDestination.HISTORY -> appState.history.refresh()
             TopLevelDestination.PROGRESS -> appState.progress.refresh()
             TopLevelDestination.TRAIN -> appState.workoutHome.hydrate()
-            TopLevelDestination.PROFILE -> appState.profile.hydrate()
+            TopLevelDestination.PROFILE -> {
+                appState.profile.hydrate()
+                scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
+            }
         }
     }
 
@@ -604,6 +608,27 @@ private fun DestinationContent(
             onExportRequested = { type ->
                 scope.launch { appState.profile.export(type) }
             },
+            onLinkBackupFile = { scope.launch { appState.profile.linkBackupFile() } },
+            onBackupNow = { scope.launch { appState.profile.backupNow() } },
+            onSyncNow = { scope.launch { appState.profile.syncNow() } },
+            onRestoreFromFile = {
+                scope.launch {
+                    when (appState.profile.restoreFromFile()) {
+                        is FoundationResult.Failure -> Unit
+                        is FoundationResult.Success -> appState.hydrate()
+                    }
+                }
+            },
+            onKeepLocalBackup = { scope.launch { appState.profile.keepLocalBackup() } },
+            onRestoreBackupConflict = {
+                scope.launch {
+                    when (appState.profile.restoreBackupConflict()) {
+                        is FoundationResult.Failure -> Unit
+                        is FoundationResult.Success -> appState.hydrate()
+                    }
+                }
+            },
+            onCancelBackupConflict = { scope.launch { appState.profile.cancelBackupConflict() } },
             onManageExercises = {
                 scope.launch { appState.exerciseManagement.open() }
             },

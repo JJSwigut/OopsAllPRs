@@ -1,6 +1,9 @@
 package com.jjswigut.oopsallprs
 
+import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
 import com.jjswigut.oopsallprs.data.exercise.defaultExerciseSeedCsv
+import com.jjswigut.oopsallprs.data.repository.SqlBackupRepository
+import com.jjswigut.oopsallprs.data.repository.SqlBackupSyncRepository
 import com.jjswigut.oopsallprs.data.repository.SqlExerciseRepository
 import com.jjswigut.oopsallprs.data.repository.SqlFoundationStore
 import com.jjswigut.oopsallprs.data.repository.SqlProgressRepository
@@ -28,6 +31,8 @@ import com.jjswigut.oopsallprs.ui.routine.RoutineStateHolder
 import com.jjswigut.oopsallprs.ui.workout.ActiveWorkoutStateHolder
 import com.jjswigut.oopsallprs.ui.workout.WorkoutHomeStateHolder
 import com.jjswigut.oopsallprs.platform.FileExportHandoff
+import com.jjswigut.oopsallprs.platform.BackupDocumentHandoff
+import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
 import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,16 +75,22 @@ class AppState(
         navigation.hydrate(restored, now)
     }
 
+    suspend fun checkBackupSyncOnLaunchOrResume() {
+        profile.checkLinkedBackup()
+    }
+
     companion object {
         fun create(
             databaseDriverFactory: PlatformDatabaseDriverFactory,
             fileExportHandoff: FileExportHandoff? = null,
+            backupDocumentHandoff: BackupDocumentHandoff? = null,
             restNotificationScheduler: RestNotificationScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState =
             create(
                 database = WorkoutDatabase(databaseDriverFactory.createDriver()),
                 fileExportHandoff = fileExportHandoff,
+                backupDocumentAdapter = backupDocumentHandoff,
                 restNotificationScheduler = restNotificationScheduler,
                 developerToolsEnabled = developerToolsEnabled
             )
@@ -87,10 +98,14 @@ class AppState(
         fun create(
             database: WorkoutDatabase,
             fileExportHandoff: FileExportHandoff? = null,
+            backupDocumentAdapter: BackupDocumentAdapter? = null,
             restNotificationScheduler: RestNotificationScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState {
             val store = SqlFoundationStore(database)
+            val backupRepository = SqlBackupRepository(database, store)
+            val backupSyncRepository = SqlBackupSyncRepository(database)
+            val backupSync = BackupSyncCoordinator(backupRepository, backupSyncRepository, backupDocumentAdapter)
             val workouts = SqlWorkoutRepository(store)
             val sets = SqlSetLedgerRepository(store)
             val routineRepo = SqlRoutineRepository(store)
@@ -143,7 +158,8 @@ class AppState(
                     exports = store,
                     exportHandoff = fileExportHandoff?.let { handoff ->
                         { file -> handoff.share(file.fileName, file.content) }
-                    }
+                    },
+                    backupSync = backupSync
                 ),
                 developerSeeds = developerSeeds
             )
