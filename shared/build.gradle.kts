@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.kotlinPluginCompose)
+    alias(libs.plugins.kotlinPluginSerialization)
     alias(libs.plugins.sqldelight)
 }
 
@@ -40,6 +41,7 @@ kotlin {
             api(libs.compose.components.resources)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.serialization.json)
             implementation(libs.koin.core)
             implementation(libs.uuid)
             implementation(libs.sqldelight.runtime)

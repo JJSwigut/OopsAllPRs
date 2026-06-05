@@ -1,6 +1,11 @@
 package com.jjswigut.oopsallprs.ui.profile
 
 import com.jjswigut.oopsallprs.data.export.ExportService
+import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
+import com.jjswigut.oopsallprs.domain.model.BackupConflictDecision
+import com.jjswigut.oopsallprs.domain.model.BackupRestoreResult
+import com.jjswigut.oopsallprs.domain.model.BackupSyncOutcome
+import com.jjswigut.oopsallprs.domain.model.BackupSyncState
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportType
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
@@ -35,6 +40,17 @@ data class ProfileExportResult(
     val weightUnit: WeightUnit
 )
 
+data class ProfileBackupStatus(
+    val linkedLocation: String = "Not linked",
+    val lastSyncLabel: String = "Never",
+    val lastOutcomeLabel: String = "No backup linked",
+    val conflictSummary: String? = null,
+    val privacyLabel: String = "Plain JSON backup is readable by anyone with access to the file.",
+    val canBackup: Boolean = false,
+    val canSync: Boolean = false,
+    val hasConflict: Boolean = false
+)
+
 data class ProfileState(
     val weightUnit: WeightUnit = WeightUnit.POUNDS,
     val weightStep: Double = WeightStepPreference.DEFAULT_POUNDS_STEP,
@@ -50,13 +66,20 @@ data class ProfileState(
     val isHydrated: Boolean = false,
     val isExporting: Boolean = false,
     val lastExport: ProfileExportResult? = null,
-    val exportError: String? = null
+    val exportError: String? = null,
+    val backupStatus: ProfileBackupStatus = ProfileBackupStatus(),
+    val isBackupBusy: Boolean = false,
+    val backupError: String? = null,
+    val lastRestoreMessage: String? = null,
+    val restoreWarning: String? = null,
+    val safetyBackupMessage: String? = null
 )
 
 class ProfileStateHolder(
     private val preferences: PreferencesRepository? = null,
     private val exports: ExportRepository? = null,
-    private val exportHandoff: ((ExportFile) -> Unit)? = null
+    private val exportHandoff: ((ExportFile) -> Unit)? = null,
+    private val backupSync: BackupSyncCoordinator? = null
 ) {
     private val _state = MutableStateFlow(ProfileState())
     val state: StateFlow<ProfileState> = _state
@@ -75,7 +98,8 @@ class ProfileStateHolder(
             restSoundEnabled = soundEnabled,
             localStatus = LocalReadinessStatus(),
             isHydrated = true,
-            exportError = null
+            exportError = null,
+            backupStatus = backupSync?.loadState()?.toProfileStatus() ?: ProfileBackupStatus()
         )
     }
 
@@ -200,6 +224,90 @@ class ProfileStateHolder(
         }
     }
 
+    suspend fun linkBackupFile(): FoundationResult<BackupSyncState> =
+        backupOperation { it.linkNewBackup() }
+
+    suspend fun backupNow(): FoundationResult<BackupSyncState> =
+        backupOperation { it.backupNow() }
+
+    suspend fun syncNow(): FoundationResult<BackupSyncState> =
+        backupOperation { it.syncNow() }
+
+    suspend fun checkLinkedBackup(): FoundationResult<BackupSyncState> {
+        val coordinator = backupSync
+            ?: return backupFailure(FoundationError.Platform("Backup unavailable"))
+        return try {
+            when (val result = coordinator.syncLinkedBackupIfAvailable()) {
+                is FoundationResult.Failure -> {
+                    _state.value = _state.value.copy(
+                        isBackupBusy = false,
+                        backupStatus = coordinator.loadState().toProfileStatus(),
+                        backupError = result.error.message
+                    )
+                    result
+                }
+                is FoundationResult.Success -> {
+                    _state.value = _state.value.copy(
+                        isBackupBusy = false,
+                        backupStatus = result.value.toProfileStatus(),
+                        backupError = null
+                    )
+                    result
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            backupFailure(FoundationError.Platform(throwable.message ?: "Backup check failed"))
+        }
+    }
+
+    suspend fun restoreFromFile(): FoundationResult<BackupRestoreResult> {
+        val coordinator = backupSync
+            ?: return backupRestoreFailure(FoundationError.Platform("Backup unavailable"))
+        _state.value = _state.value.copy(
+            isBackupBusy = true,
+            backupError = null,
+            lastRestoreMessage = null,
+            restoreWarning = null,
+            safetyBackupMessage = null
+        )
+        return try {
+            when (val result = coordinator.restoreFromFile()) {
+                is FoundationResult.Failure -> backupRestoreFailure(result.error)
+                is FoundationResult.Success -> {
+                    val syncState = coordinator.loadState()
+                    _state.value = _state.value.copy(
+                        isBackupBusy = false,
+                        backupStatus = syncState.toProfileStatus(),
+                        backupError = null,
+                        lastRestoreMessage = "Restored ${result.value.restoredSummary.displayCounts()}",
+                        restoreWarning = if (result.value.activeWorkoutReplaced) {
+                            "Active workout was replaced by the backup."
+                        } else {
+                            null
+                        },
+                        safetyBackupMessage = "Safety backup created before restore."
+                    )
+                    result
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            backupRestoreFailure(FoundationError.Platform(throwable.message ?: "Restore failed"))
+        }
+    }
+
+    suspend fun keepLocalBackup(): FoundationResult<BackupSyncState> =
+        backupOperation { it.resolveConflict(BackupConflictDecision.KEEP_LOCAL_OVERWRITE_BACKUP) }
+
+    suspend fun restoreBackupConflict(): FoundationResult<BackupSyncState> =
+        backupOperation { it.resolveConflict(BackupConflictDecision.RESTORE_BACKUP_AFTER_SAFETY_COPY) }
+
+    suspend fun cancelBackupConflict(): FoundationResult<BackupSyncState> =
+        backupOperation { it.resolveConflict(BackupConflictDecision.CANCEL) }
+
     fun setPaletteMode(mode: PaletteMode) {
         _state.value = _state.value.copy(paletteMode = mode)
     }
@@ -220,6 +328,47 @@ class ProfileStateHolder(
         return foundationFailure(error)
     }
 
+    private suspend fun backupOperation(
+        block: suspend (BackupSyncCoordinator) -> FoundationResult<BackupSyncState>
+    ): FoundationResult<BackupSyncState> {
+        val coordinator = backupSync
+            ?: return backupFailure(FoundationError.Platform("Backup unavailable"))
+        _state.value = _state.value.copy(
+            isBackupBusy = true,
+            backupError = null,
+            lastRestoreMessage = null,
+            restoreWarning = null,
+            safetyBackupMessage = null
+        )
+        return try {
+            when (val result = block(coordinator)) {
+                is FoundationResult.Failure -> backupFailure(result.error)
+                is FoundationResult.Success -> {
+                    _state.value = _state.value.copy(
+                        isBackupBusy = false,
+                        backupStatus = result.value.toProfileStatus(),
+                        backupError = null
+                    )
+                    result
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (throwable: Throwable) {
+            backupFailure(FoundationError.Platform(throwable.message ?: "Backup operation failed"))
+        }
+    }
+
+    private fun backupFailure(error: FoundationError): FoundationResult<BackupSyncState> {
+        _state.value = _state.value.copy(isBackupBusy = false, backupError = error.message)
+        return foundationFailure(error)
+    }
+
+    private fun backupRestoreFailure(error: FoundationError): FoundationResult<BackupRestoreResult> {
+        _state.value = _state.value.copy(isBackupBusy = false, backupError = error.message)
+        return foundationFailure(error)
+    }
+
     private fun ExportFile.toProfileResult(): ProfileExportResult =
         ProfileExportResult(
             type = snapshot.exportType,
@@ -227,4 +376,33 @@ class ProfileStateHolder(
             rowCount = snapshot.rowCount,
             weightUnit = snapshot.weightUnit
         )
+
+    private fun BackupSyncState.toProfileStatus(): ProfileBackupStatus {
+        val linked = linkedFile
+        return ProfileBackupStatus(
+            linkedLocation = linked?.displayName ?: "Not linked",
+            lastSyncLabel = lastBackupTimestamp?.toString() ?: "Never",
+            lastOutcomeLabel = lastOutcome.displayLabel(),
+            conflictSummary = lastConflictSummary,
+            canBackup = linked != null && !isTerminalUnavailable(),
+            canSync = linked != null && !isTerminalUnavailable(),
+            hasConflict = lastOutcome == BackupSyncOutcome.CONFLICT || lastOutcome == BackupSyncOutcome.BACKUP_CHANGED
+        )
+    }
+
+    private fun BackupSyncState.isTerminalUnavailable(): Boolean =
+        lastOutcome == BackupSyncOutcome.UNAVAILABLE
+
+    private fun BackupSyncOutcome.displayLabel(): String =
+        when (this) {
+            BackupSyncOutcome.UNLINKED -> "No backup linked"
+            BackupSyncOutcome.LINKED -> "Backup linked"
+            BackupSyncOutcome.CLEAN -> "Up to date"
+            BackupSyncOutcome.LOCAL_WRITTEN -> "Backup updated"
+            BackupSyncOutcome.BACKUP_CHANGED -> "Backup changed"
+            BackupSyncOutcome.CONFLICT -> "Conflict needs review"
+            BackupSyncOutcome.RESTORED -> "Backup restored"
+            BackupSyncOutcome.UNAVAILABLE -> "Linked file unavailable"
+            BackupSyncOutcome.FAILED -> "Backup error"
+        }
 }

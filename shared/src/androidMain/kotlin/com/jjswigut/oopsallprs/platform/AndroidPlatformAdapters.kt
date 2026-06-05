@@ -8,12 +8,23 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
+import android.net.Uri
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
+import com.jjswigut.oopsallprs.domain.model.BackupDocument
+import com.jjswigut.oopsallprs.domain.model.BackupLinkedFile
+import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.foundationFailure
+import com.jjswigut.oopsallprs.domain.model.foundationSuccess
+import com.jjswigut.oopsallprs.domain.validation.FoundationError
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -179,6 +190,130 @@ actual class FileExportHandoff actual constructor(private val context: Any?) {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         androidContext.startActivity(chooser)
     }
+}
+
+actual class BackupDocumentHandoff actual constructor(private val context: Any?) : BackupDocumentAdapter {
+    private val androidContext: Context? = context as? Context
+    private var pendingCreate: PendingCreate? = null
+    private var pendingOpen: CompletableDeferred<FoundationResult<BackupDocument>>? = null
+    private val createLauncher: ActivityResultLauncher<String>? =
+        (context as? ComponentActivity)?.registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            val pending = pendingCreate
+            pendingCreate = null
+            if (pending == null) return@registerForActivityResult
+            if (uri == null) {
+                pending.deferred.complete(foundationFailure(FoundationError.Platform("Backup file creation canceled")))
+                return@registerForActivityResult
+            }
+            persistUri(uri)
+            val linked = linkedFile(uri)
+            when (val write = writeBackupContent(linked, pending.content)) {
+                is FoundationResult.Failure -> pending.deferred.complete(write)
+                is FoundationResult.Success -> pending.deferred.complete(foundationSuccess(write.value))
+            }
+        }
+    private val openLauncher: ActivityResultLauncher<Array<String>>? =
+        (context as? ComponentActivity)?.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val pending = pendingOpen
+            pendingOpen = null
+            if (pending == null) return@registerForActivityResult
+            if (uri == null) {
+                pending.complete(foundationFailure(FoundationError.Platform("Backup file selection canceled")))
+                return@registerForActivityResult
+            }
+            persistUri(uri)
+            val linked = linkedFile(uri)
+            when (val read = readBackupContent(linked)) {
+                is FoundationResult.Failure -> pending.complete(read)
+                is FoundationResult.Success -> pending.complete(foundationSuccess(BackupDocument(linked, read.value)))
+            }
+        }
+
+    actual override suspend fun createBackupDocument(
+        suggestedName: String,
+        content: String
+    ): FoundationResult<BackupLinkedFile> {
+        val launcher = createLauncher
+            ?: return foundationFailure(FoundationError.Platform("Backup document picker unavailable"))
+        val deferred = CompletableDeferred<FoundationResult<BackupLinkedFile>>()
+        pendingCreate = PendingCreate(content, deferred)
+        launcher.launch(suggestedName)
+        return deferred.await()
+    }
+
+    actual override suspend fun openBackupDocument(): FoundationResult<BackupDocument> {
+        val launcher = openLauncher
+            ?: return foundationFailure(FoundationError.Platform("Backup document picker unavailable"))
+        val deferred = CompletableDeferred<FoundationResult<BackupDocument>>()
+        pendingOpen = deferred
+        launcher.launch(arrayOf("application/json", "text/*", "*/*"))
+        return deferred.await()
+    }
+
+    actual override suspend fun readBackup(linkedFile: BackupLinkedFile): FoundationResult<String> =
+        readBackupContent(linkedFile)
+
+    private fun readBackupContent(linkedFile: BackupLinkedFile): FoundationResult<String> {
+        val context = androidContext
+            ?: return foundationFailure(FoundationError.Platform("Android backup adapter requires Context"))
+        val uri = linkedFile.toUri()
+            ?: return foundationFailure(FoundationError.Platform("Linked backup reference is invalid"))
+        return try {
+            val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                ?: return foundationFailure(FoundationError.Platform("Linked backup file could not be read"))
+            foundationSuccess(content)
+        } catch (throwable: Throwable) {
+            foundationFailure(FoundationError.Platform(throwable.message ?: "Linked backup file could not be read"))
+        }
+    }
+
+    actual override suspend fun writeBackup(
+        linkedFile: BackupLinkedFile,
+        content: String
+    ): FoundationResult<BackupLinkedFile> =
+        writeBackupContent(linkedFile, content)
+
+    private fun writeBackupContent(
+        linkedFile: BackupLinkedFile,
+        content: String
+    ): FoundationResult<BackupLinkedFile> {
+        val context = androidContext
+            ?: return foundationFailure(FoundationError.Platform("Android backup adapter requires Context"))
+        val uri = linkedFile.toUri()
+            ?: return foundationFailure(FoundationError.Platform("Linked backup reference is invalid"))
+        return try {
+            context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(content) }
+                ?: return foundationFailure(FoundationError.Platform("Linked backup file could not be written"))
+            foundationSuccess(linkedFile)
+        } catch (throwable: Throwable) {
+            foundationFailure(FoundationError.Platform(throwable.message ?: "Linked backup file could not be written"))
+        }
+    }
+
+    private fun persistUri(uri: Uri) {
+        val context = androidContext ?: return
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+    }
+
+    private fun linkedFile(uri: Uri): BackupLinkedFile =
+        BackupLinkedFile(
+            displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "Oops All PRs backup",
+            providerReference = uri.toString(),
+            providerReferenceKind = "android-uri"
+        )
+
+    private fun BackupLinkedFile.toUri(): Uri? =
+        runCatching { Uri.parse(providerReference) }.getOrNull()
+
+    private data class PendingCreate(
+        val content: String,
+        val deferred: CompletableDeferred<FoundationResult<BackupLinkedFile>>
+    )
 }
 
 actual class HapticFeedback actual constructor(context: Any?) {

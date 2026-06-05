@@ -1,6 +1,9 @@
 package com.jjswigut.oopsallprs.di
 
 import com.jjswigut.oopsallprs.data.exercise.ExerciseCatalogInitializer
+import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
+import com.jjswigut.oopsallprs.data.repository.SqlBackupRepository
+import com.jjswigut.oopsallprs.data.repository.SqlBackupSyncRepository
 import com.jjswigut.oopsallprs.data.repository.SqlExerciseRepository
 import com.jjswigut.oopsallprs.data.repository.SqlFoundationStore
 import com.jjswigut.oopsallprs.data.repository.SqlProgressRepository
@@ -22,6 +25,9 @@ import org.koin.dsl.module
 val foundationModule = module {
     single { WorkoutDatabase(get<PlatformDatabaseDriverFactory>().createDriver()) }
     single { SqlFoundationStore(get<WorkoutDatabase>()) }
+    single { SqlBackupRepository(get<WorkoutDatabase>(), get<SqlFoundationStore>()) }
+    single { SqlBackupSyncRepository(get<WorkoutDatabase>()) }
+    single { BackupSyncCoordinator(get<SqlBackupRepository>(), get<SqlBackupSyncRepository>(), documents = null) }
     single { SqlWorkoutRepository(get<SqlFoundationStore>()) }
     single { SqlSetLedgerRepository(get<SqlFoundationStore>()) }
     single { SqlRoutineRepository(get<SqlFoundationStore>()) }

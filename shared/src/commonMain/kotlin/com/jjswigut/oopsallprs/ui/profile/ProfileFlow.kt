@@ -41,6 +41,13 @@ fun ProfileFlow(
     onHapticsChanged: (Boolean) -> Unit,
     onReduceMotionChanged: (Boolean) -> Unit,
     onExportRequested: (ExportType) -> Unit,
+    onLinkBackupFile: () -> Unit,
+    onBackupNow: () -> Unit,
+    onSyncNow: () -> Unit,
+    onRestoreFromFile: () -> Unit,
+    onKeepLocalBackup: () -> Unit,
+    onRestoreBackupConflict: () -> Unit,
+    onCancelBackupConflict: () -> Unit,
     onManageExercises: () -> Unit,
     developerSeedState: DeveloperSeedState? = null,
     onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit = {},
@@ -57,6 +64,16 @@ fun ProfileFlow(
         )
         RestPreferencesCard(state, onDefaultRestSelected, onRestSoundChanged)
         ExportCard(state, onExportRequested)
+        BackupCard(
+            state = state,
+            onLinkBackupFile = onLinkBackupFile,
+            onBackupNow = onBackupNow,
+            onSyncNow = onSyncNow,
+            onRestoreFromFile = onRestoreFromFile,
+            onKeepLocalBackup = onKeepLocalBackup,
+            onRestoreBackupConflict = onRestoreBackupConflict,
+            onCancelBackupConflict = onCancelBackupConflict
+        )
         LocalStatusCard(state.localStatus, onManageExercises)
         developerSeedState?.let { seedState ->
             DeveloperSeedCard(seedState, onDeveloperSeedSelected)
@@ -76,6 +93,104 @@ fun ProfileFlow(
             onSave = onWeightStepSave,
             onCancel = onWeightStepCancel
         )
+    }
+}
+
+@Composable
+private fun BackupCard(
+    state: ProfileState,
+    onLinkBackupFile: () -> Unit,
+    onBackupNow: () -> Unit,
+    onSyncNow: () -> Unit,
+    onRestoreFromFile: () -> Unit,
+    onKeepLocalBackup: () -> Unit,
+    onRestoreBackupConflict: () -> Unit,
+    onCancelBackupConflict: () -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Backup")
+            StatusRow("Linked", state.backupStatus.linkedLocation)
+            StatusRow("Last sync", state.backupStatus.lastSyncLabel)
+            StatusRow("Status", state.backupStatus.lastOutcomeLabel)
+            FoundationMutedText(state.backupStatus.privacyLabel)
+            FitButton(
+                text = if (state.isBackupBusy) "Working" else "Link backup file",
+                onClick = onLinkBackupFile,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isBackupBusy,
+                style = FitButtonStyle.Secondary
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = "Backup now",
+                    onClick = onBackupNow,
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isBackupBusy && state.backupStatus.canBackup,
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = "Sync now",
+                    onClick = onSyncNow,
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isBackupBusy && state.backupStatus.canSync,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            FitButton(
+                text = "Restore from file",
+                onClick = onRestoreFromFile,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isBackupBusy,
+                style = FitButtonStyle.Secondary
+            )
+            if (state.backupStatus.hasConflict) {
+                state.backupStatus.conflictSummary?.let { FoundationMutedText(it) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+                ) {
+                    FitButton(
+                        text = "Keep local",
+                        onClick = onKeepLocalBackup,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Restore backup",
+                        onClick = onRestoreBackupConflict,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                FitButton(
+                    text = "Cancel conflict",
+                    onClick = onCancelBackupConflict,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isBackupBusy,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            state.lastRestoreMessage?.let { FoundationMutedText(it) }
+            state.restoreWarning?.let {
+                FoundationText(
+                    text = it,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+            state.safetyBackupMessage?.let { FoundationMutedText(it) }
+            state.backupError?.let { message ->
+                FoundationText(
+                    text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
     }
 }
 

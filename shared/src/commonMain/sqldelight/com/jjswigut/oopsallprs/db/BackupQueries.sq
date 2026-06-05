@@ -1,0 +1,66 @@
+upsertSyncState:
+INSERT OR REPLACE INTO sync_state(
+    singleton_id,
+    linked_backup_display_name,
+    provider_reference,
+    provider_reference_kind,
+    last_backup_revision,
+    last_backup_timestamp,
+    last_local_revision,
+    last_local_timestamp,
+    last_outcome,
+    last_error,
+    last_conflict_summary,
+    updated_at
+)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectSyncState:
+SELECT * FROM sync_state
+WHERE singleton_id = 1;
+
+clearSyncState:
+DELETE FROM sync_state
+WHERE singleton_id = 1;
+
+deleteAllActiveSetDrafts:
+DELETE FROM active_set_drafts;
+
+deleteAllActiveWorkoutUx:
+DELETE FROM active_workout_ux_sessions;
+
+deleteAllSessionState:
+DELETE FROM active_session_state;
+
+deleteAllExerciseSets:
+DELETE FROM exercise_sets;
+
+deleteAllActiveExercises:
+DELETE FROM active_exercises;
+
+deleteAllCompletedWorkouts:
+DELETE FROM completed_workouts;
+
+deleteAllActiveWorkouts:
+DELETE FROM active_workouts;
+
+deleteAllRoutineSetTemplates:
+DELETE FROM routine_set_templates;
+
+deleteAllRoutineExercises:
+DELETE FROM routine_exercises;
+
+deleteAllRoutines:
+DELETE FROM routines;
+
+deleteAllPersonalRecords:
+DELETE FROM personal_records;
+
+deleteAllProgressPoints:
+DELETE FROM progress_points;
+
+deleteAllExportSnapshots:
+DELETE FROM export_snapshots;
+
+deleteAllExerciseCatalog:
+DELETE FROM exercise_catalog;
