@@ -68,9 +68,42 @@ class RoutineBuilderCreateTest {
         assertNull(routine.exercises.single().plannedSets.single().targetWeight)
     }
 
+    @Test
+    fun groupedRoutineExercisesSaveAndReopenAsSupersetOrCircuit() = runTest {
+        val harness = FoundationHarness()
+        val holder = RoutineStateHolder(harness.routines, harness.exerciseCatalog)
+        holder.beginCreateRoutine()
+        holder.updateEditorName("Upper")
+        holder.addEditorExercise(weightedRow())
+        holder.addEditorExercise(bodyweightRow())
+        holder.addEditorExercise(rowRow())
+
+        val initial = assertNotNull(holder.state.value.editorDraft)
+        holder.groupEditorExercises(initial.exercises.take(2).map { it.draftId })
+        val supersetDraft = assertNotNull(holder.state.value.editorDraft)
+        assertEquals("Superset", supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[0]))
+        assertEquals("Superset", supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[1]))
+        assertNull(supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[2]))
+
+        holder.groupEditorExercises(supersetDraft.exercises.map { it.draftId })
+        val circuitDraft = assertNotNull(holder.state.value.editorDraft)
+        assertEquals(listOf("Circuit", "Circuit", "Circuit"), circuitDraft.exercises.map { circuitDraft.exercises.groupLabelFor(it) })
+
+        val routine = holder.saveEditor(instant(2_000)).successValue()
+        holder.beginEditRoutine(routine.id).successValue()
+        val reopened = assertNotNull(holder.state.value.editorDraft)
+
+        assertEquals(listOf("Circuit", "Circuit", "Circuit"), reopened.exercises.map { reopened.exercises.groupLabelFor(it) })
+        assertEquals(1, reopened.exercises.mapNotNull { it.groupId }.distinct().size)
+        assertEquals(listOf("Bench Press", "Pull-Up", "Seated Row"), reopened.exercises.map { it.displayName })
+    }
+
     private fun weightedRow(): ExercisePickerResultRow =
         ExercisePickerResultRow(FoundationId("exercise-bench"), "Bench Press", "Chest", isBodyweight = false, isUserCreated = false)
 
     private fun bodyweightRow(): ExercisePickerResultRow =
         ExercisePickerResultRow(FoundationId("exercise-pullup"), "Pull-Up", "Back", isBodyweight = true, isUserCreated = false)
+
+    private fun rowRow(): ExercisePickerResultRow =
+        ExercisePickerResultRow(FoundationId("exercise-row"), "Seated Row", "Back", isBodyweight = false, isUserCreated = false)
 }

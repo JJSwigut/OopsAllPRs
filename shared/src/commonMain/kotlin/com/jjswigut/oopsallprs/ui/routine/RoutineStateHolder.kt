@@ -9,6 +9,7 @@ import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.ReusableRoutine
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
+import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
@@ -121,7 +122,91 @@ class RoutineStateHolder(
             editorDraft = draft.copy(
                 exercises = draft.exercises
                     .filterNot { it.draftId == exerciseDraftId }
-                    .mapIndexed { index, exercise -> exercise.copy(position = com.jjswigut.oopsallprs.domain.model.OrderedPosition(index)) },
+                    .mapIndexed { index, exercise -> exercise.copy(position = com.jjswigut.oopsallprs.domain.model.OrderedPosition(index)) }
+                    .withoutInvalidGroups(),
+                errorMessage = null
+            )
+        )
+    }
+
+    fun groupEditorExercises(exerciseDraftIds: List<FoundationId>) {
+        val draft = _state.value.editorDraft ?: return
+        if (exerciseDraftIds.size < 2) {
+            _state.value = _state.value.copy(editorDraft = draft.copy(errorMessage = "Select at least two adjacent exercises"))
+            return
+        }
+        val positionsById = draft.exercises.mapIndexed { index, exercise -> exercise.draftId to index }.toMap()
+        val positions = exerciseDraftIds.mapNotNull { positionsById[it] }.sorted()
+        if (positions.size != exerciseDraftIds.size || positions != (positions.first()..positions.last()).toList()) {
+            _state.value = _state.value.copy(editorDraft = draft.copy(errorMessage = "Only adjacent exercises can be grouped"))
+            return
+        }
+        val groupId = newFoundationId("routine-group")
+        val groupPosition = com.jjswigut.oopsallprs.domain.model.OrderedPosition(positions.first())
+        val groupRounds = positions.mapNotNull { draft.exercises[it].groupRounds }.firstOrNull() ?: DEFAULT_GROUP_ROUNDS
+        _state.value = _state.value.copy(
+            editorDraft = draft.copy(
+                exercises = draft.exercises
+                    .mapIndexed { index, exercise ->
+                        if (index in positions) {
+                            exercise.copy(groupId = groupId, groupPosition = groupPosition, groupRounds = groupRounds)
+                        } else {
+                            exercise
+                        }
+                    }
+                    .withoutInvalidGroups(),
+                errorMessage = null
+            )
+        )
+    }
+
+    fun groupEditorExerciseWithNext(exerciseDraftId: FoundationId) {
+        val draft = _state.value.editorDraft ?: return
+        val index = draft.exercises.indexOfFirst { it.draftId == exerciseDraftId }
+        if (index == -1 || index == draft.exercises.lastIndex) {
+            _state.value = _state.value.copy(editorDraft = draft.copy(errorMessage = "Choose an exercise with a next exercise"))
+            return
+        }
+        val existingGroupId = draft.exercises[index].groupId
+        val groupedIds = if (existingGroupId != null) {
+            draft.exercises.filter { it.groupId == existingGroupId }.map { it.draftId } + draft.exercises[index + 1].draftId
+        } else {
+            listOf(draft.exercises[index].draftId, draft.exercises[index + 1].draftId)
+        }
+        groupEditorExercises(groupedIds.distinct())
+    }
+
+    fun ungroupEditorExercise(exerciseDraftId: FoundationId) {
+        val draft = _state.value.editorDraft ?: return
+        val groupId = draft.exercises.firstOrNull { it.draftId == exerciseDraftId }?.groupId ?: return
+        _state.value = _state.value.copy(
+            editorDraft = draft.copy(
+                exercises = draft.exercises.map { exercise ->
+                    if (exercise.groupId == groupId) {
+                        exercise.copy(groupId = null, groupPosition = null, groupRounds = null)
+                    } else {
+                        exercise
+                    }
+                },
+                errorMessage = null
+            )
+        )
+    }
+
+    fun adjustEditorGroupRounds(exerciseDraftId: FoundationId, deltaRounds: Int) {
+        val draft = _state.value.editorDraft ?: return
+        val groupId = draft.exercises.firstOrNull { it.draftId == exerciseDraftId }?.groupId ?: return
+        val current = draft.exercises.firstOrNull { it.groupId == groupId }?.groupRounds ?: DEFAULT_GROUP_ROUNDS
+        val next = (current + deltaRounds).coerceIn(1, 12)
+        _state.value = _state.value.copy(
+            editorDraft = draft.copy(
+                exercises = draft.exercises.map { exercise ->
+                    if (exercise.groupId == groupId) {
+                        exercise.copy(groupRounds = next)
+                    } else {
+                        exercise
+                    }
+                },
                 errorMessage = null
             )
         )
@@ -289,6 +374,7 @@ class RoutineStateHolder(
         when {
             draft.name.trim().isBlank() -> FoundationError.Validation("Routine name is required")
             draft.exercises.isEmpty() -> FoundationError.Validation("Add at least one exercise")
+            draft.exercises.hasInvalidGroups() -> FoundationError.Validation("Groups must contain adjacent exercises")
             else -> draft.exercises
                 .asSequence()
                 .flatMap { exercise -> exercise.plannedSets.asSequence() }
@@ -305,3 +391,45 @@ class RoutineStateHolder(
                 .firstOrNull()
         }
 }
+
+private fun List<RoutineExerciseDraft>.withoutInvalidGroups(): List<RoutineExerciseDraft> {
+    val validGroupIds = groupingBy { it.groupId }
+        .eachCount()
+        .filterKeys { it != null }
+        .filterValues { it >= 2 }
+        .keys
+    return map { exercise ->
+        if (exercise.groupId in validGroupIds && exercise.groupPosition != null) {
+            exercise
+        } else {
+            exercise.copy(groupId = null, groupPosition = null, groupRounds = null)
+        }
+    }.renumberGroupPositions()
+}
+
+private fun List<RoutineExerciseDraft>.renumberGroupPositions(): List<RoutineExerciseDraft> {
+    val firstPositionByGroup = mapNotNull { exercise ->
+        exercise.groupId?.let { it to exercise.position.value }
+    }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, positions) -> positions.minOrNull() ?: 0 }
+    return map { exercise ->
+        val groupId = exercise.groupId
+        if (groupId == null) {
+            exercise.copy(groupPosition = null, groupRounds = null)
+        } else {
+            exercise.copy(groupPosition = com.jjswigut.oopsallprs.domain.model.OrderedPosition(firstPositionByGroup[groupId] ?: exercise.position.value))
+        }
+    }
+}
+
+private fun List<RoutineExerciseDraft>.hasInvalidGroups(): Boolean =
+    mapIndexed { index, exercise -> index to exercise }
+        .groupBy { it.second.groupId }
+        .filterKeys { it != null }
+        .values
+        .any { entries ->
+            if (entries.size < 2) return@any true
+            val positions = entries.map { it.first }.sorted()
+            positions != (positions.first()..positions.last()).toList()
+        }

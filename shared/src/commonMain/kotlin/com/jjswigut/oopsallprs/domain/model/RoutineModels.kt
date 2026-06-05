@@ -18,6 +18,9 @@ data class RoutineExercise(
     val exerciseCatalogId: FoundationId,
     val displayNameSnapshot: String,
     val position: OrderedPosition,
+    val groupId: FoundationId? = null,
+    val groupPosition: OrderedPosition? = null,
+    val groupRounds: Int? = null,
     val plannedSets: List<RoutineSetTemplate>,
     val rest: RestConfiguration = RestConfiguration.default()
 )

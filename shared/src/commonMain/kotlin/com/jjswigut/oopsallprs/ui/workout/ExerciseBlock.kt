@@ -43,11 +43,14 @@ fun ExerciseBlock(
                         style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface)
                     )
                     FoundationMutedText(
-                        when (block.loggingMode) {
+                        listOfNotNull(
+                            block.groupSummary(),
+                            when (block.loggingMode) {
                             ExerciseLoggingMode.TIMED -> "Timed"
                             ExerciseLoggingMode.BODYWEIGHT -> "Bodyweight"
                             ExerciseLoggingMode.WEIGHTED -> "Weighted"
-                        }
+                            }
+                        ).joinToString(" • ")
                     )
                 }
                 FoundationMutedText("${block.loggedRows.size} sets")
@@ -62,4 +65,10 @@ fun ExerciseBlock(
             }
         }
     }
+}
+
+private fun ExerciseBlockState.groupSummary(): String? {
+    val label = groupLabel ?: return null
+    val rounds = groupRounds ?: return label
+    return "$label x$rounds"
 }

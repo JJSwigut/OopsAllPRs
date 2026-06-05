@@ -1,0 +1,2 @@
+ALTER TABLE routine_exercises ADD COLUMN group_rounds INTEGER;
+ALTER TABLE active_exercises ADD COLUMN group_rounds INTEGER;

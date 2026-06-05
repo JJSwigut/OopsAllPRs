@@ -366,6 +366,9 @@ fun AppShell(
                     onSetDurationChange = { exerciseId, setId, durationMs -> appState.routines.updateEditorSetDuration(exerciseId, setId, durationMs) },
                     onAdjustRest = { exerciseId, delta -> appState.routines.adjustEditorRest(exerciseId, delta) },
                     onToggleRest = { exerciseId -> appState.routines.toggleEditorRest(exerciseId) },
+                    onGroupWithNext = { exerciseId -> appState.routines.groupEditorExerciseWithNext(exerciseId) },
+                    onUngroup = { exerciseId -> appState.routines.ungroupEditorExercise(exerciseId) },
+                    onAdjustGroupRounds = { exerciseId, delta -> appState.routines.adjustEditorGroupRounds(exerciseId, delta) },
                     onSave = {
                         scope.launch {
                             when (appState.routines.saveEditor()) {
