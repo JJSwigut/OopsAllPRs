@@ -20,4 +20,18 @@ class RoutineSeparationTest {
         assertEquals(completed.id, routine.sourceCompletedWorkoutId)
         assertTrue(routine.exercises.single().plannedSets.all { it.targetReps != null })
     }
+
+    @Test
+    fun ungroupedRoutinesRemainLaunchableAfterGroupMetadataExists() = runTest {
+        val harness = FoundationHarness()
+        val workoutId = harness.workoutWithLoggedWeightedSet()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
+
+        val active = harness.lifecycle.startFromRoutine(routine.id, instant(4_000)).successValue()
+
+        assertEquals(listOf(null), routine.exercises.map { it.groupId })
+        assertEquals(listOf(null), active.exercises.map { it.groupContext })
+        assertEquals("Bench Press", active.exercises.single().reference.displayNameSnapshot)
+    }
 }

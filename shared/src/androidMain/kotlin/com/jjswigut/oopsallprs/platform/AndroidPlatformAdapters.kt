@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -20,7 +21,56 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
     actual fun createDriver(): SqlDriver {
         val androidContext = context as? Context
             ?: error("Android database driver requires an android.content.Context")
+        repairRoutineGroupRoundsMigration(androidContext)
         return AndroidSqliteDriver(WorkoutDatabase.Schema, androidContext, "oops_all_prs.db")
+    }
+
+    private fun repairRoutineGroupRoundsMigration(context: Context) {
+        val databaseFile = context.getDatabasePath(DATABASE_NAME)
+        if (!databaseFile.exists()) return
+
+        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
+            val schemaVersion = WorkoutDatabase.Schema.version.toInt()
+            if (database.userVersion() != schemaVersion - 1) return
+
+            val routineColumnPresent = database.hasColumn("routine_exercises", "group_rounds")
+            val activeColumnPresent = database.hasColumn("active_exercises", "group_rounds")
+            if (!routineColumnPresent) {
+                database.execSQL("ALTER TABLE routine_exercises ADD COLUMN group_rounds INTEGER")
+            }
+            if (!activeColumnPresent) {
+                database.execSQL("ALTER TABLE active_exercises ADD COLUMN group_rounds INTEGER")
+            }
+
+            if (
+                database.hasColumn("routine_exercises", "group_rounds") &&
+                database.hasColumn("active_exercises", "group_rounds")
+            ) {
+                database.execSQL("PRAGMA user_version = $schemaVersion")
+            }
+        }
+    }
+
+    private fun SQLiteDatabase.userVersion(): Int {
+        val cursor = rawQuery("PRAGMA user_version", null)
+        return cursor.use {
+            if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+
+    private fun SQLiteDatabase.hasColumn(table: String, column: String): Boolean {
+        val cursor = rawQuery("PRAGMA table_info($table)", null)
+        return cursor.use {
+            val nameColumnIndex = it.getColumnIndex("name")
+            while (it.moveToNext()) {
+                if (it.getString(nameColumnIndex) == column) return@use true
+            }
+            false
+        }
+    }
+
+    private companion object {
+        const val DATABASE_NAME = "oops_all_prs.db"
     }
 }
 

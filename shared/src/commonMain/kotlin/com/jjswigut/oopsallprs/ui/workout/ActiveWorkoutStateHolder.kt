@@ -172,6 +172,12 @@ class ActiveWorkoutStateHolder(
                     )
                 }
                 _state.value = _state.value.copy(isSaving = false, lastLoggedSet = result.value, errorMessage = null)
+                val nextFocus = savedWorkout?.nextCircuitFocusAfter(
+                    exerciseInstanceId = exerciseInstanceId,
+                    loggedPosition = result.value.position,
+                    now = result.value.loggedAt ?: loggedAt
+                )
+                focus = nextFocus ?: focus
                 hydrate(workoutId, focus)
                 result
             }
@@ -647,3 +653,27 @@ private fun ExerciseLoggingMode.defaultSetKind(): SetKind =
         ExerciseLoggingMode.TIMED -> SetKind.TIMED
         ExerciseLoggingMode.WEIGHTED -> SetKind.WEIGHTED
     }
+
+private fun ActiveWorkout.nextCircuitFocusAfter(
+    exerciseInstanceId: FoundationId,
+    loggedPosition: OrderedPosition,
+    now: Instant
+): ActiveWorkoutFocus? {
+    val current = exercises.firstOrNull { it.id == exerciseInstanceId } ?: return null
+    val group = current.groupContext ?: return null
+    val grouped = exercises
+        .filter { it.groupContext?.groupId == group.groupId }
+        .sortedBy { it.position.value }
+    val currentIndex = grouped.indexOfFirst { it.id == exerciseInstanceId }
+    if (currentIndex == -1) return null
+    val nextExercise = when {
+        currentIndex < grouped.lastIndex -> grouped[currentIndex + 1]
+        loggedPosition.value + 1 < group.rounds -> grouped.first()
+        else -> null
+    } ?: return null
+    return ActiveWorkoutFocus(
+        exerciseInstanceId = nextExercise.id,
+        draftId = FoundationId("draft-${nextExercise.id.value}-${nextExercise.sets.size}"),
+        updatedAt = now
+    )
+}

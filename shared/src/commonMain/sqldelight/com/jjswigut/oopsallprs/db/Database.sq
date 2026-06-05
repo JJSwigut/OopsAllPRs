@@ -17,6 +17,10 @@ CREATE TABLE active_exercises (
     is_bodyweight INTEGER NOT NULL,
     position INTEGER NOT NULL,
     logging_mode TEXT NOT NULL DEFAULT 'WEIGHTED',
+    group_id TEXT,
+    group_position INTEGER,
+    group_label TEXT,
+    group_rounds INTEGER,
     rest_seconds INTEGER NOT NULL DEFAULT 120,
     rest_auto_start INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY(active_workout_id) REFERENCES active_workouts(id) ON DELETE CASCADE
@@ -63,6 +67,9 @@ CREATE TABLE routine_exercises (
     exercise_catalog_id TEXT NOT NULL,
     display_name_snapshot TEXT NOT NULL,
     position INTEGER NOT NULL,
+    group_id TEXT,
+    group_position INTEGER,
+    group_rounds INTEGER,
     rest_seconds INTEGER NOT NULL DEFAULT 120,
     rest_auto_start INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE

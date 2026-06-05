@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -50,6 +51,9 @@ fun RoutineEditorFlow(
     onSetDurationChange: (FoundationId, FoundationId, Long?) -> Unit,
     onAdjustRest: (FoundationId, Int) -> Unit,
     onToggleRest: (FoundationId) -> Unit,
+    onGroupWithNext: (FoundationId) -> Unit,
+    onUngroup: (FoundationId) -> Unit,
+    onAdjustGroupRounds: (FoundationId, Int) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
@@ -80,10 +84,15 @@ fun RoutineEditorFlow(
                 }
             }
 
-            items(draft.exercises, key = { it.draftId.value }) { exercise ->
+            itemsIndexed(draft.exercises, key = { _, exercise -> exercise.draftId.value }) { index, exercise ->
                 RoutineExerciseCard(
                     exercise = exercise,
+                    groupLabel = draft.exercises.groupSummaryFor(exercise),
+                    canGroupWithNext = draft.exercises.canGroupWithNext(index),
                     onRemoveExercise = { onRemoveExercise(exercise.draftId) },
+                    onGroupWithNext = { onGroupWithNext(exercise.draftId) },
+                    onUngroup = { onUngroup(exercise.draftId) },
+                    onAdjustGroupRounds = { delta -> onAdjustGroupRounds(exercise.draftId, delta) },
                     onAddSet = { onAddSet(exercise.draftId) },
                     onRemoveSet = { setId -> onRemoveSet(exercise.draftId, setId) },
                     onSetKindChange = { setId, kind -> onSetKindChange(exercise.draftId, setId, kind) },
@@ -134,7 +143,12 @@ fun RoutineEditorFlow(
 @Composable
 private fun RoutineExerciseCard(
     exercise: RoutineExerciseDraft,
+    groupLabel: String?,
+    canGroupWithNext: Boolean,
     onRemoveExercise: () -> Unit,
+    onGroupWithNext: () -> Unit,
+    onUngroup: () -> Unit,
+    onAdjustGroupRounds: (Int) -> Unit,
     onAddSet: () -> Unit,
     onRemoveSet: (FoundationId) -> Unit,
     onSetKindChange: (FoundationId, SetKind) -> Unit,
@@ -153,10 +167,17 @@ private fun RoutineExerciseCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     FoundationText(exercise.displayName, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-                    FoundationMutedText(exerciseKindLabel(exercise.loggingMode))
+                    FoundationMutedText(listOfNotNull(groupLabel, exerciseKindLabel(exercise.loggingMode)).joinToString(" • "))
                 }
                 FoundationTextAction("Remove", onRemoveExercise)
             }
+            RoutineGroupControls(
+                groupLabel = groupLabel,
+                canGroupWithNext = canGroupWithNext,
+                onGroupWithNext = onGroupWithNext,
+                onUngroup = onUngroup,
+                onAdjustGroupRounds = onAdjustGroupRounds
+            )
             RestControls(exercise, onAdjustRest, onToggleRest)
             exercise.plannedSets.forEach { set ->
                 RoutineSetRow(
@@ -175,6 +196,52 @@ private fun RoutineExerciseCard(
                 modifier = Modifier.fillMaxWidth(),
                 style = FitButtonStyle.Secondary
             )
+        }
+    }
+}
+
+@Composable
+private fun RoutineGroupControls(
+    groupLabel: String?,
+    canGroupWithNext: Boolean,
+    onGroupWithNext: () -> Unit,
+    onUngroup: () -> Unit,
+    onAdjustGroupRounds: (Int) -> Unit
+) {
+    if (!canGroupWithNext && groupLabel == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (canGroupWithNext) {
+                FitButton(
+                    text = if (groupLabel == null) "Superset" else "Circuit",
+                    onClick = onGroupWithNext,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            if (groupLabel != null) {
+                FitButton(
+                    text = "Ungroup",
+                    onClick = onUngroup,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+            }
+        }
+        if (groupLabel != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FoundationMutedText(groupLabel, modifier = Modifier.weight(1f))
+                FitButton(text = "- round", onClick = { onAdjustGroupRounds(-1) }, style = FitButtonStyle.Secondary)
+                FitButton(text = "+ round", onClick = { onAdjustGroupRounds(1) }, style = FitButtonStyle.Secondary)
+            }
         }
     }
 }
@@ -326,3 +393,10 @@ private fun formatRest(seconds: Int): String {
 
 private fun Double.trimmedString(): String =
     if (this % 1.0 == 0.0) toInt().toString() else toString()
+
+private fun List<RoutineExerciseDraft>.canGroupWithNext(index: Int): Boolean {
+    if (index !in indices || index == lastIndex) return false
+    val currentGroupId = this[index].groupId
+    val nextGroupId = this[index + 1].groupId
+    return currentGroupId == null || currentGroupId != nextGroupId
+}

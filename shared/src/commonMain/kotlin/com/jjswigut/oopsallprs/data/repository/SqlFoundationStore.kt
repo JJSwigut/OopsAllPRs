@@ -16,6 +16,7 @@ import com.jjswigut.oopsallprs.db.Routines
 import com.jjswigut.oopsallprs.db.SelectLoggedSets
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveExerciseGroupContext
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
@@ -152,6 +153,10 @@ class SqlFoundationStore(
                     is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
+                    group_id = null,
+                    group_position = null,
+                    group_label = null,
+                    group_rounds = null,
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -259,6 +264,11 @@ class SqlFoundationStore(
         set.validateForLogging()?.let { return foundationFailure(it) }
         activeWorkout(workoutId)
             ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $workoutId"))
+        setQueries.deleteUnloggedSetAtPosition(
+            workout_id = workoutId.value,
+            exercise_instance_id = set.exerciseInstanceId.value,
+            position = set.position.value.toLong()
+        )
         setQueries.upsertSet(workoutId, set)
         workoutQueries.updateWorkoutStatus(WorkoutStatus.ACTIVE.name, set.updatedAt.toDbLong(), workoutId.value)
         return foundationSuccess(set)
@@ -317,6 +327,9 @@ class SqlFoundationStore(
                     exercise_catalog_id = exercise.exerciseCatalogId.value,
                     display_name_snapshot = exercise.displayNameSnapshot,
                     position = exercise.position.value.toLong(),
+                    group_id = exercise.groupId?.value,
+                    group_position = exercise.groupPosition?.value?.toLong(),
+                    group_rounds = exercise.groupRounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -622,6 +635,10 @@ class SqlFoundationStore(
                     is_bodyweight = exercise.reference.isBodyweight.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.reference.loggingMode.name,
+                    group_id = exercise.groupContext?.groupId?.value,
+                    group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
+                    group_label = exercise.groupContext?.label,
+                    group_rounds = exercise.groupContext?.rounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -664,12 +681,26 @@ class SqlFoundationStore(
                 equipmentSnapshot = equipment_snapshot ?: exerciseQueries.selectExerciseById(exercise_catalog_id).executeAsOneOrNull()?.equipment
             ),
             position = OrderedPosition(position.toInt()),
+            groupContext = groupContext(),
             sets = sets.sortedBy { it.position.value },
             rest = RestConfiguration(
                 durationSeconds = rest_seconds.toInt(),
                 autoStart = rest_auto_start.toBooleanFlag()
             )
         )
+
+    private fun Active_exercises.groupContext(): ActiveExerciseGroupContext? {
+        val id = group_id ?: return null
+        val position = group_position ?: return null
+        val label = group_label ?: return null
+        val rounds = group_rounds ?: return null
+        return ActiveExerciseGroupContext(
+            groupId = FoundationId(id),
+            groupPosition = OrderedPosition(position.toInt()),
+            label = label,
+            rounds = rounds.toInt()
+        )
+    }
 
     private fun Completed_workouts.toCompletedWorkout(): CompletedWorkout {
         val completedId = FoundationId(id)
@@ -794,6 +825,9 @@ class SqlFoundationStore(
             exerciseCatalogId = FoundationId(exercise_catalog_id),
             displayNameSnapshot = display_name_snapshot,
             position = OrderedPosition(position.toInt()),
+            groupId = group_id?.let(::FoundationId),
+            groupPosition = group_position?.let { OrderedPosition(it.toInt()) },
+            groupRounds = group_rounds?.toInt(),
             plannedSets = routineQueries.selectRoutineSetTemplates(id).executeAsList().map { it.toRoutineSetTemplate() },
             rest = RestConfiguration(
                 durationSeconds = rest_seconds.toInt(),

@@ -400,7 +400,9 @@ class InMemoryFoundationStore :
             if (exercise.id != set.exerciseInstanceId) {
                 exercise
             } else {
-                val nextSets = exercise.sets.filterNot { it.id == set.id } + set
+                val nextSets = exercise.sets.filterNot { existing ->
+                    existing.id == set.id || (!existing.isLogged && existing.position == set.position)
+                } + set
                 exercise.copy(sets = nextSets.sortedBy { it.position.value })
             }
         }

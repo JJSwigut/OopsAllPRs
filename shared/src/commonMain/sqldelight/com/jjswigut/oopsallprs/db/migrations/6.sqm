@@ -1,0 +1,6 @@
+ALTER TABLE routine_exercises ADD COLUMN group_id TEXT;
+ALTER TABLE routine_exercises ADD COLUMN group_position INTEGER;
+
+ALTER TABLE active_exercises ADD COLUMN group_id TEXT;
+ALTER TABLE active_exercises ADD COLUMN group_position INTEGER;
+ALTER TABLE active_exercises ADD COLUMN group_label TEXT;

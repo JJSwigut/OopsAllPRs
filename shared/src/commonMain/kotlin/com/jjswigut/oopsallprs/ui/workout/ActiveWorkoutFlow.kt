@@ -312,7 +312,7 @@ private fun ActiveWorkoutBottomBar(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
             ) {
-                FoundationMutedText("Logging")
+                FoundationMutedText(focusedBlock?.loggingContextLabel() ?: "Logging")
                 FoundationText(
                     text = focusedBlock?.displayName.orEmpty(),
                     style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
@@ -470,4 +470,10 @@ private fun formatRest(milliseconds: Long): String {
     val minutes = totalSeconds / 60L
     val seconds = totalSeconds % 60L
     return "$minutes:${seconds.toString().padStart(2, '0')}"
+}
+
+private fun ExerciseBlockState.loggingContextLabel(): String {
+    val label = groupLabel ?: return "Logging"
+    val rounds = groupRounds ?: return label
+    return "$label · round ${draft.position.value + 1} of $rounds"
 }
