@@ -369,7 +369,7 @@ private fun RoutineExerciseSearch(
                         items = draft.exerciseResults,
                         key = { row -> row.exerciseCatalogId.value }
                     ) { row ->
-                        FitListRow {
+                        FitListRow(onClick = { onAddExercise(row) }) {
                             Column(modifier = Modifier.weight(1f)) {
                                 FoundationText(row.displayName, style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface))
                                 FoundationMutedText(exerciseMetadataLine(row.subtitle, row.loggingMode, " • "))
