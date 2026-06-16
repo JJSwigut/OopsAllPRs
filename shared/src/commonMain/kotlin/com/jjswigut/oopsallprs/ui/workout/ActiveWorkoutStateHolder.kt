@@ -34,6 +34,7 @@ data class ActiveWorkoutState(
     val focusSnapshot: ActiveWorkoutFocus? = null,
     val editDraft: LoggedSetEditDraft? = null,
     val isDiscardConfirmationVisible: Boolean = false,
+    val isFinishConfirmationVisible: Boolean = false,
     val canUndoLastSet: Boolean = false
 )
 
@@ -327,6 +328,7 @@ class ActiveWorkoutStateHolder(
                 )
             ),
             isDiscardConfirmationVisible = false,
+            isFinishConfirmationVisible = false,
             errorMessage = null
         )
     }
@@ -438,11 +440,29 @@ class ActiveWorkoutStateHolder(
     }
 
     fun requestDiscard() {
-        _state.value = _state.value.copy(isDiscardConfirmationVisible = true, editDraft = null, errorMessage = null)
+        _state.value = _state.value.copy(
+            isDiscardConfirmationVisible = true,
+            isFinishConfirmationVisible = false,
+            editDraft = null,
+            errorMessage = null
+        )
     }
 
     fun cancelDiscard() {
         _state.value = _state.value.copy(isDiscardConfirmationVisible = false, errorMessage = null)
+    }
+
+    fun requestFinish() {
+        _state.value = _state.value.copy(
+            isFinishConfirmationVisible = true,
+            isDiscardConfirmationVisible = false,
+            editDraft = null,
+            errorMessage = null
+        )
+    }
+
+    fun cancelFinish() {
+        _state.value = _state.value.copy(isFinishConfirmationVisible = false, errorMessage = null)
     }
 
     suspend fun confirmDiscard(now: Instant = Clock.System.now()): FoundationResult<Unit> {

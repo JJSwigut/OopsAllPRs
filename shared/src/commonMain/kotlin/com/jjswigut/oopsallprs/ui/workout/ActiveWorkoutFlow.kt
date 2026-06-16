@@ -47,6 +47,9 @@ fun ActiveWorkoutFlow(
     onRequestDiscard: () -> Unit,
     onCancelDiscard: () -> Unit,
     onConfirmDiscard: () -> Unit,
+    onRequestFinish: () -> Unit,
+    onCancelFinish: () -> Unit,
+    onConfirmFinish: (FoundationId) -> Unit,
     onRestTick: () -> Unit,
     onTimedTick: () -> Unit,
     onAdjustActiveRest: (Int) -> Unit,
@@ -54,7 +57,6 @@ fun ActiveWorkoutFlow(
     onAdjustExerciseRest: (FoundationId, Int) -> Unit,
     onToggleExerciseRest: (FoundationId) -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
-    onFinishWorkout: (FoundationId) -> Unit,
     onDismiss: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
     weightStepAmount: Double = weightStep(weightUnit),
@@ -144,12 +146,14 @@ fun ActiveWorkoutFlow(
                 onRequestDiscard = onRequestDiscard,
                 onCancelDiscard = onCancelDiscard,
                 onConfirmDiscard = onConfirmDiscard,
+                onRequestFinish = onRequestFinish,
+                onCancelFinish = onCancelFinish,
+                onConfirmFinish = onConfirmFinish,
                 onAdjustActiveRest = onAdjustActiveRest,
                 onSkipActiveRest = onSkipActiveRest,
                 onAdjustExerciseRest = onAdjustExerciseRest,
                 onToggleExerciseRest = onToggleExerciseRest,
                 onFocusExercise = onFocusExercise,
-                onFinishWorkout = onFinishWorkout,
                 weightUnit = weightUnit,
                 weightStepAmount = displayWeightStep,
                 modifier = Modifier.fillMaxWidth()
@@ -177,12 +181,14 @@ private fun ActiveWorkoutBottomBar(
     onRequestDiscard: () -> Unit,
     onCancelDiscard: () -> Unit,
     onConfirmDiscard: () -> Unit,
+    onRequestFinish: () -> Unit,
+    onCancelFinish: () -> Unit,
+    onConfirmFinish: (FoundationId) -> Unit,
     onAdjustActiveRest: (Int) -> Unit,
     onSkipActiveRest: () -> Unit,
     onAdjustExerciseRest: (FoundationId, Int) -> Unit,
     onToggleExerciseRest: (FoundationId) -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
-    onFinishWorkout: (FoundationId) -> Unit,
     weightUnit: WeightUnit,
     weightStepAmount: Double,
     modifier: Modifier = Modifier
@@ -249,6 +255,30 @@ private fun ActiveWorkoutBottomBar(
                 return@Column
             }
 
+            if (state.isFinishConfirmationVisible) {
+                FoundationText("Finish workout?", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                FoundationMutedText("This saves the workout to History and closes the active session.")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FitButton(
+                        text = "Cancel",
+                        onClick = onCancelFinish,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Finish",
+                        onClick = { onConfirmFinish(workout.workoutId) },
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Primary
+                    )
+                }
+                return@Column
+            }
+
             state.editDraft?.let { edit ->
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -294,7 +324,7 @@ private fun ActiveWorkoutBottomBar(
                     )
                     FitButton(
                         text = "Finish",
-                        onClick = { onFinishWorkout(workout.workoutId) },
+                        onClick = onRequestFinish,
                         modifier = Modifier.weight(1f),
                         style = FitButtonStyle.Secondary
                     )
@@ -391,7 +421,7 @@ private fun ActiveWorkoutBottomBar(
                 )
                 FitButton(
                     text = "Finish",
-                    onClick = { onFinishWorkout(workout.workoutId) },
+                    onClick = onRequestFinish,
                     modifier = Modifier.weight(1f),
                     style = FitButtonStyle.Primary
                 )
