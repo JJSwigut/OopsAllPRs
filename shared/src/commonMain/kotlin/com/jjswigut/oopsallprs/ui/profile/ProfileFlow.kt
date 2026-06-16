@@ -23,6 +23,8 @@ import com.jjswigut.oopsallprs.ds.component.FitRoller
 import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
 import com.jjswigut.oopsallprs.ds.component.FitToggle
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.common.RestDurationRoller
+import com.jjswigut.oopsallprs.ui.common.formatRestDurationSeconds
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.navigation.PaletteMode
@@ -235,15 +237,13 @@ private fun RestPreferencesCard(
     onDefaultRestSelected: (Int) -> Unit,
     onRestSoundChanged: (Boolean) -> Unit
 ) {
-    val options = listOf(60, 120, 180, 300)
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             SectionLabel("Rest")
-            FitSegmentedControl(
-                options = listOf("1m", "2m", "3m", "5m"),
-                selectedIndex = options.indexOf(state.defaultRestSeconds).takeIf { it >= 0 } ?: 1,
-                onSelect = { index -> onDefaultRestSelected(options[index]) },
-                modifier = Modifier.fillMaxWidth()
+            FoundationMutedText("Default ${formatRestDurationSeconds(state.defaultRestSeconds)}")
+            RestDurationRoller(
+                seconds = state.defaultRestSeconds,
+                onSecondsChange = onDefaultRestSelected
             )
             ToggleRow(
                 label = "Rest sound",
@@ -251,7 +251,7 @@ private fun RestPreferencesCard(
                 checked = state.restSoundEnabled,
                 onCheckedChange = onRestSoundChanged
             )
-            FoundationMutedText("New exercises use ${state.defaultRestSeconds / 60}m rest.")
+            FoundationMutedText("New exercises use ${formatRestDurationSeconds(state.defaultRestSeconds)} rest.")
         }
     }
 }
