@@ -22,6 +22,8 @@ import com.jjswigut.oopsallprs.ds.component.FitButton
 import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
 import com.jjswigut.oopsallprs.ds.component.FitCard
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.common.RestDurationRoller
+import com.jjswigut.oopsallprs.ui.common.formatRestDurationSeconds
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
@@ -321,8 +323,9 @@ private fun ActiveWorkoutBottomBar(
             focusedBlock?.let { block ->
                 ExerciseRestControls(
                     block = block,
-                    onDecrease = { onAdjustExerciseRest(block.exerciseInstanceId, -30) },
-                    onIncrease = { onAdjustExerciseRest(block.exerciseInstanceId, 30) },
+                    onSetRest = { selectedSeconds ->
+                        onAdjustExerciseRest(block.exerciseInstanceId, selectedSeconds - block.rest.durationSeconds)
+                    },
                     onToggle = { onToggleExerciseRest(block.exerciseInstanceId) }
                 )
                 SetRow(
@@ -436,25 +439,32 @@ private fun RestTimerPanel(
 @Composable
 private fun ExerciseRestControls(
     block: ExerciseBlockState,
-    onDecrease: () -> Unit,
-    onIncrease: () -> Unit,
+    onSetRest: (Int) -> Unit,
     onToggle: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             FoundationMutedText("Auto rest")
             FoundationText(
-                text = if (block.rest.isEnabled) formatRest(block.rest.durationSeconds * 1_000L) else "Off",
+                text = if (block.rest.isEnabled) formatRestDurationSeconds(block.rest.durationSeconds) else "Off",
+                modifier = Modifier.weight(1f),
                 style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
             )
+            FoundationTextAction(if (block.rest.isEnabled) "Off" else "On", onToggle)
         }
-        FitButton(text = "-30", onClick = onDecrease, style = FitButtonStyle.Secondary)
-        FitButton(text = "+30", onClick = onIncrease, style = FitButtonStyle.Secondary)
-        FoundationTextAction(if (block.rest.isEnabled) "Off" else "On", onToggle)
+        if (block.rest.isEnabled) {
+            RestDurationRoller(
+                seconds = block.rest.durationSeconds,
+                onSecondsChange = onSetRest
+            )
+        }
     }
 }
 
