@@ -12,12 +12,17 @@ import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val databaseDriverFactory = PlatformDatabaseDriverFactory(this)
+        val fileExportHandoff = FileExportHandoff(this)
+        val backupDocumentHandoff = BackupDocumentHandoff(this)
+        val restNotificationScheduler = RestNotificationScheduler(this)
+
         setContent {
             App(
-                databaseDriverFactory = PlatformDatabaseDriverFactory(this),
-                fileExportHandoff = FileExportHandoff(this),
-                backupDocumentHandoff = BackupDocumentHandoff(this),
-                restNotificationScheduler = RestNotificationScheduler(this),
+                databaseDriverFactory = databaseDriverFactory,
+                fileExportHandoff = fileExportHandoff,
+                backupDocumentHandoff = backupDocumentHandoff,
+                restNotificationScheduler = restNotificationScheduler,
                 developerToolsEnabled = BuildConfig.DEBUG
             )
         }

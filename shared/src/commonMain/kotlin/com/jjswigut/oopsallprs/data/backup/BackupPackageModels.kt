@@ -96,6 +96,10 @@ data class ActiveExerciseDto(
     val isBodyweight: Boolean,
     val loggingMode: String,
     val position: Int,
+    val groupId: String? = null,
+    val groupPosition: Int? = null,
+    val groupLabel: String? = null,
+    val groupRounds: Int? = null,
     val sets: List<ExerciseSetDto>,
     val rest: RestConfigurationDto
 )
@@ -166,6 +170,9 @@ data class RoutineExerciseDto(
     val exerciseCatalogId: String,
     val displayNameSnapshot: String,
     val position: Int,
+    val groupId: String? = null,
+    val groupPosition: Int? = null,
+    val groupRounds: Int? = null,
     val plannedSets: List<RoutineSetTemplateDto>,
     val rest: RestConfigurationDto
 )

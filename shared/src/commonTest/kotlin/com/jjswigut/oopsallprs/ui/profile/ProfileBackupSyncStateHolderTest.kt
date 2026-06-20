@@ -16,6 +16,26 @@ import kotlin.test.assertTrue
 
 class ProfileBackupSyncStateHolderTest {
     @Test
+    fun backupSetupFlowAdvancesBacksUpAndDismisses() {
+        val holder = ProfileStateHolder()
+
+        holder.startBackupSetup()
+        assertEquals(BackupSetupStep.INTRO, holder.state.value.backupSetupStep)
+
+        holder.advanceBackupSetup()
+        assertEquals(BackupSetupStep.LOCATION, holder.state.value.backupSetupStep)
+
+        holder.advanceBackupSetup()
+        assertEquals(BackupSetupStep.READY, holder.state.value.backupSetupStep)
+
+        holder.backUpBackupSetup()
+        assertEquals(BackupSetupStep.LOCATION, holder.state.value.backupSetupStep)
+
+        holder.dismissBackupSetup()
+        assertNull(holder.state.value.backupSetupStep)
+    }
+
+    @Test
     fun linkBackupFileUpdatesProfileBackupStatus() = runTest {
         val pkg = packageWithRevision("local-1")
         val documents = FakeDocumentAdapter(BackupPackageCodec().encode(pkg).successValue())
@@ -27,8 +47,26 @@ class ProfileBackupSyncStateHolderTest {
 
         assertFalse(holder.state.value.isBackupBusy)
         assertTrue(holder.state.value.backupStatus.canBackup)
+        assertTrue(holder.state.value.backupStatus.isLinked)
         assertEquals("Backup updated", holder.state.value.backupStatus.lastOutcomeLabel)
         assertNull(holder.state.value.backupError)
+    }
+
+    @Test
+    fun linkBackupFileClosesSetupFlow() = runTest {
+        val pkg = packageWithRevision("local-1")
+        val documents = FakeDocumentAdapter(BackupPackageCodec().encode(pkg).successValue())
+        val holder = ProfileStateHolder(
+            backupSync = BackupSyncCoordinator(FakeBackupRepository(pkg), FakeSyncRepository(), documents)
+        )
+
+        holder.startBackupSetup()
+        holder.advanceBackupSetup()
+        holder.advanceBackupSetup()
+        holder.linkBackupFile().successValue()
+
+        assertNull(holder.state.value.backupSetupStep)
+        assertTrue(holder.state.value.backupStatus.isLinked)
     }
 
     @Test

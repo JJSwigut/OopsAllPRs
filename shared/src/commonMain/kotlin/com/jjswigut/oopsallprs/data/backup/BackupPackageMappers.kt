@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.data.backup
 
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveExerciseGroupContext
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
@@ -145,6 +146,10 @@ internal fun ActiveExercise.toDto(): ActiveExerciseDto =
         isBodyweight = reference.isBodyweight,
         loggingMode = reference.loggingMode.name,
         position = position.value,
+        groupId = groupContext?.groupId?.value,
+        groupPosition = groupContext?.groupPosition?.value,
+        groupLabel = groupContext?.label,
+        groupRounds = groupContext?.rounds,
         sets = sets.map { it.toDto() },
         rest = rest.toDto()
     )
@@ -161,6 +166,16 @@ internal fun ActiveExerciseDto.toDomain(): ActiveExercise =
             equipmentSnapshot = equipmentSnapshot
         ),
         position = OrderedPosition(position),
+        groupContext = if (groupId != null && groupPosition != null && groupLabel != null && groupRounds != null) {
+            ActiveExerciseGroupContext(
+                groupId = FoundationId(groupId),
+                groupPosition = OrderedPosition(groupPosition),
+                label = groupLabel,
+                rounds = groupRounds
+            )
+        } else {
+            null
+        },
         sets = sets.map { it.toDomain() },
         rest = rest.toDomain()
     )
@@ -284,6 +299,9 @@ internal fun RoutineExercise.toDto(): RoutineExerciseDto =
         exerciseCatalogId = exerciseCatalogId.value,
         displayNameSnapshot = displayNameSnapshot,
         position = position.value,
+        groupId = groupId?.value,
+        groupPosition = groupPosition?.value,
+        groupRounds = groupRounds,
         plannedSets = plannedSets.map { it.toDto() },
         rest = rest.toDto()
     )
@@ -295,6 +313,9 @@ internal fun RoutineExerciseDto.toDomain(): RoutineExercise =
         exerciseCatalogId = FoundationId(exerciseCatalogId),
         displayNameSnapshot = displayNameSnapshot,
         position = OrderedPosition(position),
+        groupId = groupId?.let(::FoundationId),
+        groupPosition = groupPosition?.let(::OrderedPosition),
+        groupRounds = groupRounds,
         plannedSets = plannedSets.map { it.toDomain() },
         rest = rest.toDomain()
     )

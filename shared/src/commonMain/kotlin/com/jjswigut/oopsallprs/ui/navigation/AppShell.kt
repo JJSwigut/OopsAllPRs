@@ -620,6 +620,10 @@ private fun DestinationContent(
             onExportRequested = { type ->
                 scope.launch { appState.profile.export(type) }
             },
+            onStartBackupSetup = { appState.profile.startBackupSetup() },
+            onBackupSetupNext = { appState.profile.advanceBackupSetup() },
+            onBackupSetupBack = { appState.profile.backUpBackupSetup() },
+            onBackupSetupDismiss = { appState.profile.dismissBackupSetup() },
             onLinkBackupFile = { scope.launch { appState.profile.linkBackupFile() } },
             onBackupNow = { scope.launch { appState.profile.backupNow() } },
             onSyncNow = { scope.launch { appState.profile.syncNow() } },

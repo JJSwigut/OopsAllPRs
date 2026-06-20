@@ -33,6 +33,7 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
         val androidContext = context as? Context
             ?: error("Android database driver requires an android.content.Context")
         repairRoutineGroupRoundsMigration(androidContext)
+        repairBackupSyncStateMigration(androidContext)
         return AndroidSqliteDriver(WorkoutDatabase.Schema, androidContext, "oops_all_prs.db")
     }
 
@@ -41,8 +42,7 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
         if (!databaseFile.exists()) return
 
         SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
-            val schemaVersion = WorkoutDatabase.Schema.version.toInt()
-            if (database.userVersion() != schemaVersion - 1) return
+            if (database.userVersion() != GROUP_ROUNDS_SCHEMA_VERSION - 1) return
 
             val routineColumnPresent = database.hasColumn("routine_exercises", "group_rounds")
             val activeColumnPresent = database.hasColumn("active_exercises", "group_rounds")
@@ -57,8 +57,38 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
                 database.hasColumn("routine_exercises", "group_rounds") &&
                 database.hasColumn("active_exercises", "group_rounds")
             ) {
-                database.execSQL("PRAGMA user_version = $schemaVersion")
+                database.execSQL("PRAGMA user_version = $GROUP_ROUNDS_SCHEMA_VERSION")
             }
+        }
+    }
+
+    private fun repairBackupSyncStateMigration(context: Context) {
+        val databaseFile = context.getDatabasePath(DATABASE_NAME)
+        if (!databaseFile.exists()) return
+
+        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
+            if (database.userVersion() < BACKUP_SYNC_SCHEMA_VERSION) return
+            if (database.hasTable("sync_state")) return
+
+            database.execSQL(
+                """
+                CREATE TABLE sync_state (
+                    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+                    linked_backup_display_name TEXT,
+                    provider_reference TEXT,
+                    provider_reference_kind TEXT,
+                    last_backup_revision TEXT,
+                    last_backup_timestamp INTEGER,
+                    last_local_revision TEXT,
+                    last_local_timestamp INTEGER,
+                    last_outcome TEXT NOT NULL,
+                    last_error TEXT,
+                    last_conflict_summary TEXT,
+                    updated_at INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            database.execSQL("PRAGMA user_version = $BACKUP_SYNC_SCHEMA_VERSION")
         }
     }
 
@@ -80,8 +110,18 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
         }
     }
 
+    private fun SQLiteDatabase.hasTable(table: String): Boolean {
+        val cursor = rawQuery(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            arrayOf(table)
+        )
+        return cursor.use { it.moveToFirst() }
+    }
+
     private companion object {
         const val DATABASE_NAME = "oops_all_prs.db"
+        const val GROUP_ROUNDS_SCHEMA_VERSION = 7
+        const val BACKUP_SYNC_SCHEMA_VERSION = 8
     }
 }
 

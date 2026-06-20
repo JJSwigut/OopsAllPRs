@@ -48,8 +48,15 @@ data class ProfileBackupStatus(
     val privacyLabel: String = "Plain JSON backup is readable by anyone with access to the file.",
     val canBackup: Boolean = false,
     val canSync: Boolean = false,
-    val hasConflict: Boolean = false
+    val hasConflict: Boolean = false,
+    val isLinked: Boolean = false
 )
+
+enum class BackupSetupStep {
+    INTRO,
+    LOCATION,
+    READY
+}
 
 data class ProfileState(
     val weightUnit: WeightUnit = WeightUnit.POUNDS,
@@ -72,7 +79,8 @@ data class ProfileState(
     val backupError: String? = null,
     val lastRestoreMessage: String? = null,
     val restoreWarning: String? = null,
-    val safetyBackupMessage: String? = null
+    val safetyBackupMessage: String? = null,
+    val backupSetupStep: BackupSetupStep? = null
 )
 
 class ProfileStateHolder(
@@ -224,8 +232,41 @@ class ProfileStateHolder(
         }
     }
 
+    fun startBackupSetup() {
+        _state.value = _state.value.copy(
+            backupSetupStep = BackupSetupStep.INTRO,
+            backupError = null
+        )
+    }
+
+    fun advanceBackupSetup() {
+        _state.value = _state.value.copy(
+            backupSetupStep = when (_state.value.backupSetupStep) {
+                BackupSetupStep.INTRO -> BackupSetupStep.LOCATION
+                BackupSetupStep.LOCATION -> BackupSetupStep.READY
+                BackupSetupStep.READY -> BackupSetupStep.READY
+                null -> BackupSetupStep.INTRO
+            }
+        )
+    }
+
+    fun backUpBackupSetup() {
+        _state.value = _state.value.copy(
+            backupSetupStep = when (_state.value.backupSetupStep) {
+                BackupSetupStep.READY -> BackupSetupStep.LOCATION
+                BackupSetupStep.LOCATION -> BackupSetupStep.INTRO
+                BackupSetupStep.INTRO,
+                null -> null
+            }
+        )
+    }
+
+    fun dismissBackupSetup() {
+        _state.value = _state.value.copy(backupSetupStep = null)
+    }
+
     suspend fun linkBackupFile(): FoundationResult<BackupSyncState> =
-        backupOperation { it.linkNewBackup() }
+        backupOperation(closeSetup = true) { it.linkNewBackup() }
 
     suspend fun backupNow(): FoundationResult<BackupSyncState> =
         backupOperation { it.backupNow() }
@@ -329,6 +370,7 @@ class ProfileStateHolder(
     }
 
     private suspend fun backupOperation(
+        closeSetup: Boolean = false,
         block: suspend (BackupSyncCoordinator) -> FoundationResult<BackupSyncState>
     ): FoundationResult<BackupSyncState> {
         val coordinator = backupSync
@@ -338,7 +380,8 @@ class ProfileStateHolder(
             backupError = null,
             lastRestoreMessage = null,
             restoreWarning = null,
-            safetyBackupMessage = null
+            safetyBackupMessage = null,
+            backupSetupStep = if (closeSetup) null else _state.value.backupSetupStep
         )
         return try {
             when (val result = block(coordinator)) {
@@ -386,7 +429,8 @@ class ProfileStateHolder(
             conflictSummary = lastConflictSummary,
             canBackup = linked != null && !isTerminalUnavailable(),
             canSync = linked != null && !isTerminalUnavailable(),
-            hasConflict = lastOutcome == BackupSyncOutcome.CONFLICT || lastOutcome == BackupSyncOutcome.BACKUP_CHANGED
+            hasConflict = lastOutcome == BackupSyncOutcome.CONFLICT || lastOutcome == BackupSyncOutcome.BACKUP_CHANGED,
+            isLinked = linked != null
         )
     }
 

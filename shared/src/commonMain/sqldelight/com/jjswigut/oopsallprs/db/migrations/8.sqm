@@ -1,4 +1,4 @@
-CREATE TABLE sync_state (
+CREATE TABLE IF NOT EXISTS sync_state (
     singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
     linked_backup_display_name TEXT,
     provider_reference TEXT,

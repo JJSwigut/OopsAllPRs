@@ -186,9 +186,9 @@ class SqlBackupRepository(
                     exercise_catalog_id = exercise.exerciseCatalogId,
                     display_name_snapshot = exercise.displayNameSnapshot,
                     position = exercise.position.toLong(),
-                    group_id = null,
-                    group_position = null,
-                    group_rounds = null,
+                    group_id = exercise.groupId,
+                    group_position = exercise.groupPosition?.toLong(),
+                    group_rounds = exercise.groupRounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = if (exercise.rest.autoStart) 1L else 0L
                 )
@@ -211,7 +211,21 @@ class SqlBackupRepository(
         val active = pkg.activeWorkout ?: return
         insertActiveWorkoutRow(active.id, active.startedAt, active.routineId, active.routineSnapshotName, active.status, active.createdAt, active.updatedAt)
         active.exercises.forEach { exercise ->
-            insertActiveExerciseRow(active.id, exercise.id, exercise.exerciseCatalogId, exercise.displayNameSnapshot, exercise.equipmentSnapshot, exercise.isBodyweight, exercise.loggingMode, exercise.position, exercise.rest)
+            insertActiveExerciseRow(
+                active.id,
+                exercise.id,
+                exercise.exerciseCatalogId,
+                exercise.displayNameSnapshot,
+                exercise.equipmentSnapshot,
+                exercise.isBodyweight,
+                exercise.loggingMode,
+                exercise.position,
+                exercise.groupId,
+                exercise.groupPosition,
+                exercise.groupLabel,
+                exercise.groupRounds,
+                exercise.rest
+            )
             exercise.sets.forEach { set -> insertSetRow(active.id, set) }
         }
     }
@@ -246,6 +260,10 @@ class SqlBackupRepository(
                     isBodyweight = exercise.loggedSets.any { it.setKind != "WEIGHTED" },
                     loggingMode = exercise.loggedSets.firstOrNull()?.setKind ?: "WEIGHTED",
                     position = exercise.position,
+                    groupId = null,
+                    groupPosition = null,
+                    groupLabel = null,
+                    groupRounds = null,
                     rest = exercise.rest
                 )
                 exercise.loggedSets.forEach { set -> insertSetRow(workout.sourceActiveWorkoutId, set) }
@@ -364,6 +382,10 @@ class SqlBackupRepository(
         isBodyweight: Boolean,
         loggingMode: String,
         position: Int,
+        groupId: String?,
+        groupPosition: Int?,
+        groupLabel: String?,
+        groupRounds: Int?,
         rest: com.jjswigut.oopsallprs.data.backup.RestConfigurationDto
     ) {
         setQueries.insertActiveExercise(
@@ -375,10 +397,10 @@ class SqlBackupRepository(
             is_bodyweight = if (isBodyweight) 1L else 0L,
             position = position.toLong(),
             logging_mode = if (loggingMode == "TIMED") "TIMED" else if (isBodyweight) "BODYWEIGHT" else "WEIGHTED",
-            group_id = null,
-            group_position = null,
-            group_label = null,
-            group_rounds = null,
+            group_id = groupId,
+            group_position = groupPosition?.toLong(),
+            group_label = groupLabel,
+            group_rounds = groupRounds?.toLong(),
             rest_seconds = rest.durationSeconds.toLong(),
             rest_auto_start = if (rest.autoStart) 1L else 0L
         )
