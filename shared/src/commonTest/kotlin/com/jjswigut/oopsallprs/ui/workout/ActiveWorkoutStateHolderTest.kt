@@ -101,7 +101,7 @@ class ActiveWorkoutStateHolderTest {
     }
 
     @Test
-    fun canCreateSupersetOnTheFlyFromActiveWorkout() = runTest {
+    fun canCreateCircuitOnTheFlyFromActiveWorkout() = runTest {
         val harness = FoundationHarness()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
         val first = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
@@ -112,7 +112,7 @@ class ActiveWorkoutStateHolderTest {
         holder.groupExercisesAsCircuit(listOf(first.id, second.id)).successValue()
 
         val grouped = holder.state.value.workout!!.exerciseBlocks
-        assertEquals(listOf("Superset", "Superset"), grouped.map { it.groupLabel })
+        assertEquals(listOf("Circuit", "Circuit"), grouped.map { it.groupLabel })
         assertEquals(listOf(3, 3), grouped.map { it.groupRounds })
 
         holder.confirmDraft(first.id).successValue()

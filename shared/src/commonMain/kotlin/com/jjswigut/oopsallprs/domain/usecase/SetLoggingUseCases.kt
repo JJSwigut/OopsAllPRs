@@ -90,7 +90,6 @@ class SetLoggingUseCases(
         val groupRounds = positions
             .mapNotNull { workout.exercises[it].groupContext?.rounds }
             .firstOrNull() ?: DEFAULT_CIRCUIT_ROUNDS
-        val groupLabel = if (positions.size == 2) SUPERSET_LABEL else CIRCUIT_LABEL
         val selected = exerciseInstanceIds.toSet()
         val updated = workout.copy(
             exercises = workout.exercises.map { exercise ->
@@ -99,7 +98,7 @@ class SetLoggingUseCases(
                         groupContext = ActiveExerciseGroupContext(
                             groupId = groupId,
                             groupPosition = groupPosition,
-                            label = groupLabel,
+                            label = CIRCUIT_LABEL,
                             rounds = groupRounds
                         )
                     )
@@ -238,7 +237,6 @@ class SetLoggingUseCases(
             .firstOrNull { it.id == setId && it.isLogged }
 
     private companion object {
-        const val SUPERSET_LABEL = "Superset"
         const val CIRCUIT_LABEL = "Circuit"
         const val DEFAULT_CIRCUIT_ROUNDS = 3
     }
