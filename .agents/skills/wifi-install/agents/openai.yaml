@@ -1,0 +1,6 @@
+interface:
+  display_name: "Wi-Fi Install"
+  short_description: "Deploy Oops All PRs to Pixel over Wi-Fi"
+  default_prompt: "Use $wifi-install to connect to my Pixel over Wi-Fi and deploy the debug app."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,19 @@
+#!/bin/sh
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+if [ "$branch" = "main" ] && [ "${ALLOW_MAIN_COMMIT:-}" != "1" ]; then
+  cat >&2 <<'EOF'
+Direct commits to main are blocked by repo convention.
+
+Use development for active work:
+  git switch development
+
+For an intentional release metadata commit or urgent hotfix on main, rerun with:
+  ALLOW_MAIN_COMMIT=1 git commit
+
+EOF
+  exit 1
+fi
+
+exit 0
