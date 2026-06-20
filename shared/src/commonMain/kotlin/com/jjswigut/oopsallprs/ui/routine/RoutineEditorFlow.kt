@@ -30,6 +30,8 @@ import com.jjswigut.oopsallprs.ds.component.FitListRow
 import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
 import com.jjswigut.oopsallprs.ds.component.FitTextField
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.common.RestDurationRoller
+import com.jjswigut.oopsallprs.ui.common.formatRestDurationSeconds
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
@@ -187,7 +189,11 @@ private fun RoutineExerciseCard(
                 }
                 FoundationTextAction("Remove", onRemoveExercise)
             }
-            RestControls(exercise, onAdjustRest, onToggleRest)
+            RestControls(
+                exercise = exercise,
+                onSetRest = { selectedSeconds -> onAdjustRest(selectedSeconds - exercise.rest.durationSeconds) },
+                onToggleRest = onToggleRest
+            )
             exercise.plannedSets.forEach { set ->
                 RoutineSetRow(
                     exercise = exercise,
@@ -331,24 +337,32 @@ private fun List<RoutineExerciseDraft>.isAdjacentSelection(selectedIds: Set<Foun
 @Composable
 private fun RestControls(
     exercise: RoutineExerciseDraft,
-    onAdjustRest: (Int) -> Unit,
+    onSetRest: (Int) -> Unit,
     onToggleRest: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             FoundationMutedText("Rest")
             FoundationText(
-                text = if (exercise.rest.isEnabled) formatRest(exercise.rest.durationSeconds) else "Off",
+                text = if (exercise.rest.isEnabled) formatRestDurationSeconds(exercise.rest.durationSeconds) else "Off",
+                modifier = Modifier.weight(1f),
                 style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface)
             )
+            FoundationTextAction(if (exercise.rest.isEnabled) "Off" else "On", onToggleRest)
         }
-        FitButton(text = "-30", onClick = { onAdjustRest(-30) }, style = FitButtonStyle.Secondary)
-        FitButton(text = "+30", onClick = { onAdjustRest(30) }, style = FitButtonStyle.Secondary)
-        FoundationTextAction(if (exercise.rest.isEnabled) "Off" else "On", onToggleRest)
+        if (exercise.rest.isEnabled) {
+            RestDurationRoller(
+                seconds = exercise.rest.durationSeconds,
+                onSecondsChange = onSetRest
+            )
+        }
     }
 }
 
@@ -451,7 +465,7 @@ private fun RoutineExerciseSearch(
                         items = draft.exerciseResults,
                         key = { row -> row.exerciseCatalogId.value }
                     ) { row ->
-                        FitListRow {
+                        FitListRow(onClick = { onAddExercise(row) }) {
                             Column(modifier = Modifier.weight(1f)) {
                                 FoundationText(row.displayName, style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface))
                                 FoundationMutedText(exerciseMetadataLine(row.subtitle, row.loggingMode, " • "))
@@ -465,12 +479,6 @@ private fun RoutineExerciseSearch(
             }
         }
     }
-}
-
-private fun formatRest(seconds: Int): String {
-    val minutes = seconds / 60
-    val remainder = seconds % 60
-    return if (remainder == 0) "${minutes}m" else "$minutes:${remainder.toString().padStart(2, '0')}"
 }
 
 private fun Double.trimmedString(): String =

@@ -272,6 +272,21 @@ fun AppShell(
                             }
                         }
                     },
+                    onRequestFinish = { appState.activeWorkout.requestFinish() },
+                    onCancelFinish = { appState.activeWorkout.cancelFinish() },
+                    onConfirmFinish = { workoutId ->
+                        scope.launch {
+                            when (val result = appState.routines.finishWorkout(workoutId)) {
+                                is FoundationResult.Failure -> Unit
+                                is FoundationResult.Success -> {
+                                    appState.hydrate()
+                                    appState.history.presentCompletedWorkout(result.value.id)
+                                    appState.progress.refresh()
+                                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
+                                }
+                            }
+                        }
+                    },
                     onRestTick = {
                         scope.launch {
                             appState.activeWorkout.refreshTimers()
@@ -310,19 +325,6 @@ fun AppShell(
                     },
                     onFocusExercise = { exerciseId ->
                         scope.launch { appState.activeWorkout.setFocus(exerciseId) }
-                    },
-                    onFinishWorkout = { workoutId ->
-                        scope.launch {
-                            when (val result = appState.routines.finishWorkout(workoutId)) {
-                                is FoundationResult.Failure -> Unit
-                                is FoundationResult.Success -> {
-                                    appState.hydrate()
-                                    appState.history.presentCompletedWorkout(result.value.id)
-                                    appState.progress.refresh()
-                                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
-                                }
-                            }
-                        }
                     },
                     onDismiss = { scope.launch { appState.navigation.dismissActiveWorkout() } },
                     weightUnit = profileState.weightUnit,
