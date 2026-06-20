@@ -85,9 +85,6 @@ fun HistoryFlow(
                             FoundationText(row.title, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
                             FoundationMutedText("${row.durationLabel} • ${row.exerciseCount} exercises • ${row.setCount} sets")
                         }
-                        if (row.hasPr) {
-                            FoundationText("PR", style = FitTheme.type.label.copy(color = FitTheme.colors.accent))
-                        }
                     }
                 }
             }
