@@ -19,8 +19,17 @@ The Google Play service account needs Play Console access for:
 
 - `View app information and download bulk reports (read-only)`
 - `Release apps to testing tracks`
+- `Manage store presence` for listing image and screenshot uploads
 
 The Play Console app must exist before the first Fastlane upload. Use package name `com.jjswigut.oopsallprs.android`.
+
+Upload only the Google Play listing artwork:
+
+```sh
+bundle exec fastlane android listing
+```
+
+Set `ANDROID_PLAY_VALIDATE_ONLY=true` to validate the Play edit without publishing it.
 
 ## iOS
 
@@ -36,6 +45,14 @@ The iOS TestFlight job is intentionally skipped until all Apple secrets are pres
 - `KEYCHAIN_PASSWORD`
 
 The App Store Connect app and Apple Developer bundle ID must use `com.jjswigut.oopsallprs.ios`.
+
+Upload only the App Store screenshots:
+
+```sh
+bundle exec fastlane ios listing
+```
+
+This lane uses only the App Store Connect API secrets above; it does not need the distribution certificate or provisioning profile because it does not upload a build. Set `IOS_APP_VERSION` if Fastlane should target a specific editable App Store version.
 
 To create the remaining iOS secrets:
 
