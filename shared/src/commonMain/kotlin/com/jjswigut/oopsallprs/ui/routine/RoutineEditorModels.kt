@@ -153,8 +153,7 @@ private fun List<RoutineSetTemplate>.loggingMode(): ExerciseLoggingMode =
 
 fun routineGroupLabel(size: Int): String? =
     when {
-        size == 2 -> "Superset"
-        size >= 3 -> "Circuit"
+        size >= 2 -> "Circuit"
         else -> null
     }
 

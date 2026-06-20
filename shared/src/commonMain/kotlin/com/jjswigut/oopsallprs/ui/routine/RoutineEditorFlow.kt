@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -22,6 +25,7 @@ import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.ds.component.FitButton
 import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
 import com.jjswigut.oopsallprs.ds.component.FitCard
+import com.jjswigut.oopsallprs.ds.component.FitDialog
 import com.jjswigut.oopsallprs.ds.component.FitListRow
 import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
 import com.jjswigut.oopsallprs.ds.component.FitTextField
@@ -51,13 +55,15 @@ fun RoutineEditorFlow(
     onSetDurationChange: (FoundationId, FoundationId, Long?) -> Unit,
     onAdjustRest: (FoundationId, Int) -> Unit,
     onToggleRest: (FoundationId) -> Unit,
-    onGroupWithNext: (FoundationId) -> Unit,
+    onGroupSelected: (List<FoundationId>) -> Unit,
     onUngroup: (FoundationId) -> Unit,
     onAdjustGroupRounds: (FoundationId, Int) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isOrganizerOpen by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
@@ -69,10 +75,18 @@ fun RoutineEditorFlow(
             item(key = "details") {
                 FitCard(glow = FitTheme.glow.none) {
                     Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
-                        FoundationText(
-                            text = if (draft.routineId == null) "Create routine" else "Edit routine",
-                            style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FoundationText(
+                                text = if (draft.routineId == null) "Create routine" else "Edit routine",
+                                modifier = Modifier.weight(1f),
+                                style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+                            )
+                            FoundationTextAction("Organize", onClick = { isOrganizerOpen = true })
+                        }
                         FitTextField(
                             value = draft.name,
                             onValueChange = onNameChange,
@@ -84,15 +98,11 @@ fun RoutineEditorFlow(
                 }
             }
 
-            itemsIndexed(draft.exercises, key = { _, exercise -> exercise.draftId.value }) { index, exercise ->
+            items(draft.exercises, key = { exercise -> exercise.draftId.value }) { exercise ->
                 RoutineExerciseCard(
                     exercise = exercise,
                     groupLabel = draft.exercises.groupSummaryFor(exercise),
-                    canGroupWithNext = draft.exercises.canGroupWithNext(index),
                     onRemoveExercise = { onRemoveExercise(exercise.draftId) },
-                    onGroupWithNext = { onGroupWithNext(exercise.draftId) },
-                    onUngroup = { onUngroup(exercise.draftId) },
-                    onAdjustGroupRounds = { delta -> onAdjustGroupRounds(exercise.draftId, delta) },
                     onAddSet = { onAddSet(exercise.draftId) },
                     onRemoveSet = { setId -> onRemoveSet(exercise.draftId, setId) },
                     onSetKindChange = { setId, kind -> onSetKindChange(exercise.draftId, setId, kind) },
@@ -138,17 +148,23 @@ fun RoutineEditorFlow(
             )
         }
     }
+
+    if (isOrganizerOpen) {
+        CircuitOrganizerDialog(
+            exercises = draft.exercises,
+            onCreateCircuit = onGroupSelected,
+            onUngroup = onUngroup,
+            onAdjustGroupRounds = onAdjustGroupRounds,
+            onDismiss = { isOrganizerOpen = false }
+        )
+    }
 }
 
 @Composable
 private fun RoutineExerciseCard(
     exercise: RoutineExerciseDraft,
     groupLabel: String?,
-    canGroupWithNext: Boolean,
     onRemoveExercise: () -> Unit,
-    onGroupWithNext: () -> Unit,
-    onUngroup: () -> Unit,
-    onAdjustGroupRounds: (Int) -> Unit,
     onAddSet: () -> Unit,
     onRemoveSet: (FoundationId) -> Unit,
     onSetKindChange: (FoundationId, SetKind) -> Unit,
@@ -171,13 +187,6 @@ private fun RoutineExerciseCard(
                 }
                 FoundationTextAction("Remove", onRemoveExercise)
             }
-            RoutineGroupControls(
-                groupLabel = groupLabel,
-                canGroupWithNext = canGroupWithNext,
-                onGroupWithNext = onGroupWithNext,
-                onUngroup = onUngroup,
-                onAdjustGroupRounds = onAdjustGroupRounds
-            )
             RestControls(exercise, onAdjustRest, onToggleRest)
             exercise.plannedSets.forEach { set ->
                 RoutineSetRow(
@@ -201,49 +210,122 @@ private fun RoutineExerciseCard(
 }
 
 @Composable
-private fun RoutineGroupControls(
-    groupLabel: String?,
-    canGroupWithNext: Boolean,
-    onGroupWithNext: () -> Unit,
-    onUngroup: () -> Unit,
-    onAdjustGroupRounds: (Int) -> Unit
+private fun CircuitOrganizerDialog(
+    exercises: List<RoutineExerciseDraft>,
+    onCreateCircuit: (List<FoundationId>) -> Unit,
+    onUngroup: (FoundationId) -> Unit,
+    onAdjustGroupRounds: (FoundationId, Int) -> Unit,
+    onDismiss: () -> Unit
 ) {
-    if (!canGroupWithNext && groupLabel == null) return
-    Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (canGroupWithNext) {
-                FitButton(
-                    text = if (groupLabel == null) "Superset" else "Circuit",
-                    onClick = onGroupWithNext,
-                    modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Secondary
+    var selectedIds by remember(exercises.map { it.draftId }) { mutableStateOf<Set<FoundationId>>(emptySet()) }
+    val selectedExercises = exercises.filter { it.draftId in selectedIds }
+    val canCreateCircuit = selectedExercises.size >= 2 && exercises.isAdjacentSelection(selectedIds)
+    val selectedGroupedExercise = selectedExercises.firstOrNull { it.groupId != null }
+
+    FitDialog(onDismissRequest = onDismiss) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                FoundationText(
+                    text = "Organize routine",
+                    style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+                )
+                FoundationMutedText("Select adjacent exercises to create one circuit.")
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+            ) {
+                items(exercises, key = { it.draftId.value }) { exercise ->
+                    val isSelected = exercise.draftId in selectedIds
+                    FitListRow(onClick = {
+                        selectedIds = if (isSelected) {
+                            selectedIds - exercise.draftId
+                        } else {
+                            selectedIds + exercise.draftId
+                        }
+                    }) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            FoundationText(
+                                text = exercise.displayName,
+                                style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                            )
+                            FoundationMutedText(
+                                listOfNotNull(
+                                    exercises.groupSummaryFor(exercise),
+                                    exerciseKindLabel(exercise.loggingMode)
+                                ).joinToString(" • ")
+                            )
+                        }
+                        FoundationMutedText(if (isSelected) "Selected" else "Select")
+                    }
+                }
+            }
+
+            selectedGroupedExercise?.let { exercise ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FoundationMutedText(exercises.groupSummaryFor(exercise).orEmpty(), modifier = Modifier.weight(1f))
+                    FitButton(text = "- round", onClick = { onAdjustGroupRounds(exercise.draftId, -1) }, style = FitButtonStyle.Secondary)
+                    FitButton(text = "+ round", onClick = { onAdjustGroupRounds(exercise.draftId, 1) }, style = FitButtonStyle.Secondary)
+                }
+            }
+
+            if (selectedExercises.size >= 2 && !canCreateCircuit) {
+                FoundationText(
+                    text = "Select adjacent exercises to create a circuit.",
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
                 )
             }
-            if (groupLabel != null) {
-                FitButton(
-                    text = "Ungroup",
-                    onClick = onUngroup,
-                    modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Secondary
-                )
-            }
-        }
-        if (groupLabel != null) {
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FoundationMutedText(groupLabel, modifier = Modifier.weight(1f))
-                FitButton(text = "- round", onClick = { onAdjustGroupRounds(-1) }, style = FitButtonStyle.Secondary)
-                FitButton(text = "+ round", onClick = { onAdjustGroupRounds(1) }, style = FitButtonStyle.Secondary)
+                FitButton(
+                    text = "Close",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+                selectedGroupedExercise?.let { exercise ->
+                    FitButton(
+                        text = "Ungroup",
+                        onClick = {
+                            onUngroup(exercise.draftId)
+                            selectedIds = emptySet()
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                FitButton(
+                    text = "Create circuit",
+                    onClick = {
+                        onCreateCircuit(exercises.filter { it.draftId in selectedIds }.map { it.draftId })
+                        selectedIds = emptySet()
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = canCreateCircuit,
+                    style = FitButtonStyle.Primary
+                )
             }
         }
     }
+}
+
+private fun List<RoutineExerciseDraft>.isAdjacentSelection(selectedIds: Set<FoundationId>): Boolean {
+    if (selectedIds.size < 2) return false
+    val positions = mapIndexedNotNull { index, exercise ->
+        index.takeIf { exercise.draftId in selectedIds }
+    }
+    return positions == (positions.first()..positions.last()).toList()
 }
 
 @Composable
@@ -393,10 +475,3 @@ private fun formatRest(seconds: Int): String {
 
 private fun Double.trimmedString(): String =
     if (this % 1.0 == 0.0) toInt().toString() else toString()
-
-private fun List<RoutineExerciseDraft>.canGroupWithNext(index: Int): Boolean {
-    if (index !in indices || index == lastIndex) return false
-    val currentGroupId = this[index].groupId
-    val nextGroupId = this[index + 1].groupId
-    return currentGroupId == null || currentGroupId != nextGroupId
-}

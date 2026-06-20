@@ -69,7 +69,7 @@ class RoutineBuilderCreateTest {
     }
 
     @Test
-    fun groupedRoutineExercisesSaveAndReopenAsSupersetOrCircuit() = runTest {
+    fun groupedRoutineExercisesSaveAndReopenAsCircuit() = runTest {
         val harness = FoundationHarness()
         val holder = RoutineStateHolder(harness.routines, harness.exerciseCatalog)
         holder.beginCreateRoutine()
@@ -80,12 +80,12 @@ class RoutineBuilderCreateTest {
 
         val initial = assertNotNull(holder.state.value.editorDraft)
         holder.groupEditorExercises(initial.exercises.take(2).map { it.draftId })
-        val supersetDraft = assertNotNull(holder.state.value.editorDraft)
-        assertEquals("Superset", supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[0]))
-        assertEquals("Superset", supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[1]))
-        assertNull(supersetDraft.exercises.groupLabelFor(supersetDraft.exercises[2]))
+        val firstCircuitDraft = assertNotNull(holder.state.value.editorDraft)
+        assertEquals("Circuit", firstCircuitDraft.exercises.groupLabelFor(firstCircuitDraft.exercises[0]))
+        assertEquals("Circuit", firstCircuitDraft.exercises.groupLabelFor(firstCircuitDraft.exercises[1]))
+        assertNull(firstCircuitDraft.exercises.groupLabelFor(firstCircuitDraft.exercises[2]))
 
-        holder.groupEditorExercises(supersetDraft.exercises.map { it.draftId })
+        holder.groupEditorExercises(firstCircuitDraft.exercises.map { it.draftId })
         val circuitDraft = assertNotNull(holder.state.value.editorDraft)
         assertEquals(listOf("Circuit", "Circuit", "Circuit"), circuitDraft.exercises.map { circuitDraft.exercises.groupLabelFor(it) })
 

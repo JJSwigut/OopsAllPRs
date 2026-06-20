@@ -264,8 +264,7 @@ private fun List<com.jjswigut.oopsallprs.domain.model.RoutineExercise>.groupCont
     val rounds = (exercise.groupRounds ?: 1).coerceAtLeast(1)
     val groupSize = count { it.groupId == groupId }
     val label = when {
-        groupSize == 2 -> "Superset"
-        groupSize >= 3 -> "Circuit"
+        groupSize >= 2 -> "Circuit"
         else -> return null
     }
     return ActiveExerciseGroupContext(

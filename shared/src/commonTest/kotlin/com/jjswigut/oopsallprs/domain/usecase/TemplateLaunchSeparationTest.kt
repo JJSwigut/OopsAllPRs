@@ -48,7 +48,7 @@ class TemplateLaunchSeparationTest {
 
         val active = harness.lifecycle.startFromRoutine(routine.id, instant(2_000)).successValue()
 
-        assertEquals(listOf("Superset", "Superset"), active.exercises.map { it.groupContext?.label })
+        assertEquals(listOf("Circuit", "Circuit"), active.exercises.map { it.groupContext?.label })
         assertEquals(listOf(groupId, groupId), active.exercises.map { it.groupContext?.groupId })
         assertTrue(active.exercises.flatMap { it.sets }.all { it.loggedAt == null })
     }
