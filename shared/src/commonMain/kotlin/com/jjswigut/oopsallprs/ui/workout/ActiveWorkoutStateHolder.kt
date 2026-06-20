@@ -120,6 +120,51 @@ class ActiveWorkoutStateHolder(
         return confirmDraft(exerciseId)
     }
 
+    suspend fun groupExercisesAsCircuit(exerciseInstanceIds: List<FoundationId>): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.groupExercisesAsCircuit(workoutId, exerciseInstanceIds)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun ungroupCircuit(exerciseInstanceId: FoundationId): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.ungroupCircuit(workoutId, exerciseInstanceId)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun adjustCircuitRounds(exerciseInstanceId: FoundationId, deltaRounds: Int): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.adjustCircuitRounds(workoutId, exerciseInstanceId, deltaRounds)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
     suspend fun confirmDraft(exerciseInstanceId: FoundationId): FoundationResult<ExerciseSet> {
         val workoutId = activeWorkoutId
             ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))

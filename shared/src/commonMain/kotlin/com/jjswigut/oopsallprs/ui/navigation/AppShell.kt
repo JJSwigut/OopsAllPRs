@@ -299,6 +299,15 @@ fun AppShell(
                     onToggleExerciseRest = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleExerciseRest(exerciseId) }
                     },
+                    onGroupCircuit = { exerciseIds ->
+                        scope.launch { appState.activeWorkout.groupExercisesAsCircuit(exerciseIds) }
+                    },
+                    onUngroupCircuit = { exerciseId ->
+                        scope.launch { appState.activeWorkout.ungroupCircuit(exerciseId) }
+                    },
+                    onAdjustCircuitRounds = { exerciseId, delta ->
+                        scope.launch { appState.activeWorkout.adjustCircuitRounds(exerciseId, delta) }
+                    },
                     onFocusExercise = { exerciseId ->
                         scope.launch { appState.activeWorkout.setFocus(exerciseId) }
                     },

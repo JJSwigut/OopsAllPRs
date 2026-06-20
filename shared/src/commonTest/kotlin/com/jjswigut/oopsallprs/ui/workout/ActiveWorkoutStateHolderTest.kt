@@ -100,6 +100,46 @@ class ActiveWorkoutStateHolderTest {
         assertEquals(1, holder.state.value.workout?.exerciseBlocks?.first { it.exerciseInstanceId == squat }?.draft?.position?.value)
     }
 
+    @Test
+    fun canCreateSupersetOnTheFlyFromActiveWorkout() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val first = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
+        val second = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_200)).successValue()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle)
+        holder.hydrate(workout.id, now = instant(1_300))
+
+        holder.groupExercisesAsCircuit(listOf(first.id, second.id)).successValue()
+
+        val grouped = holder.state.value.workout!!.exerciseBlocks
+        assertEquals(listOf("Superset", "Superset"), grouped.map { it.groupLabel })
+        assertEquals(listOf(3, 3), grouped.map { it.groupRounds })
+
+        holder.confirmDraft(first.id).successValue()
+
+        assertEquals(second.id, holder.state.value.workout?.focus?.exerciseInstanceId)
+    }
+
+    @Test
+    fun groupedExerciseBlocksCollapseForDisplay() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val first = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
+        val second = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_200)).successValue()
+        val third = harness.setLogging.addExercise(workout.id, harness.timedReference, instant(1_300)).successValue()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle)
+        holder.hydrate(workout.id, now = instant(1_400))
+
+        holder.groupExercisesAsCircuit(listOf(first.id, second.id)).successValue()
+
+        val displayGroups = holder.state.value.workout!!.exerciseBlockGroups()
+        assertEquals(2, displayGroups.size)
+        assertEquals(listOf(first.id, second.id), displayGroups[0].blocks.map { it.exerciseInstanceId })
+        assertEquals(true, displayGroups[0].isGrouped)
+        assertEquals(third.id, displayGroups[1].blocks.single().exerciseInstanceId)
+        assertEquals(false, displayGroups[1].isGrouped)
+    }
+
     private fun circuitExercise(
         id: String,
         name: String,
