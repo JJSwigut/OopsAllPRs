@@ -2,45 +2,67 @@ package com.jjswigut.oopsallprs.ui.workout
 
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
+import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
+import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.ui.history.TemplateListItem
 import com.jjswigut.oopsallprs.ui.history.toTemplateListItem
+import com.jjswigut.oopsallprs.ui.profile.DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+
+private const val WORKOUT_LIMIT_REACHED_MESSAGE = "You've used your free workouts."
 
 data class WorkoutHomeState(
     val activeSession: ActiveSessionState? = null,
     val templates: List<TemplateListItem> = emptyList(),
     val pendingDeleteTemplate: TemplateListItem? = null,
+    val fullAccess: FullAccessState = FullAccessState(),
+    val isFullAccessPaywallVisible: Boolean = false,
+    val fullAccessMessage: String? = null,
     val errorMessage: String? = null
 )
 
 class WorkoutHomeStateHolder(
     private val lifecycle: WorkoutLifecycleUseCases,
-    private val routines: RoutineUseCases? = null
+    private val routines: RoutineUseCases? = null,
+    private val fullAccess: FullAccessUseCases? = null,
+    freeCompletedWorkoutLimit: Int = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
 ) {
+    private val freeWorkoutLimit = freeCompletedWorkoutLimit.coerceAtLeast(0)
     private val _state = MutableStateFlow(WorkoutHomeState())
     val state: StateFlow<WorkoutHomeState> = _state
 
     suspend fun hydrate() {
+        val accessState = fullAccess?.loadState() ?: _state.value.fullAccess
         _state.value = _state.value.copy(
             activeSession = lifecycle.restoreActiveSession().resumable(),
             templates = routines?.listRoutinesByRecentUse().orEmpty().map { it.toTemplateListItem() },
-            pendingDeleteTemplate = null
+            pendingDeleteTemplate = null,
+            fullAccess = accessState,
+            isFullAccessPaywallVisible = if (accessState.canCreateWorkoutData(freeWorkoutLimit)) {
+                false
+            } else {
+                _state.value.isFullAccessPaywallVisible
+            }
         )
     }
 
     suspend fun startEmpty(): FoundationResult<ActiveWorkout> {
+        requireWorkoutStartAccess()?.let { return it }
         val result = lifecycle.startEmpty()
         _state.value = when (result) {
             is FoundationResult.Failure -> _state.value.copy(errorMessage = result.error.message)
             is FoundationResult.Success -> _state.value.copy(
                 activeSession = ActiveSessionState(result.value.id, result.value.startedAt, updatedAt = result.value.updatedAt),
+                isFullAccessPaywallVisible = false,
+                fullAccessMessage = null,
                 errorMessage = null
             )
         }
@@ -70,15 +92,39 @@ class WorkoutHomeStateHolder(
             val error = FoundationError.Conflict("An active workout is already in progress")
             return foundationFailure(error)
         }
+        requireWorkoutStartAccess()?.let { return it }
         val result = lifecycle.startFromRoutine(templateId)
         _state.value = when (result) {
             is FoundationResult.Failure -> _state.value.copy(errorMessage = result.error.message)
             is FoundationResult.Success -> _state.value.copy(
                 activeSession = ActiveSessionState(result.value.id, result.value.startedAt, updatedAt = result.value.updatedAt),
+                isFullAccessPaywallVisible = false,
+                fullAccessMessage = null,
                 errorMessage = null
             )
         }
         return result
+    }
+
+    suspend fun refreshFullAccess() {
+        fullAccess?.let { access ->
+            val accessState = access.loadState()
+            _state.value = _state.value.copy(
+                fullAccess = accessState,
+                isFullAccessPaywallVisible = if (accessState.canCreateWorkoutData(freeWorkoutLimit)) {
+                    false
+                } else {
+                    _state.value.isFullAccessPaywallVisible
+                }
+            )
+        }
+    }
+
+    suspend fun requireWorkoutDataWriteAccess(): FoundationResult<Unit> =
+        workoutDataWriteAccessError()?.let { foundationFailure(it) } ?: foundationSuccess(Unit)
+
+    fun dismissFullAccessPaywall() {
+        _state.value = _state.value.copy(isFullAccessPaywallVisible = false, fullAccessMessage = null)
     }
 
     fun requestTemplateDelete(templateId: FoundationId) {
@@ -107,7 +153,28 @@ class WorkoutHomeStateHolder(
             }
         }
     }
+
+    private suspend fun requireWorkoutStartAccess(): FoundationResult<ActiveWorkout>? {
+        return workoutDataWriteAccessError()?.let { foundationFailure(it) }
+    }
+
+    private suspend fun workoutDataWriteAccessError(): FoundationError? {
+        val access = fullAccess ?: return null
+        val accessState = access.loadState()
+        _state.value = _state.value.copy(fullAccess = accessState)
+        if (accessState.canCreateWorkoutData(freeWorkoutLimit)) return null
+        val message = WORKOUT_LIMIT_REACHED_MESSAGE
+        _state.value = _state.value.copy(
+            isFullAccessPaywallVisible = true,
+            fullAccessMessage = message,
+            errorMessage = null
+        )
+        return FoundationError.Validation(message)
+    }
 }
 
 private fun ActiveSessionState?.resumable(): ActiveSessionState? =
     this?.takeIf { it.activeWorkoutId != null }
+
+private fun FullAccessState.canCreateWorkoutData(freeWorkoutLimit: Int): Boolean =
+    hasFullAccess || normalizedCompletedFreeWorkouts < freeWorkoutLimit

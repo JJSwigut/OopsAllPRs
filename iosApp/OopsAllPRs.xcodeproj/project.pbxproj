@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		100000000000000000000001 /* OopsAllPRsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000011 /* OopsAllPRsApp.swift */; };
 		100000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* ContentView.swift */; };
+		100000000000000000000003 /* StoreKitFullAccessBillingAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */; };
 		100000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -16,6 +17,7 @@
 		100000000000000000000010 /* OopsAllPRs.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OopsAllPRs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000011 /* OopsAllPRsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OopsAllPRsApp.swift; sourceTree = "<group>"; };
 		100000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitFullAccessBillingAdapter.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -44,6 +46,7 @@
 			children = (
 				100000000000000000000011 /* OopsAllPRsApp.swift */,
 				100000000000000000000012 /* ContentView.swift */,
+				100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */,
 				100000000000000000000014 /* Assets.xcassets */,
 			);
 			path = iosApp;
@@ -158,6 +161,7 @@
 			files = (
 				100000000000000000000001 /* OopsAllPRsApp.swift in Sources */,
 				100000000000000000000002 /* ContentView.swift in Sources */,
+				100000000000000000000003 /* StoreKitFullAccessBillingAdapter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

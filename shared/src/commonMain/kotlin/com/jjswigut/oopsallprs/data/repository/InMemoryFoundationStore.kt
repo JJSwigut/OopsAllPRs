@@ -12,6 +12,7 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportSnapshot
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
@@ -29,6 +30,7 @@ import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
@@ -46,6 +48,7 @@ class InMemoryFoundationStore :
     RoutineRepository,
     ExerciseRepository,
     PreferencesRepository,
+    FullAccessRepository,
     ProgressRepository,
     ExportRepository {
 
@@ -63,6 +66,7 @@ class InMemoryFoundationStore :
     private var weightStepPreference = WeightStepPreference()
     private var defaultRestSeconds = RestConfiguration.DEFAULT_SECONDS
     private var restSoundEnabled = true
+    private var fullAccessState = FullAccessState()
 
     override suspend fun createActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout> {
         if (activeWorkouts.values.any { it.status.name == "ACTIVE" }) {
@@ -323,6 +327,16 @@ class InMemoryFoundationStore :
     override suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean> {
         restSoundEnabled = enabled
         return foundationSuccess(enabled)
+    }
+
+    override suspend fun loadFullAccess(): FullAccessState = fullAccessState
+
+    override suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState> {
+        val normalized = state.copy(
+            completedFreeWorkouts = state.normalizedCompletedFreeWorkouts
+        )
+        fullAccessState = normalized
+        return foundationSuccess(normalized)
     }
 
     override suspend fun replaceRecords(

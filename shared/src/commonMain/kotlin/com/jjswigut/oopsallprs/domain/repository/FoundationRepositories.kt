@@ -15,6 +15,7 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseSeedImport
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
@@ -85,6 +86,11 @@ interface PreferencesRepository {
     suspend fun setDefaultRestSeconds(seconds: Int): FoundationResult<Int>
     suspend fun restSoundEnabled(): Boolean
     suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean>
+}
+
+interface FullAccessRepository {
+    suspend fun loadFullAccess(): FullAccessState
+    suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState>
 }
 
 interface ProgressRepository {

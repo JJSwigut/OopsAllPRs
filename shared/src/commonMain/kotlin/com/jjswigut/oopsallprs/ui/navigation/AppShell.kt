@@ -100,6 +100,7 @@ fun AppShell(
 
     LaunchedEffect(Unit) {
         appState.hydrate()
+        scope.launch { appState.refreshFullAccessEntitlements() }
         scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
     }
 
@@ -110,6 +111,7 @@ fun AppShell(
             TopLevelDestination.TRAIN -> appState.workoutHome.hydrate()
             TopLevelDestination.PROFILE -> {
                 appState.profile.hydrate()
+                scope.launch { appState.refreshFullAccessEntitlements() }
                 scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
             }
         }
@@ -492,6 +494,7 @@ private fun DestinationContent(
     when (destination) {
         TopLevelDestination.TRAIN -> WorkoutHomeFlow(
             state = workoutHomeState,
+            fullAccessStatus = profileState.fullAccessStatus,
             onStartEmpty = {
                 scope.launch {
                     appState.workoutHome.startEmpty()
@@ -507,6 +510,18 @@ private fun DestinationContent(
                             appState.navigation.presentActiveWorkout()
                         }
                     }
+                }
+            },
+            onPurchaseLifetimeUnlock = {
+                scope.launch {
+                    appState.profile.purchaseLifetimeUnlock()
+                    appState.workoutHome.refreshFullAccess()
+                }
+            },
+            onRestorePurchases = {
+                scope.launch {
+                    appState.profile.restorePurchases()
+                    appState.workoutHome.refreshFullAccess()
                 }
             },
             onCreateRoutine = {
@@ -621,6 +636,18 @@ private fun DestinationContent(
             },
             onExportRequested = { type ->
                 scope.launch { appState.profile.export(type) }
+            },
+            onPurchaseLifetimeUnlock = {
+                scope.launch {
+                    appState.profile.purchaseLifetimeUnlock()
+                    appState.workoutHome.refreshFullAccess()
+                }
+            },
+            onRestorePurchases = {
+                scope.launch {
+                    appState.profile.restorePurchases()
+                    appState.workoutHome.refreshFullAccess()
+                }
             },
             onStartBackupSetup = { appState.profile.startBackupSetup() },
             onBackupSetupNext = { appState.profile.advanceBackupSetup() },

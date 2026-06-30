@@ -69,3 +69,11 @@ WHERE singleton_id = 1;
 upsertUserPreferences:
 INSERT OR REPLACE INTO user_preferences(singleton_id, weight_unit, date_format, default_rest_seconds, rest_sound_enabled, weight_step_lb, weight_step_kg, android_auto_backup_allowed, created_at, updated_at)
 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+selectFullAccessState:
+SELECT * FROM full_access_state
+WHERE singleton_id = 1;
+
+upsertFullAccessState:
+INSERT OR REPLACE INTO full_access_state(singleton_id, completed_free_workouts, lifetime_active, store_status, last_error, updated_at)
+VALUES (1, ?, ?, ?, ?, ?);

@@ -5,6 +5,8 @@ import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.BackupDocument
 import com.jjswigut.oopsallprs.domain.model.BackupLinkedFile
+import com.jjswigut.oopsallprs.domain.model.FullAccessEntitlementSnapshot
+import com.jjswigut.oopsallprs.domain.model.FullAccessStoreOffer
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
@@ -226,6 +228,27 @@ actual class BackupDocumentHandoff actual constructor(context: Any?) : BackupDoc
         override fun documentPickerWasCancelled(controller: UIDocumentPickerViewController) {
             onComplete(null)
         }
+    }
+}
+
+actual class FullAccessBillingHandoff actual constructor(private val context: Any?) : FullAccessBillingAdapter {
+    actual override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>> =
+        unavailable()
+
+    actual override suspend fun refreshEntitlements(): FoundationResult<FullAccessEntitlementSnapshot> =
+        unavailable()
+
+    actual override suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot> =
+        unavailable()
+
+    actual override suspend fun restorePurchases(): FoundationResult<FullAccessEntitlementSnapshot> =
+        unavailable()
+
+    private fun <T> unavailable(): FoundationResult<T> =
+        foundationFailure(FoundationError.Platform(UNAVAILABLE_MESSAGE))
+
+    private companion object {
+        const val UNAVAILABLE_MESSAGE = "App Store purchases are not configured for this build."
     }
 }
 

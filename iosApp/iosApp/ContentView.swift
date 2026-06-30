@@ -18,9 +18,16 @@ struct SharedAppView: UIViewControllerRepresentable {
         developerToolsEnabled = false
         #endif
         let container = UIViewController()
+        let billingAdapter: FullAccessBillingAdapter?
+        if #available(iOS 15.0, *) {
+            billingAdapter = StoreKitFullAccessBillingAdapter()
+        } else {
+            billingAdapter = nil
+        }
         let sharedController = IosAppViewControllerFactory().create(
             context: container,
-            developerToolsEnabled: developerToolsEnabled
+            developerToolsEnabled: developerToolsEnabled,
+            fullAccessBilling: billingAdapter
         )
         container.addChild(sharedController)
         container.view.addSubview(sharedController.view)

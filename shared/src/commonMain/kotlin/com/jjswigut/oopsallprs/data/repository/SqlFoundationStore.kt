@@ -8,6 +8,7 @@ import com.jjswigut.oopsallprs.db.Active_workouts
 import com.jjswigut.oopsallprs.db.Completed_workouts
 import com.jjswigut.oopsallprs.db.Exercise_catalog
 import com.jjswigut.oopsallprs.db.Exercise_sets
+import com.jjswigut.oopsallprs.db.Full_access_state
 import com.jjswigut.oopsallprs.db.Personal_records
 import com.jjswigut.oopsallprs.db.Progress_points
 import com.jjswigut.oopsallprs.db.Routine_exercises
@@ -30,6 +31,8 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportSnapshot
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
+import com.jjswigut.oopsallprs.domain.model.FullAccessStoreStatus
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
@@ -54,6 +57,7 @@ import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
+import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
@@ -73,6 +77,7 @@ class SqlFoundationStore(
     RoutineRepository,
     ExerciseRepository,
     PreferencesRepository,
+    FullAccessRepository,
     ProgressRepository,
     ExportRepository {
 
@@ -531,6 +536,27 @@ class SqlFoundationStore(
         return foundationSuccess(enabled)
     }
 
+    override suspend fun loadFullAccess(): FullAccessState =
+        workoutQueries.selectFullAccessState().executeAsOneOrNull()?.toFullAccessState()
+            ?: FullAccessState(completedFreeWorkouts = completedWorkouts().size)
+
+    override suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState> {
+        val now = state.updatedAt ?: Clock.System.now()
+        workoutQueries.upsertFullAccessState(
+            completed_free_workouts = state.normalizedCompletedFreeWorkouts.toLong(),
+            lifetime_active = state.lifetimeUnlocked.toDbLong(),
+            store_status = state.storeStatus.name,
+            last_error = state.lastError,
+            updated_at = now.toDbLong()
+        )
+        return foundationSuccess(
+            state.copy(
+                completedFreeWorkouts = state.normalizedCompletedFreeWorkouts,
+                updatedAt = now
+            )
+        )
+    }
+
     override suspend fun replaceRecords(
         records: List<PersonalRecord>,
         points: List<ProgressPoint>
@@ -892,6 +918,16 @@ class SqlFoundationStore(
             weight = weight_kg?.let(::WeightKg),
             reps = reps?.toInt(),
             recordedAt = recorded_at.toInstant()
+        )
+
+    private fun Full_access_state.toFullAccessState(): FullAccessState =
+        FullAccessState(
+            completedFreeWorkouts = completed_free_workouts.toInt().coerceAtLeast(0),
+            lifetimeUnlocked = lifetime_active.toBooleanFlag(),
+            storeStatus = runCatching { FullAccessStoreStatus.valueOf(store_status) }
+                .getOrDefault(FullAccessStoreStatus.NOT_CHECKED),
+            lastError = last_error,
+            updatedAt = Instant.fromEpochMilliseconds(updated_at)
         )
 
     private fun SetQueriesAccessor.upsertSet(workoutId: FoundationId, set: ExerciseSet) {
