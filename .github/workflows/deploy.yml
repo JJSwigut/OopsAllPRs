@@ -5,9 +5,19 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional GitHub Release tag to create, for example v1.0.1001"
+        required: false
+        type: string
+      publish_stores:
+        description: "Attempt Google Play/TestFlight uploads when secrets are present"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: store-deploy-${{ github.ref }}
@@ -30,22 +40,66 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run Gradle checks
-        run: ./gradlew --no-daemon check :androidApp:assembleRelease
+      - name: Run release gate checks
+        run: tools/release_gate.sh --skip-ios
 
-  android:
-    name: Android internal testing
-    needs: tests
+      - name: Upload release gate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-gate-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            build/release-gate/*.txt
+            build/release-gate/*.env
+            androidApp/build/outputs/apk/release/*.apk
+            androidApp/build/outputs/bundle/release/*.aab
+            androidApp/build/outputs/mapping/release/*.txt
+
+  github-release:
+    name: GitHub release package
+    needs:
+      - tests
+      - ios-package
+    if: always() && needs.tests.result == 'success' && (github.event_name == 'push' || inputs.release_tag != '')
     runs-on: ubuntu-latest
-    env:
-      ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
-      ANDROID_PLAY_TRACK: internal
-      ANDROID_RELEASE_STATUS: completed
-      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
-      ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
-      ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-      ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
-      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - name: Resolve release tag
+        id: release-meta
+        env:
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RELEASE_TAG_INPUT:-}" ]; then
+            tag="$RELEASE_TAG_INPUT"
+          else
+            version_code=$((GITHUB_RUN_NUMBER + 1000))
+            tag="v1.0.$version_code"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release-artifacts/**/*.apk
+            release-artifacts/**/*.aab
+            release-artifacts/**/*.txt
+            release-artifacts/**/*.zip
+
+  ios-package:
+    name: iOS release simulator package
+    needs: tests
+    runs-on: macos-latest
+    timeout-minutes: 20
+    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -59,13 +113,33 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
+      - name: Build iOS release simulator app
+        run: IOS_RELEASE_TIMEOUT_SECONDS=1080 tools/ios_release_package.sh
 
-      - name: Prepare Android signing
+      - name: Upload iOS release simulator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-simulator-${{ github.run_number }}
+          if-no-files-found: error
+          path: build/release-artifacts/*.zip
+
+  android:
+    name: Android internal testing
+    needs: tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.publish_stores
+    env:
+      ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
+      ANDROID_PLAY_TRACK: internal
+      ANDROID_RELEASE_STATUS: completed
+      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+      ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - name: Check Android deploy secrets
+        id: android-secrets
         run: |
           set -euo pipefail
           missing=()
@@ -75,26 +149,58 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            printf 'Missing required Android deploy secrets: %s\n' "${missing[*]}" >&2
-            exit 1
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            printf '::notice::Skipping Android deploy. Missing secrets: %s\n' "${missing[*]}"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Check out repository
+        if: steps.android-secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        if: steps.android-secrets.outputs.ready == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        if: steps.android-secrets.outputs.ready == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Ruby
+        if: steps.android-secrets.outputs.ready == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Prepare Android signing
+        if: steps.android-secrets.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
           keystore_path="$RUNNER_TEMP/android-upload-keystore.jks"
           printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
           echo "ANDROID_UPLOAD_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
 
       - name: Set Android version
+        if: steps.android-secrets.outputs.ready == 'true'
         run: |
           version_code=$((GITHUB_RUN_NUMBER + 1000))
           echo "ANDROID_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_NAME=1.0.$version_code" >> "$GITHUB_ENV"
 
       - name: Upload Android bundle to Play internal testing
-        run: bundle exec fastlane android internal
+        if: steps.android-secrets.outputs.ready == 'true'
+        run: tools/fastlane.sh android internal
 
   ios:
     name: iOS TestFlight
     needs: tests
     runs-on: macos-latest
+    if: github.event_name == 'push' || inputs.publish_stores
     env:
       IOS_BUNDLE_ID: com.jjswigut.oopsallprs.ios
       IOS_MARKETING_VERSION: "1.0"
@@ -178,4 +284,4 @@ jobs:
 
       - name: Upload iOS build to TestFlight
         if: steps.ios-secrets.outputs.ready == 'true'
-        run: bundle exec fastlane ios beta
+        run: tools/fastlane.sh ios beta

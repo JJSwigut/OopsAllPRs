@@ -4,6 +4,10 @@ shell commands, and other important information, read
 `specs/024-cloud-backup-sync/plan.md`.
 <!-- SPECKIT END -->
 
+For Codex product-orchestrator, worker-thread, feature-worktree, emulator
+verification, PR, and release-flow conventions, also read
+`docs/development/codex-workflow.md`.
+
 ## Git Working Conventions
 
 - `main` is the deploy/release branch. Keep it stable and only update it when intentionally promoting work for deployment.
