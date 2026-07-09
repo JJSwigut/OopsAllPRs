@@ -71,9 +71,14 @@ internal class FakeBackupRepository(
     private val restoredActiveWorkoutReplaced: Boolean = false
 ) : BackupRepository {
     private val codec = BackupPackageCodec()
+    var createPackageCount: Int = 0
     var restoreCount: Int = 0
 
-    override suspend fun createPackage(): FoundationResult<BackupPackage> = foundationSuccess(pkg)
+    override suspend fun createPackage(): FoundationResult<BackupPackage> {
+        createPackageCount += 1
+        return foundationSuccess(pkg)
+    }
+
     override suspend fun decodePackage(content: String): FoundationResult<BackupPackage> = codec.decode(content)
     override suspend fun encodePackage(pkg: BackupPackage): FoundationResult<String> = codec.encode(pkg)
     override suspend fun currentRevision(): BackupRevision = revision
@@ -115,6 +120,8 @@ internal class FakeDocumentAdapter(
 ) : BackupDocumentAdapter {
     var content: String = initialContent
     var createCount: Int = 0
+    var openCount: Int = 0
+    var readCount: Int = 0
     var writeCount: Int = 0
 
     override suspend fun createBackupDocument(suggestedName: String, content: String): FoundationResult<BackupLinkedFile> {
@@ -123,11 +130,15 @@ internal class FakeDocumentAdapter(
         return foundationSuccess(linkedFile.copy(displayName = suggestedName))
     }
 
-    override suspend fun openBackupDocument(): FoundationResult<BackupDocument> =
-        foundationSuccess(BackupDocument(linkedFile, content))
+    override suspend fun openBackupDocument(): FoundationResult<BackupDocument> {
+        openCount += 1
+        return foundationSuccess(BackupDocument(linkedFile, content))
+    }
 
-    override suspend fun readBackup(linkedFile: BackupLinkedFile): FoundationResult<String> =
-        foundationSuccess(content)
+    override suspend fun readBackup(linkedFile: BackupLinkedFile): FoundationResult<String> {
+        readCount += 1
+        return foundationSuccess(content)
+    }
 
     override suspend fun writeBackup(linkedFile: BackupLinkedFile, content: String): FoundationResult<BackupLinkedFile> {
         this.content = content

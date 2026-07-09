@@ -42,6 +42,8 @@ fun ProfileFlow(
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onReduceMotionChanged: (Boolean) -> Unit,
+    onPurchaseLifetimeUnlock: () -> Unit,
+    onRestorePurchases: () -> Unit,
     onExportRequested: (ExportType) -> Unit,
     onStartBackupSetup: () -> Unit,
     onBackupSetupNext: () -> Unit,
@@ -63,6 +65,11 @@ fun ProfileFlow(
         modifier = modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
     ) {
+        FullAccessCard(
+            state = state,
+            onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
+            onRestorePurchases = onRestorePurchases
+        )
         UnitsCard(
             state = state,
             onWeightUnitSelected = onWeightUnitSelected,
@@ -110,6 +117,65 @@ fun ProfileFlow(
             onDismiss = onBackupSetupDismiss,
             onChooseLocation = onLinkBackupFile
         )
+    }
+}
+
+@Composable
+private fun FullAccessCard(
+    state: ProfileState,
+    onPurchaseLifetimeUnlock: () -> Unit,
+    onRestorePurchases: () -> Unit
+) {
+    val access = state.fullAccessStatus
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Unlock")
+            StatusRow("Status", access.statusLabel)
+            FoundationMutedText(access.detailLabel)
+            when {
+                access.hasFullAccess -> FoundationMutedText("Unlimited logging is available forever.")
+                access.isFreeLimitReached -> {
+                    FoundationText(
+                        text = "You've used your free workouts.",
+                        style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                    )
+                    FoundationMutedText("Unlock unlimited workout logging forever.")
+                    FoundationMutedText(access.termsLabel)
+                    StatusRow("Price", access.offerLabel)
+                    FitButton(
+                        text = if (access.isStoreBusy) "Working" else "Unlock forever",
+                        onClick = onPurchaseLifetimeUnlock,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !access.isStoreBusy,
+                        style = FitButtonStyle.Primary
+                    )
+                    FitButton(
+                        text = if (access.isStoreBusy) "Working" else "Restore purchase",
+                        onClick = onRestorePurchases,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !access.isStoreBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                else -> FoundationMutedText("Keep logging. Unlock appears when the free workout limit is reached.")
+            }
+            if (!access.hasFullAccess && !access.isFreeLimitReached) {
+                FitButton(
+                    text = if (access.isStoreBusy) "Working" else "Restore purchase",
+                    onClick = onRestorePurchases,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !access.isStoreBusy,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            FoundationMutedText("Purchases restore through the app store used to buy them.")
+            access.error?.let { message ->
+                FoundationText(
+                    text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.platform
 
 import android.app.AlarmManager
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,16 +18,37 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import com.android.billingclient.api.AcknowledgePurchaseParams
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingFlowParams
+import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.PendingPurchasesParams
+import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
+import com.android.billingclient.api.PurchasesUpdatedListener
+import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.BackupDocument
 import com.jjswigut.oopsallprs.domain.model.BackupLinkedFile
+import com.jjswigut.oopsallprs.domain.model.FullAccessBillingProductIds
+import com.jjswigut.oopsallprs.domain.model.FullAccessEntitlementSnapshot
+import com.jjswigut.oopsallprs.domain.model.FullAccessStoreOffer
+import com.jjswigut.oopsallprs.domain.model.FullAccessStoreStatus
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlin.coroutines.resume
 
 actual class PlatformDatabaseDriverFactory actual constructor(private val context: Any?) {
     actual fun createDriver(): SqlDriver {
@@ -34,6 +56,7 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
             ?: error("Android database driver requires an android.content.Context")
         repairRoutineGroupRoundsMigration(androidContext)
         repairBackupSyncStateMigration(androidContext)
+        repairFullAccessStateMigration(androidContext)
         return AndroidSqliteDriver(WorkoutDatabase.Schema, androidContext, "oops_all_prs.db")
     }
 
@@ -92,6 +115,30 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
         }
     }
 
+    private fun repairFullAccessStateMigration(context: Context) {
+        val databaseFile = context.getDatabasePath(DATABASE_NAME)
+        if (!databaseFile.exists()) return
+
+        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { database ->
+            if (database.userVersion() < FULL_ACCESS_SCHEMA_VERSION) return
+            if (database.hasTable("full_access_state")) return
+
+            database.execSQL(
+                """
+                CREATE TABLE full_access_state (
+                    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+                    completed_free_workouts INTEGER NOT NULL,
+                    lifetime_active INTEGER NOT NULL,
+                    store_status TEXT NOT NULL,
+                    last_error TEXT,
+                    updated_at INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            database.execSQL("PRAGMA user_version = $FULL_ACCESS_SCHEMA_VERSION")
+        }
+    }
+
     private fun SQLiteDatabase.userVersion(): Int {
         val cursor = rawQuery("PRAGMA user_version", null)
         return cursor.use {
@@ -122,6 +169,7 @@ actual class PlatformDatabaseDriverFactory actual constructor(private val contex
         const val DATABASE_NAME = "oops_all_prs.db"
         const val GROUP_ROUNDS_SCHEMA_VERSION = 7
         const val BACKUP_SYNC_SCHEMA_VERSION = 8
+        const val FULL_ACCESS_SCHEMA_VERSION = 9
     }
 }
 
@@ -354,6 +402,335 @@ actual class BackupDocumentHandoff actual constructor(private val context: Any?)
         val content: String,
         val deferred: CompletableDeferred<FoundationResult<BackupLinkedFile>>
     )
+}
+
+actual class FullAccessBillingHandoff actual constructor(private val context: Any?) :
+    FullAccessBillingAdapter,
+    PurchasesUpdatedListener {
+
+    private val androidContext = context as? Context
+    private val activity = context as? Activity
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var pendingPurchase: CompletableDeferred<FoundationResult<FullAccessEntitlementSnapshot>>? = null
+    private var pendingConnection: CompletableDeferred<FoundationResult<BillingClient>>? = null
+    private val billingClient: BillingClient? = androidContext?.let { ctx ->
+        BillingClient.newBuilder(ctx)
+            .setListener(this)
+            .enablePendingPurchases(
+                PendingPurchasesParams.newBuilder()
+                    .enableOneTimeProducts()
+                    .build()
+            )
+            .enableAutoServiceReconnection()
+            .build()
+    }
+
+    actual override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>> {
+        return when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
+            is FoundationResult.Failure -> foundationSuccess(listOf(fallbackLifetimeOffer()))
+            is FoundationResult.Success -> {
+                val offer = result.value
+                    .firstOrNull { it.productId == LIFETIME_UNLOCK_PRODUCT_ID }
+                    ?.toLifetimeStoreOffer()
+                    ?: fallbackLifetimeOffer()
+                foundationSuccess(listOf(offer))
+            }
+        }
+    }
+
+    actual override suspend fun refreshEntitlements(): FoundationResult<FullAccessEntitlementSnapshot> =
+        entitlementSnapshot()
+
+    actual override suspend fun restorePurchases(): FoundationResult<FullAccessEntitlementSnapshot> =
+        entitlementSnapshot()
+
+    actual override suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot> {
+        val client = billingClient ?: return unavailable()
+        val launchActivity = activity ?: return foundationFailure(
+            FoundationError.Platform("Google Play purchases require an Android Activity context.")
+        )
+        pendingPurchase?.let {
+            return foundationFailure(FoundationError.Platform("A purchase is already in progress."))
+        }
+        val productDetails = when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
+            is FoundationResult.Failure -> return result
+            is FoundationResult.Success -> result.value.firstOrNull { it.productId == LIFETIME_UNLOCK_PRODUCT_ID }
+                ?: return foundationFailure(FoundationError.Platform("Google Play product was not found: $LIFETIME_UNLOCK_PRODUCT_ID"))
+        }
+        val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(productDetails)
+            .build()
+        val purchaseResult = CompletableDeferred<FoundationResult<FullAccessEntitlementSnapshot>>()
+        pendingPurchase = purchaseResult
+        val billingResult = runCatching {
+            client.launchBillingFlow(
+                launchActivity,
+                BillingFlowParams.newBuilder()
+                    .setProductDetailsParamsList(listOf(productParams))
+                    .build()
+            )
+        }.getOrElse { throwable ->
+            pendingPurchase = null
+            return billingFailure(throwable, "Could not launch Google Play purchase flow.")
+        }
+        if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            pendingPurchase = null
+            return billingFailure(billingResult, "Could not launch Google Play purchase flow.")
+        }
+        return purchaseResult.await()
+    }
+
+    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
+        val purchaseResult = pendingPurchase ?: return
+        pendingPurchase = null
+        when (billingResult.responseCode) {
+            BillingClient.BillingResponseCode.OK -> {
+                scope.launch {
+                    purchaseResult.complete(processPurchaseUpdates(purchases.orEmpty()))
+                }
+            }
+            BillingClient.BillingResponseCode.USER_CANCELED -> {
+                purchaseResult.complete(
+                    foundationFailure(FoundationError.Platform("Purchase cancelled."))
+                )
+            }
+            else -> {
+                purchaseResult.complete(
+                    billingFailure(billingResult, "Google Play purchase failed.")
+                )
+            }
+        }
+    }
+
+    private suspend fun processPurchaseUpdates(purchases: List<Purchase>): FoundationResult<FullAccessEntitlementSnapshot> {
+        val relevant = purchases.filter { purchase ->
+            purchase.products.any { it == LIFETIME_UNLOCK_PRODUCT_ID }
+        }
+        val completed = relevant.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+        if (completed.isEmpty()) {
+            return if (relevant.any { it.purchaseState == Purchase.PurchaseState.PENDING }) {
+                foundationFailure(FoundationError.Platform("Purchase is pending. Full Access unlocks after Google Play confirms payment."))
+            } else {
+                foundationFailure(FoundationError.Platform("Google Play did not return a completed Full Access purchase."))
+            }
+        }
+        completed.forEach { purchase ->
+            when (val acknowledged = acknowledgeIfNeeded(purchase)) {
+                is FoundationResult.Failure -> return acknowledged
+                is FoundationResult.Success -> Unit
+            }
+        }
+        return lifetimeUnlockedSnapshot()
+    }
+
+    private suspend fun entitlementSnapshot(): FoundationResult<FullAccessEntitlementSnapshot> {
+        val inAppPurchases = when (val result = queryPurchases(BillingClient.ProductType.INAPP)) {
+            is FoundationResult.Failure -> return result
+            is FoundationResult.Success -> result.value
+        }
+        val lifetimePurchases = inAppPurchases.filter { purchase ->
+            purchase.products.any { it == LIFETIME_UNLOCK_PRODUCT_ID }
+        }
+        lifetimePurchases
+            .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+            .forEach { purchase ->
+                when (val acknowledged = acknowledgeIfNeeded(purchase)) {
+                    is FoundationResult.Failure -> return acknowledged
+                    is FoundationResult.Success -> Unit
+                }
+            }
+        return foundationSuccess(
+            FullAccessEntitlementSnapshot(
+                lifetimeUnlocked = lifetimePurchases.anyActiveProduct(LIFETIME_UNLOCK_PRODUCT_ID),
+                storeStatus = FullAccessStoreStatus.AVAILABLE,
+                message = if (lifetimePurchases.any { it.purchaseState == Purchase.PurchaseState.PENDING }) {
+                    "Purchase is pending. Full Access unlocks after Google Play confirms payment."
+                } else {
+                    null
+                }
+            )
+        )
+    }
+
+    private suspend fun queryProductDetails(
+        products: List<QueryProductDetailsParams.Product>
+    ): FoundationResult<List<ProductDetails>> {
+        val client = when (val connected = connectedClient()) {
+            is FoundationResult.Failure -> return connected
+            is FoundationResult.Success -> connected.value
+        }
+        val params = QueryProductDetailsParams.newBuilder()
+            .setProductList(products)
+            .build()
+        return suspendCancellableCoroutine { continuation ->
+            runCatching {
+                client.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
+                    if (!continuation.isActive) return@queryProductDetailsAsync
+                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                        continuation.resume(foundationSuccess(productDetailsResult.productDetailsList))
+                    } else {
+                        continuation.resume(billingFailure(billingResult, "Could not load Google Play products."))
+                    }
+                }
+            }.onFailure { throwable ->
+                if (continuation.isActive) {
+                    continuation.resume(billingFailure(throwable, "Could not load Google Play products."))
+                }
+            }
+        }
+    }
+
+    private suspend fun queryPurchases(productType: String): FoundationResult<List<Purchase>> {
+        val client = when (val connected = connectedClient()) {
+            is FoundationResult.Failure -> return connected
+            is FoundationResult.Success -> connected.value
+        }
+        val params = QueryPurchasesParams.newBuilder()
+            .setProductType(productType)
+            .build()
+        return suspendCancellableCoroutine { continuation ->
+            runCatching {
+                client.queryPurchasesAsync(params) { billingResult, purchases ->
+                    if (!continuation.isActive) return@queryPurchasesAsync
+                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                        continuation.resume(foundationSuccess(purchases))
+                    } else {
+                        continuation.resume(billingFailure(billingResult, "Could not restore Google Play purchases."))
+                    }
+                }
+            }.onFailure { throwable ->
+                if (continuation.isActive) {
+                    continuation.resume(billingFailure(throwable, "Could not restore Google Play purchases."))
+                }
+            }
+        }
+    }
+
+    private suspend fun acknowledgeIfNeeded(purchase: Purchase): FoundationResult<Unit> {
+        if (purchase.isAcknowledged || purchase.purchaseState != Purchase.PurchaseState.PURCHASED) {
+            return foundationSuccess(Unit)
+        }
+        val client = when (val connected = connectedClient()) {
+            is FoundationResult.Failure -> return connected
+            is FoundationResult.Success -> connected.value
+        }
+        val params = AcknowledgePurchaseParams.newBuilder()
+            .setPurchaseToken(purchase.purchaseToken)
+            .build()
+        return suspendCancellableCoroutine { continuation ->
+            runCatching {
+                client.acknowledgePurchase(params) { billingResult ->
+                    if (!continuation.isActive) return@acknowledgePurchase
+                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                        continuation.resume(foundationSuccess(Unit))
+                    } else {
+                        continuation.resume(billingFailure(billingResult, "Could not acknowledge Google Play purchase."))
+                    }
+                }
+            }.onFailure { throwable ->
+                if (continuation.isActive) {
+                    continuation.resume(billingFailure(throwable, "Could not acknowledge Google Play purchase."))
+                }
+            }
+        }
+    }
+
+    private suspend fun connectedClient(): FoundationResult<BillingClient> {
+        val client = billingClient ?: return unavailable()
+        if (client.isReady) return foundationSuccess(client)
+        pendingConnection?.let { return it.await() }
+
+        val connection = CompletableDeferred<FoundationResult<BillingClient>>()
+        pendingConnection = connection
+        runCatching {
+            client.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(billingResult: BillingResult) {
+                    if (pendingConnection == connection) {
+                        pendingConnection = null
+                    }
+                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                        connection.complete(foundationSuccess(client))
+                    } else {
+                        connection.complete(billingFailure(billingResult, "Could not connect to Google Play Billing."))
+                    }
+                }
+
+                override fun onBillingServiceDisconnected() {
+                    if (pendingConnection == connection) {
+                        pendingConnection = null
+                    }
+                    connection.complete(
+                        foundationFailure(FoundationError.Platform("Google Play Billing disconnected. Try again."))
+                    )
+                }
+            })
+        }.onFailure { throwable ->
+            if (pendingConnection == connection) {
+                pendingConnection = null
+            }
+            connection.complete(billingFailure(throwable, "Could not connect to Google Play Billing."))
+        }
+        return connection.await()
+    }
+
+    private fun List<Purchase>.anyActiveProduct(productId: String): Boolean =
+        any { purchase ->
+            purchase.purchaseState == Purchase.PurchaseState.PURCHASED && purchase.products.any { it == productId }
+        }
+
+    private fun lifetimeUnlockedSnapshot(): FoundationResult<FullAccessEntitlementSnapshot> =
+        foundationSuccess(
+            FullAccessEntitlementSnapshot(
+                lifetimeUnlocked = true,
+                storeStatus = FullAccessStoreStatus.AVAILABLE,
+                message = null
+            )
+        )
+
+    private fun ProductDetails.toLifetimeStoreOffer(): FullAccessStoreOffer =
+        FullAccessStoreOffer(
+            title = "Lifetime",
+            priceLabel = lifetimePurchaseOfferDetails()?.formattedPrice?.takeIf { it.isNotBlank() }
+                ?: LIFETIME_FALLBACK_PRICE_LABEL,
+            termsLabel = LIFETIME_TERMS_LABEL
+        )
+
+    private fun fallbackLifetimeOffer(): FullAccessStoreOffer =
+        FullAccessStoreOffer(
+            title = "Lifetime",
+            priceLabel = LIFETIME_FALLBACK_PRICE_LABEL,
+            termsLabel = LIFETIME_TERMS_LABEL
+        )
+
+    private fun ProductDetails.lifetimePurchaseOfferDetails(): ProductDetails.OneTimePurchaseOfferDetails? =
+        oneTimePurchaseOfferDetailsList?.firstOrNull() ?: oneTimePurchaseOfferDetails
+
+    private fun lifetimeProductQuery(): QueryProductDetailsParams.Product =
+        QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(LIFETIME_UNLOCK_PRODUCT_ID)
+            .setProductType(BillingClient.ProductType.INAPP)
+            .build()
+
+    private fun <T> unavailable(): FoundationResult<T> =
+        foundationFailure(FoundationError.Platform("Google Play Billing is unavailable on this device."))
+
+    private fun <T> billingFailure(result: BillingResult, fallback: String): FoundationResult<T> {
+        val debug = result.debugMessage.takeIf { it.isNotBlank() }
+        val message = if (debug == null) fallback else "$fallback ${debug}"
+        return foundationFailure(FoundationError.Platform(message))
+    }
+
+    private fun <T> billingFailure(throwable: Throwable, fallback: String): FoundationResult<T> {
+        val detail = throwable.message?.takeIf { it.isNotBlank() }
+        val message = if (detail == null) fallback else "$fallback $detail"
+        return foundationFailure(FoundationError.Platform(message))
+    }
+
+    private companion object {
+        const val LIFETIME_UNLOCK_PRODUCT_ID = FullAccessBillingProductIds.LIFETIME
+        const val LIFETIME_FALLBACK_PRICE_LABEL = "${'$'}14.99"
+        const val LIFETIME_TERMS_LABEL = "One-time Google Play purchase."
+    }
 }
 
 actual class HapticFeedback actual constructor(context: Any?) {

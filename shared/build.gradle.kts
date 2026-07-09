@@ -56,6 +56,7 @@ kotlin {
             implementation(libs.koin.android)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.lifecycle.runtime.compose)
+            implementation(libs.play.billing)
             implementation(libs.sqldelight.android)
         }
         androidUnitTest.dependencies {

@@ -6,6 +6,7 @@ import com.jjswigut.oopsallprs.dev.DeveloperSeedStateHolder
 import com.jjswigut.oopsallprs.dev.DeveloperSeedUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
 import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
@@ -26,7 +27,8 @@ fun testAppState(developerToolsEnabled: Boolean = false): AppState {
     val setLogging = SetLoggingUseCases(store, store)
     val activePrFeedback = ActivePrFeedbackUseCase(store)
     val personalRecordDerivation = PersonalRecordDerivationUseCase(store)
-    val routineUseCases = RoutineUseCases(store, store, store, personalRecordDerivation)
+    val fullAccess = FullAccessUseCases(store)
+    val routineUseCases = RoutineUseCases(store, store, store, personalRecordDerivation, fullAccess = fullAccess)
     val activeWorkout = ActiveWorkoutStateHolder(setLogging, lifecycle, store, activePrFeedback)
     val exerciseCatalog = ExerciseCatalogUseCases(store, store)
     val developerSeeds = if (developerToolsEnabled) {
@@ -47,7 +49,7 @@ fun testAppState(developerToolsEnabled: Boolean = false): AppState {
         workoutLifecycle = lifecycle,
         setLogging = setLogging,
         navigation = AppNavigationStateHolder(lifecycle),
-        workoutHome = WorkoutHomeStateHolder(lifecycle, routineUseCases),
+        workoutHome = WorkoutHomeStateHolder(lifecycle, routineUseCases, fullAccess),
         activeWorkout = activeWorkout,
         exercisePicker = ExercisePickerStateHolder(exerciseCatalog, activeWorkout),
         exerciseManagement = ExerciseManagementStateHolder(exerciseCatalog),
@@ -55,7 +57,8 @@ fun testAppState(developerToolsEnabled: Boolean = false): AppState {
         routines = RoutineStateHolder(routineUseCases, exerciseCatalog),
         progress = ProgressStateHolder(store, store, store),
         history = HistoryStateHolder(store, store),
-        profile = ProfileStateHolder(store, store),
+        profile = ProfileStateHolder(store, store, fullAccess = fullAccess),
+        fullAccess = fullAccess,
         developerSeeds = developerSeeds
     )
 }

@@ -12,6 +12,7 @@ import com.jjswigut.oopsallprs.data.repository.SqlSetLedgerRepository
 import com.jjswigut.oopsallprs.data.repository.SqlWorkoutRepository
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
@@ -33,6 +34,7 @@ val foundationModule = module {
     single { SqlRoutineRepository(get<SqlFoundationStore>()) }
     single { SqlExerciseRepository(get<SqlFoundationStore>()) }
     single { SqlProgressRepository(get<SqlFoundationStore>()) }
+    single { FullAccessUseCases(get<SqlFoundationStore>()) }
     single { PreviousWorkoutDefaultsUseCase(get<SqlWorkoutRepository>()) }
     single {
         WorkoutLifecycleUseCases(
@@ -46,7 +48,7 @@ val foundationModule = module {
     }
     single { SetLoggingUseCases(get<SqlWorkoutRepository>(), get<SqlSetLedgerRepository>(), get<SqlFoundationStore>()) }
     single { PersonalRecordDerivationUseCase(get<SqlProgressRepository>()) }
-    single { RoutineUseCases(get<SqlWorkoutRepository>(), get<SqlRoutineRepository>(), get<SqlWorkoutRepository>(), get<PersonalRecordDerivationUseCase>(), get<SqlFoundationStore>()) }
+    single { RoutineUseCases(get<SqlWorkoutRepository>(), get<SqlRoutineRepository>(), get<SqlWorkoutRepository>(), get<PersonalRecordDerivationUseCase>(), get<SqlFoundationStore>(), fullAccess = get<FullAccessUseCases>()) }
     single { ExerciseCatalogUseCases(get<SqlExerciseRepository>(), get<SqlWorkoutRepository>()) }
     single { ExerciseCatalogInitializer(get<SqlExerciseRepository>()) }
     single { ProgressStateHolder(get<SqlProgressRepository>(), get<SqlWorkoutRepository>(), get<SqlFoundationStore>()) }
