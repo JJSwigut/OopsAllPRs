@@ -29,6 +29,7 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.UnfetchedProduct
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.BackupDocument
 import com.jjswigut.oopsallprs.domain.model.BackupLinkedFile
@@ -429,10 +430,14 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         return when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
             is FoundationResult.Failure -> foundationSuccess(listOf(fallbackLifetimeOffer()))
             is FoundationResult.Success -> {
-                val offer = result.value
-                    .firstOrNull { it.productId == LIFETIME_UNLOCK_PRODUCT_ID }
-                    ?.toLifetimeStoreOffer()
-                    ?: fallbackLifetimeOffer()
+                val productDetails = when (val product = result.value.lifetimeProductDetails()) {
+                    is FoundationResult.Failure -> return product
+                    is FoundationResult.Success -> product.value
+                }
+                val offer = when (val storeOffer = productDetails.toLifetimeStoreOffer()) {
+                    is FoundationResult.Failure -> return storeOffer
+                    is FoundationResult.Success -> storeOffer.value
+                }
                 foundationSuccess(listOf(offer))
             }
         }
@@ -452,13 +457,21 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         pendingPurchase?.let {
             return foundationFailure(FoundationError.Platform("A purchase is already in progress."))
         }
-        val productDetails = when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
+        val productDetailsQuery = when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
             is FoundationResult.Failure -> return result
-            is FoundationResult.Success -> result.value.firstOrNull { it.productId == LIFETIME_UNLOCK_PRODUCT_ID }
-                ?: return foundationFailure(FoundationError.Platform("Google Play product was not found: $LIFETIME_UNLOCK_PRODUCT_ID"))
+            is FoundationResult.Success -> result.value
         }
+        val productDetails = when (val product = productDetailsQuery.lifetimeProductDetails()) {
+            is FoundationResult.Failure -> return product
+            is FoundationResult.Success -> product.value
+        }
+        val selectedOffer = productDetails.selectLifetimePurchaseOption()
+            ?: return lifetimePurchaseOptionUnavailable()
+        val selectedOfferToken = selectedOffer.token
+            ?: return lifetimePurchaseOptionUnavailable()
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(productDetails)
+            .setOfferToken(selectedOfferToken)
             .build()
         val purchaseResult = CompletableDeferred<FoundationResult<FullAccessEntitlementSnapshot>>()
         pendingPurchase = purchaseResult
@@ -554,7 +567,7 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
 
     private suspend fun queryProductDetails(
         products: List<QueryProductDetailsParams.Product>
-    ): FoundationResult<List<ProductDetails>> {
+    ): FoundationResult<ProductDetailsQuery> {
         val client = when (val connected = connectedClient()) {
             is FoundationResult.Failure -> return connected
             is FoundationResult.Success -> connected.value
@@ -567,7 +580,14 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
                 client.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
                     if (!continuation.isActive) return@queryProductDetailsAsync
                     if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        continuation.resume(foundationSuccess(productDetailsResult.productDetailsList))
+                        continuation.resume(
+                            foundationSuccess(
+                                ProductDetailsQuery(
+                                    productDetails = productDetailsResult.productDetailsList,
+                                    unfetchedProducts = productDetailsResult.unfetchedProductList
+                                )
+                            )
+                        )
                     } else {
                         continuation.resume(billingFailure(billingResult, "Could not load Google Play products."))
                     }
@@ -687,13 +707,17 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
             )
         )
 
-    private fun ProductDetails.toLifetimeStoreOffer(): FullAccessStoreOffer =
-        FullAccessStoreOffer(
-            title = "Lifetime",
-            priceLabel = lifetimePurchaseOfferDetails()?.formattedPrice?.takeIf { it.isNotBlank() }
-                ?: LIFETIME_FALLBACK_PRICE_LABEL,
-            termsLabel = LIFETIME_TERMS_LABEL
+    private fun ProductDetails.toLifetimeStoreOffer(): FoundationResult<FullAccessStoreOffer> {
+        val selectedOffer = selectLifetimePurchaseOption()
+            ?: return lifetimePurchaseOptionUnavailable()
+        return foundationSuccess(
+            FullAccessStoreOffer(
+                title = "Lifetime",
+                priceLabel = selectedOffer.priceLabel ?: LIFETIME_FALLBACK_PRICE_LABEL,
+                termsLabel = LIFETIME_TERMS_LABEL
+            )
         )
+    }
 
     private fun fallbackLifetimeOffer(): FullAccessStoreOffer =
         FullAccessStoreOffer(
@@ -702,8 +726,54 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
             termsLabel = LIFETIME_TERMS_LABEL
         )
 
-    private fun ProductDetails.lifetimePurchaseOfferDetails(): ProductDetails.OneTimePurchaseOfferDetails? =
-        oneTimePurchaseOfferDetailsList?.firstOrNull() ?: oneTimePurchaseOfferDetails
+    private fun ProductDetails.selectLifetimePurchaseOption(): AndroidLifetimePurchaseOption? =
+        AndroidLifetimePurchaseOptionSelector.select(lifetimePurchaseOptions())
+
+    private fun ProductDetails.lifetimePurchaseOptions(): List<AndroidLifetimePurchaseOption> {
+        val currentOptions = oneTimePurchaseOfferDetailsList.orEmpty()
+        val source = currentOptions.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(oneTimePurchaseOfferDetails)
+        return source.map { details ->
+            AndroidLifetimePurchaseOption(
+                formattedPrice = details.formattedPrice,
+                offerToken = details.offerToken,
+                purchaseOptionId = details.purchaseOptionId,
+                offerId = details.offerId,
+                hasRentalDetails = details.rentalDetails != null,
+                hasPreorderDetails = details.preorderDetails != null
+            )
+        }
+    }
+
+    private fun ProductDetailsQuery.lifetimeProductDetails(): FoundationResult<ProductDetails> {
+        productDetails.firstOrNull { it.productId == LIFETIME_UNLOCK_PRODUCT_ID }?.let { product ->
+            return foundationSuccess(product)
+        }
+
+        val unfetched = unfetchedProducts.firstOrNull { unfetchedProduct ->
+            unfetchedProduct.productId == LIFETIME_UNLOCK_PRODUCT_ID
+        }
+        val message = when (unfetched?.statusCode) {
+            UnfetchedProduct.StatusCode.NO_ELIGIBLE_OFFER ->
+                "Google Play has no eligible purchase option for $LIFETIME_UNLOCK_PRODUCT_ID. Confirm the buy purchase option is active and available to this tester and region."
+            UnfetchedProduct.StatusCode.PRODUCT_NOT_FOUND ->
+                "Google Play product was not found: $LIFETIME_UNLOCK_PRODUCT_ID. Confirm the one-time product is active for com.jjswigut.oopsallprs.android."
+            UnfetchedProduct.StatusCode.INVALID_PRODUCT_ID_FORMAT ->
+                "Google Play rejected the product ID format: $LIFETIME_UNLOCK_PRODUCT_ID."
+            null ->
+                "Google Play product was not returned: $LIFETIME_UNLOCK_PRODUCT_ID. Confirm the one-time product and buy purchase option are active."
+            else ->
+                "Google Play could not load $LIFETIME_UNLOCK_PRODUCT_ID. Product status code: ${unfetched.statusCode}."
+        }
+        return foundationFailure(FoundationError.Platform(message))
+    }
+
+    private fun <T> lifetimePurchaseOptionUnavailable(): FoundationResult<T> =
+        foundationFailure(
+            FoundationError.Platform(
+                "Google Play returned $LIFETIME_UNLOCK_PRODUCT_ID without one eligible base buy purchase option and offer token. Confirm purchase option ID ${AndroidLifetimePurchaseOptionSelector.EXPECTED_BUY_PURCHASE_OPTION_ID} is active and available."
+            )
+        )
 
     private fun lifetimeProductQuery(): QueryProductDetailsParams.Product =
         QueryProductDetailsParams.Product.newBuilder()
@@ -731,6 +801,11 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         const val LIFETIME_FALLBACK_PRICE_LABEL = "${'$'}14.99"
         const val LIFETIME_TERMS_LABEL = "One-time Google Play purchase."
     }
+
+    private data class ProductDetailsQuery(
+        val productDetails: List<ProductDetails>,
+        val unfetchedProducts: List<UnfetchedProduct>
+    )
 }
 
 actual class HapticFeedback actual constructor(context: Any?) {
