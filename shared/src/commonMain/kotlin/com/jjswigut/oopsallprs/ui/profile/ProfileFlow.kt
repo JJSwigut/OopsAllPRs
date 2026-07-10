@@ -37,7 +37,10 @@ fun ProfileFlow(
     onWeightStepDraftChange: (Double) -> Unit,
     onWeightStepSave: () -> Unit,
     onWeightStepCancel: () -> Unit,
-    onDefaultRestSelected: (Int) -> Unit,
+    onDefaultRestClick: () -> Unit,
+    onDefaultRestDraftChange: (Int) -> Unit,
+    onDefaultRestSave: () -> Unit,
+    onDefaultRestCancel: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit,
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
@@ -75,8 +78,8 @@ fun ProfileFlow(
             onWeightUnitSelected = onWeightUnitSelected,
             onWeightStepClick = onWeightStepClick
         )
-        RestPreferencesCard(state, onDefaultRestSelected, onRestSoundChanged)
-        ExportCard(state, onExportRequested)
+        RestPreferencesCard(state, onDefaultRestClick, onRestSoundChanged)
+        ExercisesCard(onManageExercises)
         BackupCard(
             state = state,
             onStartBackupSetup = onStartBackupSetup,
@@ -88,7 +91,7 @@ fun ProfileFlow(
             onRestoreBackupConflict = onRestoreBackupConflict,
             onCancelBackupConflict = onCancelBackupConflict
         )
-        LocalStatusCard(state.localStatus, onManageExercises)
+        ExportCard(state, onExportRequested)
         developerSeedState?.let { seedState ->
             DeveloperSeedCard(seedState, onDeveloperSeedSelected)
         }
@@ -106,6 +109,14 @@ fun ProfileFlow(
             onDraftChange = onWeightStepDraftChange,
             onSave = onWeightStepSave,
             onCancel = onWeightStepCancel
+        )
+    }
+    if (state.isDefaultRestPickerVisible) {
+        DefaultRestDialog(
+            state = state,
+            onDraftChange = onDefaultRestDraftChange,
+            onSave = onDefaultRestSave,
+            onCancel = onDefaultRestCancel
         )
     }
     state.backupSetupStep?.let { step ->
@@ -424,17 +435,26 @@ private fun DeveloperSeedCard(
 @Composable
 private fun RestPreferencesCard(
     state: ProfileState,
-    onDefaultRestSelected: (Int) -> Unit,
+    onDefaultRestClick: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit
 ) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             SectionLabel("Rest")
-            FoundationMutedText("Default ${formatRestDurationSeconds(state.defaultRestSeconds)}")
-            RestDurationRoller(
-                seconds = state.defaultRestSeconds,
-                onSecondsChange = onDefaultRestSelected
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    FoundationText("Default rest")
+                    FoundationMutedText(formatRestDurationSeconds(state.defaultRestSeconds))
+                }
+                FitButton(
+                    text = "Change",
+                    onClick = onDefaultRestClick,
+                    style = FitButtonStyle.Secondary
+                )
+            }
             ToggleRow(
                 label = "Rest sound",
                 value = if (state.restSoundEnabled) "On" else "Off",
@@ -442,6 +462,48 @@ private fun RestPreferencesCard(
                 onCheckedChange = onRestSoundChanged
             )
             FoundationMutedText("New exercises use ${formatRestDurationSeconds(state.defaultRestSeconds)} rest.")
+        }
+    }
+}
+
+@Composable
+private fun DefaultRestDialog(
+    state: ProfileState,
+    onDraftChange: (Int) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit
+) {
+    FitDialog(onDismissRequest = onCancel) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            SectionLabel("Default rest")
+            FoundationMutedText(formatRestDurationSeconds(state.draftDefaultRestSeconds))
+            RestDurationRoller(
+                seconds = state.draftDefaultRestSeconds,
+                onSecondsChange = onDraftChange
+            )
+            state.defaultRestError?.let { error ->
+                FoundationText(
+                    text = error,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = "Cancel",
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = "Save",
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Primary
+                )
+            }
         }
     }
 }
@@ -559,24 +621,16 @@ private fun ExportCard(
 }
 
 @Composable
-private fun LocalStatusCard(
-    status: LocalReadinessStatus,
-    onManageExercises: () -> Unit
-) {
+private fun ExercisesCard(onManageExercises: () -> Unit) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
-            SectionLabel("Data")
-            StatusRow("Storage", status.storageLabel)
-            StatusRow("Sync", status.syncLabel)
-            StatusRow("Backup", status.backupLabel)
-            StatusRow("Rest alerts", status.restNotificationLabel)
-            StatusRow("Export", status.exportLabel)
-            StatusRow("Alpha", status.alphaGateLabel)
+            SectionLabel("Exercises")
+            FoundationMutedText("Add, edit, or archive the exercises in your library.")
             FitButton(
                 text = "Manage exercises",
                 onClick = onManageExercises,
                 modifier = Modifier.fillMaxWidth(),
-                style = FitButtonStyle.Secondary
+                style = FitButtonStyle.Primary
             )
         }
     }

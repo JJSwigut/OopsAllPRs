@@ -29,7 +29,6 @@ class ProfileStateHolderTest {
 
         assertTrue(holder.state.value.isHydrated)
         assertEquals(WeightUnit.KILOGRAMS, holder.state.value.weightUnit)
-        assertEquals("Local database", holder.state.value.localStatus.storageLabel)
     }
 
     @Test
@@ -138,7 +137,6 @@ class ProfileStateHolderTest {
         assertEquals(PaletteMode.LIGHT, holder.state.value.paletteMode)
         assertFalse(holder.state.value.hapticsEnabled)
         assertTrue(holder.state.value.reduceMotion)
-        assertEquals("Cloud sync off", holder.state.value.localStatus.syncLabel)
     }
 
     private class FailingExportRepository : ExportRepository {
