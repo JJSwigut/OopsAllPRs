@@ -604,9 +604,10 @@ private fun DestinationContent(
             onWeightStepDraftChange = { step -> appState.profile.setDraftWeightStep(step) },
             onWeightStepSave = { scope.launch { appState.profile.saveWeightStep() } },
             onWeightStepCancel = { appState.profile.cancelWeightStepPicker() },
-            onDefaultRestSelected = { seconds ->
-                scope.launch { appState.profile.setDefaultRestSeconds(seconds) }
-            },
+            onDefaultRestClick = { appState.profile.openDefaultRestPicker() },
+            onDefaultRestDraftChange = { seconds -> appState.profile.setDraftDefaultRestSeconds(seconds) },
+            onDefaultRestSave = { scope.launch { appState.profile.saveDefaultRest() } },
+            onDefaultRestCancel = { appState.profile.cancelDefaultRestPicker() },
             onRestSoundChanged = { enabled ->
                 scope.launch { appState.profile.setRestSoundEnabled(enabled) }
             },
