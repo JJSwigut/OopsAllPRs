@@ -37,6 +37,10 @@ data class ExerciseBlockState(
     val displayName: String,
     val isBodyweight: Boolean,
     val loggingMode: ExerciseLoggingMode,
+    val groupId: FoundationId? = null,
+    val groupLabel: String? = null,
+    val groupRounds: Int? = null,
+    val loadCalculatorKind: LoadCalculatorKind?,
     val position: OrderedPosition,
     val rest: RestConfiguration,
     val loggedRows: List<LoggedSetRow>,
@@ -44,6 +48,16 @@ data class ExerciseBlockState(
     val prFeedback: ActivePrFeedback? = null,
     val inlineError: String? = null
 )
+
+internal data class ExerciseBlockGroupState(
+    val blocks: List<ExerciseBlockState>
+) {
+    val groupId: FoundationId? = blocks.firstOrNull()?.groupId
+    val groupLabel: String? = blocks.firstOrNull()?.groupLabel
+    val groupRounds: Int? = blocks.firstOrNull()?.groupRounds
+    val isGrouped: Boolean = groupId != null && blocks.size > 1
+    val loggedSetCount: Int = blocks.sumOf { it.loggedRows.size }
+}
 
 data class SetRowDraft(
     val draftId: FoundationId,
@@ -133,6 +147,39 @@ fun ActiveWorkout.toView(
     )
 }
 
+internal fun ActiveWorkoutView.exerciseBlockGroups(): List<ExerciseBlockGroupState> =
+    exerciseBlocks.toExerciseBlockGroups()
+
+internal fun List<ExerciseBlockState>.toExerciseBlockGroups(): List<ExerciseBlockGroupState> {
+    val groups = mutableListOf<ExerciseBlockGroupState>()
+    var pendingGroupId: FoundationId? = null
+    var pendingBlocks = mutableListOf<ExerciseBlockState>()
+
+    fun flushPendingGroup() {
+        if (pendingBlocks.isNotEmpty()) {
+            groups += ExerciseBlockGroupState(pendingBlocks.toList())
+        }
+        pendingGroupId = null
+        pendingBlocks = mutableListOf()
+    }
+
+    forEach { block ->
+        val blockGroupId = block.groupId
+        if (blockGroupId == null) {
+            flushPendingGroup()
+            groups += ExerciseBlockGroupState(listOf(block))
+        } else if (pendingGroupId == blockGroupId) {
+            pendingBlocks += block
+        } else {
+            flushPendingGroup()
+            pendingGroupId = blockGroupId
+            pendingBlocks += block
+        }
+    }
+    flushPendingGroup()
+    return groups
+}
+
 private fun ActiveExercise.toBlock(
     existingDraft: SetRowDraft?,
     prFeedbackBySetId: Map<FoundationId, ActivePrFeedback>
@@ -152,6 +199,10 @@ private fun ActiveExercise.toBlock(
         displayName = reference.displayNameSnapshot,
         isBodyweight = reference.isBodyweight,
         loggingMode = reference.loggingMode,
+        groupId = groupContext?.groupId,
+        groupLabel = groupContext?.label,
+        groupRounds = groupContext?.rounds,
+        loadCalculatorKind = loadCalculatorKind(reference.equipmentSnapshot, draft.setKind),
         position = position,
         rest = rest,
         loggedRows = loggedRows,

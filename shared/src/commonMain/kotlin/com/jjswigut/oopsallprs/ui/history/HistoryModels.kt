@@ -11,6 +11,7 @@ import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ui.common.shortDateLabel
+import com.jjswigut.oopsallprs.ui.common.shortDateTimeLabel
 import kotlinx.datetime.Instant
 import kotlin.math.abs
 import kotlin.math.round
@@ -64,8 +65,7 @@ data class HistoryListItem(
     val finishedAt: Instant,
     val durationLabel: String,
     val exerciseCount: Int,
-    val setCount: Int,
-    val hasPr: Boolean
+    val setCount: Int
 )
 
 data class TemplateListItem(
@@ -114,12 +114,11 @@ fun List<CompletedWorkout>.toHistoryRows(
         val summary = workout.toSummary(personalRecords)
         HistoryListItem(
             workoutId = workout.id,
-            title = summary.exercises.firstOrNull()?.displayName ?: "Workout",
+            title = workout.finishedAt.shortDateTimeLabel(),
             finishedAt = workout.finishedAt,
             durationLabel = summary.durationLabel,
             exerciseCount = summary.exerciseCount,
-            setCount = summary.setCount,
-            hasPr = summary.prCount > 0
+            setCount = summary.setCount
         )
     }
 

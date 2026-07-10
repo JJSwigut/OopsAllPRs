@@ -61,4 +61,23 @@ class ActiveWorkoutMistakeRecoveryTest {
         assertNull(holder.state.value.workout)
         assertNull(harness.store.activeWorkout(workout.id))
     }
+
+    @Test
+    fun finishConfirmationCanBeRequestedAndCanceledWithoutCompletingWorkout() = runTest {
+        val harness = FoundationHarness()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle, harness.store)
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+
+        holder.hydrate(workout.id, now = instant(1_100))
+        holder.requestFinish()
+
+        assertTrue(holder.state.value.isFinishConfirmationVisible)
+        assertFalse(holder.state.value.isDiscardConfirmationVisible)
+
+        holder.cancelFinish()
+
+        assertFalse(holder.state.value.isFinishConfirmationVisible)
+        assertEquals(workout.id, holder.state.value.workout?.workoutId)
+        assertEquals(workout.id, harness.store.activeWorkout(workout.id)?.id)
+    }
 }

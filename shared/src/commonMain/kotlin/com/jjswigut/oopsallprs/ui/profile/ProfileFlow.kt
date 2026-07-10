@@ -23,6 +23,8 @@ import com.jjswigut.oopsallprs.ds.component.FitRoller
 import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
 import com.jjswigut.oopsallprs.ds.component.FitToggle
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.common.RestDurationRoller
+import com.jjswigut.oopsallprs.ui.common.formatRestDurationSeconds
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.navigation.PaletteMode
@@ -40,7 +42,20 @@ fun ProfileFlow(
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onReduceMotionChanged: (Boolean) -> Unit,
+    onPurchaseLifetimeUnlock: () -> Unit,
+    onRestorePurchases: () -> Unit,
     onExportRequested: (ExportType) -> Unit,
+    onStartBackupSetup: () -> Unit,
+    onBackupSetupNext: () -> Unit,
+    onBackupSetupBack: () -> Unit,
+    onBackupSetupDismiss: () -> Unit,
+    onLinkBackupFile: () -> Unit,
+    onBackupNow: () -> Unit,
+    onSyncNow: () -> Unit,
+    onRestoreFromFile: () -> Unit,
+    onKeepLocalBackup: () -> Unit,
+    onRestoreBackupConflict: () -> Unit,
+    onCancelBackupConflict: () -> Unit,
     onManageExercises: () -> Unit,
     developerSeedState: DeveloperSeedState? = null,
     onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit = {},
@@ -50,6 +65,11 @@ fun ProfileFlow(
         modifier = modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
     ) {
+        FullAccessCard(
+            state = state,
+            onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
+            onRestorePurchases = onRestorePurchases
+        )
         UnitsCard(
             state = state,
             onWeightUnitSelected = onWeightUnitSelected,
@@ -57,6 +77,17 @@ fun ProfileFlow(
         )
         RestPreferencesCard(state, onDefaultRestSelected, onRestSoundChanged)
         ExportCard(state, onExportRequested)
+        BackupCard(
+            state = state,
+            onStartBackupSetup = onStartBackupSetup,
+            onLinkBackupFile = onLinkBackupFile,
+            onBackupNow = onBackupNow,
+            onSyncNow = onSyncNow,
+            onRestoreFromFile = onRestoreFromFile,
+            onKeepLocalBackup = onKeepLocalBackup,
+            onRestoreBackupConflict = onRestoreBackupConflict,
+            onCancelBackupConflict = onCancelBackupConflict
+        )
         LocalStatusCard(state.localStatus, onManageExercises)
         developerSeedState?.let { seedState ->
             DeveloperSeedCard(seedState, onDeveloperSeedSelected)
@@ -77,6 +108,282 @@ fun ProfileFlow(
             onCancel = onWeightStepCancel
         )
     }
+    state.backupSetupStep?.let { step ->
+        BackupSetupDialog(
+            step = step,
+            isBusy = state.isBackupBusy,
+            onNext = onBackupSetupNext,
+            onBack = onBackupSetupBack,
+            onDismiss = onBackupSetupDismiss,
+            onChooseLocation = onLinkBackupFile
+        )
+    }
+}
+
+@Composable
+private fun FullAccessCard(
+    state: ProfileState,
+    onPurchaseLifetimeUnlock: () -> Unit,
+    onRestorePurchases: () -> Unit
+) {
+    val access = state.fullAccessStatus
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Unlock")
+            StatusRow("Status", access.statusLabel)
+            FoundationMutedText(access.detailLabel)
+            when {
+                access.hasFullAccess -> FoundationMutedText("Unlimited logging is available forever.")
+                access.isFreeLimitReached -> {
+                    FoundationText(
+                        text = "You've used your free workouts.",
+                        style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                    )
+                    FoundationMutedText("Unlock unlimited workout logging forever.")
+                    FoundationMutedText(access.termsLabel)
+                    StatusRow("Price", access.offerLabel)
+                    FitButton(
+                        text = if (access.isStoreBusy) "Working" else "Unlock forever",
+                        onClick = onPurchaseLifetimeUnlock,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !access.isStoreBusy,
+                        style = FitButtonStyle.Primary
+                    )
+                    FitButton(
+                        text = if (access.isStoreBusy) "Working" else "Restore purchase",
+                        onClick = onRestorePurchases,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !access.isStoreBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                else -> FoundationMutedText("Keep logging. Unlock appears when the free workout limit is reached.")
+            }
+            if (!access.hasFullAccess && !access.isFreeLimitReached) {
+                FitButton(
+                    text = if (access.isStoreBusy) "Working" else "Restore purchase",
+                    onClick = onRestorePurchases,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !access.isStoreBusy,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            FoundationMutedText("Purchases restore through the app store used to buy them.")
+            access.error?.let { message ->
+                FoundationText(
+                    text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupCard(
+    state: ProfileState,
+    onStartBackupSetup: () -> Unit,
+    onLinkBackupFile: () -> Unit,
+    onBackupNow: () -> Unit,
+    onSyncNow: () -> Unit,
+    onRestoreFromFile: () -> Unit,
+    onKeepLocalBackup: () -> Unit,
+    onRestoreBackupConflict: () -> Unit,
+    onCancelBackupConflict: () -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Backup")
+            if (!state.backupStatus.isLinked) {
+                StatusRow("This phone", "Saved locally")
+                StatusRow("Backup", "Not set up")
+                FoundationMutedText("Keep a copy of your workouts in a file you choose, like Drive or local storage.")
+                FitButton(
+                    text = if (state.isBackupBusy) "Working" else "Set up backup",
+                    onClick = onStartBackupSetup,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isBackupBusy,
+                    style = FitButtonStyle.Primary
+                )
+                FoundationMutedText("No account is required. Oops All PRs only writes to the file you pick.")
+            } else {
+                StatusRow("Backup file", state.backupStatus.linkedLocation)
+                StatusRow("Last check", state.backupStatus.lastSyncLabel)
+                StatusRow("Status", state.backupStatus.lastOutcomeLabel)
+                FoundationMutedText(state.backupStatus.privacyLabel)
+                FitButton(
+                    text = if (state.isBackupBusy) "Working" else "Change backup file",
+                    onClick = onLinkBackupFile,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isBackupBusy,
+                    style = FitButtonStyle.Secondary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+                ) {
+                    FitButton(
+                        text = "Backup now",
+                        onClick = onBackupNow,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy && state.backupStatus.canBackup,
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Sync now",
+                        onClick = onSyncNow,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy && state.backupStatus.canSync,
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+            }
+            RestoreAction(onRestoreFromFile, state.isBackupBusy)
+            if (state.backupStatus.hasConflict) {
+                state.backupStatus.conflictSummary?.let { FoundationMutedText(it) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+                ) {
+                    FitButton(
+                        text = "Keep local",
+                        onClick = onKeepLocalBackup,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Restore backup",
+                        onClick = onRestoreBackupConflict,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isBackupBusy,
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                FitButton(
+                    text = "Cancel conflict",
+                    onClick = onCancelBackupConflict,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isBackupBusy,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            state.lastRestoreMessage?.let { FoundationMutedText(it) }
+            state.restoreWarning?.let {
+                FoundationText(
+                    text = it,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+            state.safetyBackupMessage?.let { FoundationMutedText(it) }
+            state.backupError?.let { message ->
+                FoundationText(
+                    text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupSetupDialog(
+    step: BackupSetupStep,
+    isBusy: Boolean,
+    onNext: () -> Unit,
+    onBack: () -> Unit,
+    onDismiss: () -> Unit,
+    onChooseLocation: () -> Unit
+) {
+    val content = when (step) {
+        BackupSetupStep.INTRO -> BackupSetupContent(
+            eyebrow = "Step 1 of 3",
+            title = "Back up your training",
+            body = "Oops All PRs keeps your data on this phone. A backup adds a second copy so a lost or replaced phone is less risky.",
+            bullets = listOf(
+                "Workouts, routines, exercises, PRs, preferences, and active workout state are included.",
+                "The app stays account-free and local-first."
+            ),
+            primary = "Next"
+        )
+        BackupSetupStep.LOCATION -> BackupSetupContent(
+            eyebrow = "Step 2 of 3",
+            title = "Pick where the file lives",
+            body = "Android will ask where to save the backup file. You can choose cloud storage, local files, or another document provider.",
+            bullets = listOf(
+                "Use a cloud folder if you want the file available on another device.",
+                "Anyone with access to the file can read it."
+            ),
+            primary = "Next"
+        )
+        BackupSetupStep.READY -> BackupSetupContent(
+            eyebrow = "Step 3 of 3",
+            title = "Create your backup file",
+            body = "After you choose a location, Oops All PRs writes the first backup and remembers that file for future backups.",
+            bullets = listOf(
+                "You can run Backup now any time from Profile.",
+                "Restore from file remains available if you need to recover data."
+            ),
+            primary = "Choose location"
+        )
+    }
+
+    FitDialog(onDismissRequest = onDismiss) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            SectionLabel(content.eyebrow)
+            FoundationText(
+                text = content.title,
+                style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+            )
+            FoundationMutedText(content.body)
+            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                content.bullets.forEach { bullet ->
+                    FoundationMutedText("- $bullet")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = if (step == BackupSetupStep.INTRO) "Close" else "Back",
+                    onClick = if (step == BackupSetupStep.INTRO) onDismiss else onBack,
+                    modifier = Modifier.weight(1f),
+                    enabled = !isBusy,
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = if (isBusy) "Working" else content.primary,
+                    onClick = if (step == BackupSetupStep.READY) onChooseLocation else onNext,
+                    modifier = Modifier.weight(1f),
+                    enabled = !isBusy,
+                    style = FitButtonStyle.Primary
+                )
+            }
+        }
+    }
+}
+
+private data class BackupSetupContent(
+    val eyebrow: String,
+    val title: String,
+    val body: String,
+    val bullets: List<String>,
+    val primary: String
+)
+
+@Composable
+private fun RestoreAction(
+    onRestoreFromFile: () -> Unit,
+    isBackupBusy: Boolean
+) {
+    FitButton(
+        text = "Restore from file",
+        onClick = onRestoreFromFile,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !isBackupBusy,
+        style = FitButtonStyle.Secondary
+    )
 }
 
 @Composable
@@ -120,15 +427,13 @@ private fun RestPreferencesCard(
     onDefaultRestSelected: (Int) -> Unit,
     onRestSoundChanged: (Boolean) -> Unit
 ) {
-    val options = listOf(60, 120, 180, 300)
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             SectionLabel("Rest")
-            FitSegmentedControl(
-                options = listOf("1m", "2m", "3m", "5m"),
-                selectedIndex = options.indexOf(state.defaultRestSeconds).takeIf { it >= 0 } ?: 1,
-                onSelect = { index -> onDefaultRestSelected(options[index]) },
-                modifier = Modifier.fillMaxWidth()
+            FoundationMutedText("Default ${formatRestDurationSeconds(state.defaultRestSeconds)}")
+            RestDurationRoller(
+                seconds = state.defaultRestSeconds,
+                onSecondsChange = onDefaultRestSelected
             )
             ToggleRow(
                 label = "Rest sound",
@@ -136,7 +441,7 @@ private fun RestPreferencesCard(
                 checked = state.restSoundEnabled,
                 onCheckedChange = onRestSoundChanged
             )
-            FoundationMutedText("New exercises use ${state.defaultRestSeconds / 60}m rest.")
+            FoundationMutedText("New exercises use ${formatRestDurationSeconds(state.defaultRestSeconds)} rest.")
         }
     }
 }

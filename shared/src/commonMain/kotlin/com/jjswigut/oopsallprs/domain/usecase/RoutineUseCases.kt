@@ -28,7 +28,8 @@ class RoutineUseCases(
     private val activeUx: ActiveWorkoutUxRepository? = null,
     private val personalRecords: PersonalRecordDerivationUseCase? = null,
     private val preferences: PreferencesRepository? = null,
-    private val restNotifications: RestAlertScheduler? = null
+    private val restNotifications: RestAlertScheduler? = null,
+    private val fullAccess: FullAccessUseCases? = null
 ) {
     suspend fun finishWorkout(activeWorkoutId: FoundationId, finishedAt: Instant = Clock.System.now()): FoundationResult<CompletedWorkout> {
         val active = workouts.activeWorkout(activeWorkoutId)
@@ -61,6 +62,7 @@ class RoutineUseCases(
             restNotifications?.cancel()
             activeUx?.clearWorkoutUx(activeWorkoutId, finishedAt)
             personalRecords?.rebuildFrom(workouts.completedWorkouts())
+            fullAccess?.recordCompletedWorkout(finishedAt)
         }
         return result
     }

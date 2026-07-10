@@ -3,18 +3,26 @@ package com.jjswigut.oopsallprs.domain.repository
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
+import com.jjswigut.oopsallprs.domain.model.BackupConflictDecision
+import com.jjswigut.oopsallprs.data.backup.BackupPackage
+import com.jjswigut.oopsallprs.domain.model.BackupRestorePlan
+import com.jjswigut.oopsallprs.domain.model.BackupRestoreResult
+import com.jjswigut.oopsallprs.domain.model.BackupRevision
+import com.jjswigut.oopsallprs.domain.model.BackupSyncState
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem
 import com.jjswigut.oopsallprs.domain.model.ExerciseSeedImport
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
 import com.jjswigut.oopsallprs.domain.model.ReusableRoutine
+import com.jjswigut.oopsallprs.domain.model.SnapshotSummary
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import kotlinx.datetime.Instant
 
@@ -80,6 +88,11 @@ interface PreferencesRepository {
     suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean>
 }
 
+interface FullAccessRepository {
+    suspend fun loadFullAccess(): FullAccessState
+    suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState>
+}
+
 interface ProgressRepository {
     suspend fun replaceRecords(records: List<PersonalRecord>, points: List<ProgressPoint>): FoundationResult<Unit>
     suspend fun personalRecords(): List<PersonalRecord>
@@ -88,4 +101,21 @@ interface ProgressRepository {
 
 interface ExportRepository {
     suspend fun export(type: ExportType, unit: WeightUnit): FoundationResult<ExportFile>
+}
+
+interface BackupRepository {
+    suspend fun createPackage(): FoundationResult<BackupPackage>
+    suspend fun decodePackage(content: String): FoundationResult<BackupPackage>
+    suspend fun encodePackage(pkg: BackupPackage): FoundationResult<String>
+    suspend fun currentRevision(): BackupRevision
+    suspend fun currentSummary(): SnapshotSummary
+    suspend fun restorePlan(pkg: BackupPackage): FoundationResult<BackupRestorePlan>
+    suspend fun restore(pkg: BackupPackage): FoundationResult<BackupRestoreResult>
+}
+
+interface BackupSyncRepository {
+    suspend fun loadSyncState(): BackupSyncState
+    suspend fun saveSyncState(state: BackupSyncState): FoundationResult<BackupSyncState>
+    suspend fun clearSyncState(): FoundationResult<Unit>
+    suspend fun applyConflictDecision(decision: BackupConflictDecision): FoundationResult<BackupSyncState>
 }

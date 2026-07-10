@@ -34,6 +34,7 @@ data class ActiveWorkoutState(
     val focusSnapshot: ActiveWorkoutFocus? = null,
     val editDraft: LoggedSetEditDraft? = null,
     val isDiscardConfirmationVisible: Boolean = false,
+    val isFinishConfirmationVisible: Boolean = false,
     val canUndoLastSet: Boolean = false
 )
 
@@ -120,6 +121,51 @@ class ActiveWorkoutStateHolder(
         return confirmDraft(exerciseId)
     }
 
+    suspend fun groupExercisesAsCircuit(exerciseInstanceIds: List<FoundationId>): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.groupExercisesAsCircuit(workoutId, exerciseInstanceIds)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun ungroupCircuit(exerciseInstanceId: FoundationId): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.ungroupCircuit(workoutId, exerciseInstanceId)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
+    suspend fun adjustCircuitRounds(exerciseInstanceId: FoundationId, deltaRounds: Int): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        return when (val result = setLogging.adjustCircuitRounds(workoutId, exerciseInstanceId, deltaRounds)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+
     suspend fun confirmDraft(exerciseInstanceId: FoundationId): FoundationResult<ExerciseSet> {
         val workoutId = activeWorkoutId
             ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
@@ -172,6 +218,12 @@ class ActiveWorkoutStateHolder(
                     )
                 }
                 _state.value = _state.value.copy(isSaving = false, lastLoggedSet = result.value, errorMessage = null)
+                val nextFocus = savedWorkout?.nextCircuitFocusAfter(
+                    exerciseInstanceId = exerciseInstanceId,
+                    loggedPosition = result.value.position,
+                    now = result.value.loggedAt ?: loggedAt
+                )
+                focus = nextFocus ?: focus
                 hydrate(workoutId, focus)
                 result
             }
@@ -321,6 +373,7 @@ class ActiveWorkoutStateHolder(
                 )
             ),
             isDiscardConfirmationVisible = false,
+            isFinishConfirmationVisible = false,
             errorMessage = null
         )
     }
@@ -432,11 +485,29 @@ class ActiveWorkoutStateHolder(
     }
 
     fun requestDiscard() {
-        _state.value = _state.value.copy(isDiscardConfirmationVisible = true, editDraft = null, errorMessage = null)
+        _state.value = _state.value.copy(
+            isDiscardConfirmationVisible = true,
+            isFinishConfirmationVisible = false,
+            editDraft = null,
+            errorMessage = null
+        )
     }
 
     fun cancelDiscard() {
         _state.value = _state.value.copy(isDiscardConfirmationVisible = false, errorMessage = null)
+    }
+
+    fun requestFinish() {
+        _state.value = _state.value.copy(
+            isFinishConfirmationVisible = true,
+            isDiscardConfirmationVisible = false,
+            editDraft = null,
+            errorMessage = null
+        )
+    }
+
+    fun cancelFinish() {
+        _state.value = _state.value.copy(isFinishConfirmationVisible = false, errorMessage = null)
     }
 
     suspend fun confirmDiscard(now: Instant = Clock.System.now()): FoundationResult<Unit> {
@@ -647,3 +718,27 @@ private fun ExerciseLoggingMode.defaultSetKind(): SetKind =
         ExerciseLoggingMode.TIMED -> SetKind.TIMED
         ExerciseLoggingMode.WEIGHTED -> SetKind.WEIGHTED
     }
+
+private fun ActiveWorkout.nextCircuitFocusAfter(
+    exerciseInstanceId: FoundationId,
+    loggedPosition: OrderedPosition,
+    now: Instant
+): ActiveWorkoutFocus? {
+    val current = exercises.firstOrNull { it.id == exerciseInstanceId } ?: return null
+    val group = current.groupContext ?: return null
+    val grouped = exercises
+        .filter { it.groupContext?.groupId == group.groupId }
+        .sortedBy { it.position.value }
+    val currentIndex = grouped.indexOfFirst { it.id == exerciseInstanceId }
+    if (currentIndex == -1) return null
+    val nextExercise = when {
+        currentIndex < grouped.lastIndex -> grouped[currentIndex + 1]
+        loggedPosition.value + 1 < group.rounds -> grouped.first()
+        else -> null
+    } ?: return null
+    return ActiveWorkoutFocus(
+        exerciseInstanceId = nextExercise.id,
+        draftId = FoundationId("draft-${nextExercise.id.value}-${nextExercise.sets.size}"),
+        updatedAt = now
+    )
+}

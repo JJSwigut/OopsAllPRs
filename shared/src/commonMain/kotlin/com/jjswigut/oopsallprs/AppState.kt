@@ -1,6 +1,9 @@
 package com.jjswigut.oopsallprs
 
+import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
 import com.jjswigut.oopsallprs.data.exercise.defaultExerciseSeedCsv
+import com.jjswigut.oopsallprs.data.repository.SqlBackupRepository
+import com.jjswigut.oopsallprs.data.repository.SqlBackupSyncRepository
 import com.jjswigut.oopsallprs.data.repository.SqlExerciseRepository
 import com.jjswigut.oopsallprs.data.repository.SqlFoundationStore
 import com.jjswigut.oopsallprs.data.repository.SqlProgressRepository
@@ -13,6 +16,7 @@ import com.jjswigut.oopsallprs.dev.DeveloperSeedUseCase
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
@@ -28,6 +32,9 @@ import com.jjswigut.oopsallprs.ui.routine.RoutineStateHolder
 import com.jjswigut.oopsallprs.ui.workout.ActiveWorkoutStateHolder
 import com.jjswigut.oopsallprs.ui.workout.WorkoutHomeStateHolder
 import com.jjswigut.oopsallprs.platform.FileExportHandoff
+import com.jjswigut.oopsallprs.platform.BackupDocumentHandoff
+import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
+import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
 import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +55,7 @@ class AppState(
     val progress: ProgressStateHolder,
     val history: HistoryStateHolder,
     val profile: ProfileStateHolder,
+    private val fullAccess: FullAccessUseCases,
     val developerSeeds: DeveloperSeedStateHolder? = null
 ) {
     private val _activeSession = MutableStateFlow<ActiveSessionState?>(null)
@@ -70,16 +78,30 @@ class AppState(
         navigation.hydrate(restored, now)
     }
 
+    suspend fun checkBackupSyncOnLaunchOrResume() {
+        profile.checkLinkedBackup()
+    }
+
+    suspend fun refreshFullAccessEntitlements() {
+        fullAccess.refreshEntitlements()
+        workoutHome.refreshFullAccess()
+        profile.hydrate()
+    }
+
     companion object {
         fun create(
             databaseDriverFactory: PlatformDatabaseDriverFactory,
             fileExportHandoff: FileExportHandoff? = null,
+            backupDocumentHandoff: BackupDocumentHandoff? = null,
+            fullAccessBilling: FullAccessBillingAdapter? = null,
             restNotificationScheduler: RestNotificationScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState =
             create(
                 database = WorkoutDatabase(databaseDriverFactory.createDriver()),
                 fileExportHandoff = fileExportHandoff,
+                backupDocumentAdapter = backupDocumentHandoff,
+                fullAccessBilling = fullAccessBilling,
                 restNotificationScheduler = restNotificationScheduler,
                 developerToolsEnabled = developerToolsEnabled
             )
@@ -87,15 +109,21 @@ class AppState(
         fun create(
             database: WorkoutDatabase,
             fileExportHandoff: FileExportHandoff? = null,
+            backupDocumentAdapter: BackupDocumentAdapter? = null,
+            fullAccessBilling: FullAccessBillingAdapter? = null,
             restNotificationScheduler: RestNotificationScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState {
             val store = SqlFoundationStore(database)
+            val backupRepository = SqlBackupRepository(database, store)
+            val backupSyncRepository = SqlBackupSyncRepository(database)
+            val backupSync = BackupSyncCoordinator(backupRepository, backupSyncRepository, backupDocumentAdapter)
             val workouts = SqlWorkoutRepository(store)
             val sets = SqlSetLedgerRepository(store)
             val routineRepo = SqlRoutineRepository(store)
             val exerciseRepo = SqlExerciseRepository(store)
             val progress = SqlProgressRepository(store)
+            val fullAccess = FullAccessUseCases(store, fullAccessBilling)
             val previousDefaults = PreviousWorkoutDefaultsUseCase(workouts)
             val lifecycle = WorkoutLifecycleUseCases(
                 workouts = workouts,
@@ -109,7 +137,15 @@ class AppState(
             val setLogging = SetLoggingUseCases(workouts, sets, store)
             val activePrFeedback = ActivePrFeedbackUseCase(progress)
             val personalRecordDerivation = PersonalRecordDerivationUseCase(progress)
-            val routineUseCases = RoutineUseCases(workouts, routineRepo, workouts, personalRecordDerivation, store, restNotificationScheduler)
+            val routineUseCases = RoutineUseCases(
+                workouts,
+                routineRepo,
+                workouts,
+                personalRecordDerivation,
+                store,
+                restNotificationScheduler,
+                fullAccess
+            )
             val activeWorkout = ActiveWorkoutStateHolder(setLogging, lifecycle, workouts, activePrFeedback, previousDefaults)
             val exerciseCatalog = ExerciseCatalogUseCases(exerciseRepo, workouts)
             val developerSeeds = if (developerToolsEnabled) {
@@ -130,7 +166,7 @@ class AppState(
                 workoutLifecycle = lifecycle,
                 setLogging = setLogging,
                 navigation = AppNavigationStateHolder(lifecycle),
-                workoutHome = WorkoutHomeStateHolder(lifecycle, routineUseCases),
+                workoutHome = WorkoutHomeStateHolder(lifecycle, routineUseCases, fullAccess),
                 activeWorkout = activeWorkout,
                 exercisePicker = ExercisePickerStateHolder(exerciseCatalog, activeWorkout),
                 exerciseManagement = ExerciseManagementStateHolder(exerciseCatalog),
@@ -143,8 +179,11 @@ class AppState(
                     exports = store,
                     exportHandoff = fileExportHandoff?.let { handoff ->
                         { file -> handoff.share(file.fileName, file.content) }
-                    }
+                    },
+                    backupSync = backupSync,
+                    fullAccess = fullAccess
                 ),
+                fullAccess = fullAccess,
                 developerSeeds = developerSeeds
             )
         }

@@ -1,7 +1,11 @@
 package com.jjswigut.oopsallprs.ui.workout
 
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
+import com.jjswigut.oopsallprs.domain.model.ActivePrFeedback
+import com.jjswigut.oopsallprs.domain.model.ActivePrFeedbackKind
+import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.successValue
@@ -30,5 +34,20 @@ class ActiveWorkoutPrFeedbackTest {
         val feedback = holder.state.value.workout?.exerciseBlocks?.single()?.loggedRows?.single()?.prFeedback
         assertNotNull(feedback)
         assertEquals("New PR: 100 kg x 5", feedback.label)
+    }
+
+    @Test
+    fun weightedPrDisplayUsesSelectedWeightUnit() {
+        val feedback = ActivePrFeedback(
+            setId = FoundationId("set-1"),
+            exerciseCatalogId = FoundationId("exercise-1"),
+            kind = ActivePrFeedbackKind.WEIGHT_FOR_REPS,
+            label = "New PR: 100 kg x 5",
+            previousValue = null,
+            newValue = 100.0
+        )
+
+        assertEquals("New PR: 220.5 lb x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.POUNDS))
+        assertEquals("New PR: 100 kg x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.KILOGRAMS))
     }
 }

@@ -32,6 +32,9 @@ data class RoutineExerciseDraft(
     val isBodyweight: Boolean,
     val loggingMode: ExerciseLoggingMode,
     val position: OrderedPosition,
+    val groupId: FoundationId? = null,
+    val groupPosition: OrderedPosition? = null,
+    val groupRounds: Int? = null,
     val rest: RestConfiguration = RestConfiguration.default(),
     val plannedSets: List<RoutineSetDraft> = emptyList()
 )
@@ -74,6 +77,9 @@ fun ReusableRoutineToEditorDraft(routine: com.jjswigut.oopsallprs.domain.model.R
                     isBodyweight = loggingMode == ExerciseLoggingMode.BODYWEIGHT || loggingMode == ExerciseLoggingMode.TIMED,
                     loggingMode = loggingMode,
                     position = exercise.position,
+                    groupId = exercise.groupId,
+                    groupPosition = exercise.groupPosition,
+                    groupRounds = exercise.groupRounds,
                     rest = exercise.rest,
                     plannedSets = exercise.plannedSets
                         .sortedBy { it.position.value }
@@ -103,6 +109,9 @@ fun RoutineEditorDraft.toRoutineExercises(): List<RoutineExercise> {
             exerciseCatalogId = exercise.exerciseCatalogId,
             displayNameSnapshot = exercise.displayName,
             position = OrderedPosition(exerciseIndex),
+            groupId = exercise.groupId,
+            groupPosition = exercise.groupPosition,
+            groupRounds = exercise.groupRounds,
             rest = exercise.rest,
             plannedSets = exercise.plannedSets.mapIndexed { setIndex, set ->
                 RoutineSetTemplate(
@@ -141,3 +150,22 @@ private fun List<RoutineSetTemplate>.loggingMode(): ExerciseLoggingMode =
         any { it.setKind == SetKind.BODYWEIGHT } -> ExerciseLoggingMode.BODYWEIGHT
         else -> ExerciseLoggingMode.WEIGHTED
     }
+
+fun routineGroupLabel(size: Int): String? =
+    when {
+        size >= 2 -> "Circuit"
+        else -> null
+    }
+
+fun List<RoutineExerciseDraft>.groupLabelFor(exercise: RoutineExerciseDraft): String? {
+    val groupId = exercise.groupId ?: return null
+    return routineGroupLabel(count { it.groupId == groupId })
+}
+
+fun List<RoutineExerciseDraft>.groupSummaryFor(exercise: RoutineExerciseDraft): String? {
+    val label = groupLabelFor(exercise) ?: return null
+    val rounds = exercise.groupRounds ?: DEFAULT_GROUP_ROUNDS
+    return "$label x$rounds"
+}
+
+const val DEFAULT_GROUP_ROUNDS: Int = 3

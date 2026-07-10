@@ -1,13 +1,44 @@
 # Store Deployment Setup
 
-GitHub Actions now has two workflows:
+GitHub Actions has two workflows:
 
-- `CI`: runs Gradle checks, Android debug/release assembly, and an iOS simulator build for pull requests and pushes to `main`.
-- `Deploy Stores`: runs release gates on pushes to `main`, uploads Android to Google Play internal testing, and uploads iOS to TestFlight once the Apple signing secrets exist.
+- `CI`: runs Gradle checks, Android debug/release assembly, and an iOS simulator build for pull requests and pushes to `development` or `main`.
+- `Deploy Stores`: runs `tools/release_gate.sh --skip-ios` on pushes to `main`, uploads Android release artifacts and release-gate proof files to GitHub Actions, creates a GitHub Release, attempts a timeout-bounded iOS Release simulator package, uploads Android to Google Play internal testing when secrets exist, and uploads iOS to TestFlight once Apple signing secrets exist.
+
+Manual dispatch accepts:
+
+- `release_tag`: optional GitHub Release tag override, such as `v1.0.1001`.
+- `publish_stores`: attempts Google Play/TestFlight uploads when secrets are present. Store jobs also run on `main` pushes.
+
+## GitHub Release Package
+
+Every successful `main` push creates a GitHub Release with an automatic `v1.0.<run-number + 1000>` tag and attaches available release packages:
+
+- Android release APK.
+- Android release AAB.
+- Android R8/resource shrink mapping files.
+- Release-gate proof files from `build/release-gate/`.
+- iOS Release simulator zip from `tools/ios_release_package.sh` when the best-effort iOS package job succeeds.
+
+The iOS package job is best-effort while local Release framework linking is slow/unresolved. Android release artifacts and the GitHub Release should still be available when the release gate passes.
+
+Before promoting `development` to `main`, run `tools/release_gate.sh --android-smoke`. Successful local release gates write `build/release-gate/summary.txt`, `build/release-gate/artifacts.txt`, and `build/release-gate/proof.env` for PR or release notes.
 
 ## Android
 
-The Android workflow expects these GitHub secrets:
+For local Fastlane checks, use Ruby 3.1 or newer and install the bundle into
+`vendor/bundle`. The repo includes `.ruby-version` for Ruby version managers,
+and the bootstrap script auto-detects Homebrew `ruby@3.3` or `ruby@3.4` when
+the shell still points at macOS system Ruby:
+
+```sh
+tools/bootstrap_fastlane.sh
+tools/fastlane.sh lanes
+```
+
+The macOS system Ruby 2.6 is too old for the repo Fastlane environment.
+
+The Android store upload expects these GitHub secrets:
 
 - `ANDROID_UPLOAD_KEYSTORE_BASE64`
 - `ANDROID_UPLOAD_KEYSTORE_PASSWORD`
@@ -19,8 +50,17 @@ The Google Play service account needs Play Console access for:
 
 - `View app information and download bulk reports (read-only)`
 - `Release apps to testing tracks`
+- `Manage store presence` for listing image and screenshot uploads
 
-The Play Console app must exist before the first Fastlane upload. Use package name `com.jjswigut.oopsallprs.android`.
+The deploy workflow skips Android store upload with a GitHub Actions notice until all required Android secrets are present. The Play Console app must exist before the first Fastlane upload. Use package name `com.jjswigut.oopsallprs.android`.
+
+Upload only the Google Play listing artwork:
+
+```sh
+tools/fastlane.sh android listing
+```
+
+Set `ANDROID_PLAY_VALIDATE_ONLY=true` to validate the Play edit without publishing it.
 
 ## iOS
 
@@ -36,6 +76,14 @@ The iOS TestFlight job is intentionally skipped until all Apple secrets are pres
 - `KEYCHAIN_PASSWORD`
 
 The App Store Connect app and Apple Developer bundle ID must use `com.jjswigut.oopsallprs.ios`.
+
+Upload only the App Store screenshots:
+
+```sh
+tools/fastlane.sh ios listing
+```
+
+This lane uses only the App Store Connect API secrets above; it does not need the distribution certificate or provisioning profile because it does not upload a build. Set `IOS_APP_VERSION` if Fastlane should target a specific editable App Store version.
 
 To create the remaining iOS secrets:
 

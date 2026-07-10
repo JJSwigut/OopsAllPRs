@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS sync_state (
+    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+    linked_backup_display_name TEXT,
+    provider_reference TEXT,
+    provider_reference_kind TEXT,
+    last_backup_revision TEXT,
+    last_backup_timestamp INTEGER,
+    last_local_revision TEXT,
+    last_local_timestamp INTEGER,
+    last_outcome TEXT NOT NULL,
+    last_error TEXT,
+    last_conflict_summary TEXT,
+    updated_at INTEGER NOT NULL
+);

@@ -25,12 +25,16 @@ import com.jjswigut.oopsallprs.ui.accessibility.foundationTouchTarget
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
+import com.jjswigut.oopsallprs.ui.profile.ProfileFullAccessStatus
 
 @Composable
 fun WorkoutHomeFlow(
     state: WorkoutHomeState,
+    fullAccessStatus: ProfileFullAccessStatus,
     onStartEmpty: () -> Unit,
     onStartRoutine: (FoundationId) -> Unit,
+    onPurchaseLifetimeUnlock: () -> Unit = {},
+    onRestorePurchases: () -> Unit = {},
     onCreateRoutine: () -> Unit = {},
     onEditRoutine: (FoundationId) -> Unit = {},
     onRequestDeleteTemplate: (FoundationId) -> Unit = {},
@@ -154,9 +158,57 @@ fun WorkoutHomeFlow(
                     )
                 }
             }
+            if (state.isFullAccessPaywallVisible) {
+                FullAccessRequiredCard(
+                    access = fullAccessStatus,
+                    onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
+                    onRestorePurchases = onRestorePurchases
+                )
+            }
             state.errorMessage?.let { message ->
                 FoundationText(
                     text = message,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullAccessRequiredCard(
+    access: ProfileFullAccessStatus,
+    onPurchaseLifetimeUnlock: () -> Unit,
+    onRestorePurchases: () -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            FoundationText("You've used your free workouts.", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+            FoundationMutedText("Unlock unlimited workout logging forever.")
+            FoundationMutedText(access.termsLabel)
+            FoundationMutedText("Price ${access.offerLabel}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = if (access.isStoreBusy) "Working" else "Unlock forever",
+                    onClick = onPurchaseLifetimeUnlock,
+                    modifier = Modifier.weight(1f),
+                    enabled = !access.isStoreBusy,
+                    style = FitButtonStyle.Primary
+                )
+                FitButton(
+                    text = "Restore purchase",
+                    onClick = onRestorePurchases,
+                    modifier = Modifier.weight(1f),
+                    enabled = !access.isStoreBusy,
+                    style = FitButtonStyle.Secondary
+                )
+            }
+            access.error?.let { error ->
+                FoundationText(
+                    text = error,
                     style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
                 )
             }

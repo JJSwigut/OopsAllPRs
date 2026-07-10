@@ -1,6 +1,8 @@
 package com.jjswigut.oopsallprs.domain.usecase
 
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveExerciseGroupContext
+import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseReference
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
@@ -66,6 +68,89 @@ class SetLoggingUseCases(
             is FoundationResult.Failure -> saved
             is FoundationResult.Success -> foundationSuccess(exercise)
         }
+    }
+
+    suspend fun groupExercisesAsCircuit(
+        activeWorkoutId: FoundationId,
+        exerciseInstanceIds: List<FoundationId>,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveWorkout> {
+        val workout = workouts.activeWorkout(activeWorkoutId)
+            ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
+        if (exerciseInstanceIds.size < 2) {
+            return foundationFailure(FoundationError.Validation("Select at least two adjacent exercises"))
+        }
+        val positionsById = workout.exercises.mapIndexed { index, exercise -> exercise.id to index }.toMap()
+        val positions = exerciseInstanceIds.mapNotNull { positionsById[it] }.sorted()
+        if (positions.size != exerciseInstanceIds.size || positions != (positions.first()..positions.last()).toList()) {
+            return foundationFailure(FoundationError.Validation("Only adjacent exercises can be grouped"))
+        }
+        val groupId = newFoundationId("active-circuit")
+        val groupPosition = OrderedPosition(positions.first())
+        val groupRounds = positions
+            .mapNotNull { workout.exercises[it].groupContext?.rounds }
+            .firstOrNull() ?: DEFAULT_CIRCUIT_ROUNDS
+        val selected = exerciseInstanceIds.toSet()
+        val updated = workout.copy(
+            exercises = workout.exercises.map { exercise ->
+                if (exercise.id in selected) {
+                    exercise.copy(
+                        groupContext = ActiveExerciseGroupContext(
+                            groupId = groupId,
+                            groupPosition = groupPosition,
+                            label = CIRCUIT_LABEL,
+                            rounds = groupRounds
+                        )
+                    )
+                } else {
+                    exercise
+                }
+            },
+            updatedAt = now
+        )
+        return workouts.saveActiveWorkout(updated)
+    }
+
+    suspend fun ungroupCircuit(
+        activeWorkoutId: FoundationId,
+        exerciseInstanceId: FoundationId,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveWorkout> {
+        val workout = workouts.activeWorkout(activeWorkoutId)
+            ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
+        val groupId = workout.exercises.firstOrNull { it.id == exerciseInstanceId }?.groupContext?.groupId
+            ?: return foundationFailure(FoundationError.NotFound("Circuit not found for exercise: $exerciseInstanceId"))
+        val updated = workout.copy(
+            exercises = workout.exercises.map { exercise ->
+                if (exercise.groupContext?.groupId == groupId) exercise.copy(groupContext = null) else exercise
+            },
+            updatedAt = now
+        )
+        return workouts.saveActiveWorkout(updated)
+    }
+
+    suspend fun adjustCircuitRounds(
+        activeWorkoutId: FoundationId,
+        exerciseInstanceId: FoundationId,
+        deltaRounds: Int,
+        now: Instant = Clock.System.now()
+    ): FoundationResult<ActiveWorkout> {
+        val workout = workouts.activeWorkout(activeWorkoutId)
+            ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
+        val group = workout.exercises.firstOrNull { it.id == exerciseInstanceId }?.groupContext
+            ?: return foundationFailure(FoundationError.NotFound("Circuit not found for exercise: $exerciseInstanceId"))
+        val nextRounds = (group.rounds + deltaRounds).coerceIn(1, 12)
+        val updated = workout.copy(
+            exercises = workout.exercises.map { exercise ->
+                if (exercise.groupContext?.groupId == group.groupId) {
+                    exercise.copy(groupContext = exercise.groupContext?.copy(rounds = nextRounds))
+                } else {
+                    exercise
+                }
+            },
+            updatedAt = now
+        )
+        return workouts.saveActiveWorkout(updated)
     }
 
     suspend fun confirmSet(
@@ -150,4 +235,9 @@ class SetLoggingUseCases(
             .orEmpty()
             .flatMap { it.sets }
             .firstOrNull { it.id == setId && it.isLogged }
+
+    private companion object {
+        const val CIRCUIT_LABEL = "Circuit"
+        const val DEFAULT_CIRCUIT_ROUNDS = 3
+    }
 }

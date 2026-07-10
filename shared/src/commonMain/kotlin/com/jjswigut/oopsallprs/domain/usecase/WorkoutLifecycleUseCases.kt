@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.domain.usecase
 
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveExerciseGroupContext
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
@@ -70,17 +71,20 @@ class WorkoutLifecycleUseCases(
             val loggingMode = exercise.plannedSets.loggingMode()
             val isBodyweight = loggingMode == ExerciseLoggingMode.BODYWEIGHT || loggingMode == ExerciseLoggingMode.TIMED
             val previous = previousDefaults?.snapshotFor(exercise.exerciseCatalogId, isBodyweight, loggingMode)
+            val groupContext = routine.exercises.groupContextFor(exercise)
+            val plannedSets = exercise.plannedSets.expandedForGroupRounds(groupContext?.rounds)
             ActiveExercise(
                 id = activeExerciseId,
                 activeWorkoutId = workoutId,
                 reference = ExerciseReference(exercise.exerciseCatalogId, exercise.displayNameSnapshot, isBodyweight, loggingMode),
                 position = exercise.position,
-                sets = exercise.plannedSets.map { planned ->
-                    val previousValue = previous?.valueForSetIndex(planned.position.value)
+                groupContext = groupContext,
+                sets = plannedSets.mapIndexed { setIndex, planned ->
+                    val previousValue = previous?.valueForSetIndex(setIndex)
                     ExerciseSet(
                         id = newFoundationId("set"),
                         exerciseInstanceId = activeExerciseId,
-                        position = planned.position,
+                        position = OrderedPosition(setIndex),
                         setKind = planned.setKind,
                         weight = planned.targetWeight ?: previousValue?.weight,
                         reps = (planned.targetReps ?: previousValue?.reps).takeIf { planned.setKind != SetKind.TIMED },
@@ -251,3 +255,31 @@ private fun List<com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate>.loggin
         any { it.setKind == SetKind.BODYWEIGHT } -> ExerciseLoggingMode.BODYWEIGHT
         else -> ExerciseLoggingMode.WEIGHTED
     }
+
+private fun List<com.jjswigut.oopsallprs.domain.model.RoutineExercise>.groupContextFor(
+    exercise: com.jjswigut.oopsallprs.domain.model.RoutineExercise
+): ActiveExerciseGroupContext? {
+    val groupId = exercise.groupId ?: return null
+    val groupPosition = exercise.groupPosition ?: return null
+    val rounds = (exercise.groupRounds ?: 1).coerceAtLeast(1)
+    val groupSize = count { it.groupId == groupId }
+    val label = when {
+        groupSize >= 2 -> "Circuit"
+        else -> return null
+    }
+    return ActiveExerciseGroupContext(
+        groupId = groupId,
+        groupPosition = groupPosition,
+        label = label,
+        rounds = rounds
+    )
+}
+
+private fun List<com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate>.expandedForGroupRounds(
+    rounds: Int?
+): List<com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate> {
+    val sorted = sortedBy { it.position.value }
+    val targetCount = rounds ?: return sorted
+    if (sorted.isEmpty() || targetCount <= sorted.size) return sorted
+    return List(targetCount) { index -> sorted.getOrElse(index) { sorted.last() } }
+}

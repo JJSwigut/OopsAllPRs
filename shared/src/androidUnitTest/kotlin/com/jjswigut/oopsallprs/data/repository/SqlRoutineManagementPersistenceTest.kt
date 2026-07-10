@@ -37,19 +37,47 @@ class SqlRoutineManagementPersistenceTest {
         assertEquals(RestConfiguration(durationSeconds = 180), recovered.exercises.single().rest)
     }
 
+    @Test
+    fun routineExerciseGroupMetadataRecoversAfterRepositoryRecreation() = runTest {
+        val harness = SqlFoundationStoreTestHarness()
+        val repos = harness.repositories()
+        val groupId = FoundationId("routine-group-1")
+
+        repos.routineUseCases.saveRoutine(
+            routineId = null,
+            name = "Upper",
+            exercises = listOf(
+                routineExercise("routine-draft", "routine-exercise-1", "Bench Press", 100.0, 120, groupId, 0),
+                routineExercise("routine-draft", "routine-exercise-2", "Seated Row", 80.0, 120, groupId, 0, exercisePosition = 1)
+            ),
+            now = instant(1_000)
+        ).successValue()
+
+        val recovered = harness.repositories().routineUseCases.listRoutines().single()
+
+        assertEquals(listOf(groupId, groupId), recovered.exercises.map { it.groupId })
+        assertEquals(listOf(0, 0), recovered.exercises.map { it.groupPosition?.value })
+        assertEquals(listOf("Bench Press", "Seated Row"), recovered.exercises.map { it.displayNameSnapshot })
+    }
+
     private fun routineExercise(
         routineId: String,
         routineExerciseId: String,
         name: String,
         weight: Double,
-        restSeconds: Int
+        restSeconds: Int,
+        groupId: FoundationId? = null,
+        groupPosition: Int? = null,
+        exercisePosition: Int = 0
     ): RoutineExercise =
         RoutineExercise(
             id = FoundationId(routineExerciseId),
             routineId = FoundationId(routineId),
             exerciseCatalogId = FoundationId("exercise-bench"),
             displayNameSnapshot = name,
-            position = OrderedPosition(0),
+            position = OrderedPosition(exercisePosition),
+            groupId = groupId,
+            groupPosition = groupPosition?.let(::OrderedPosition),
             rest = RestConfiguration(durationSeconds = restSeconds),
             plannedSets = listOf(
                 RoutineSetTemplate(

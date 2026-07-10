@@ -1,6 +1,74 @@
+require "fileutils"
+
 opt_out_usage
 
 default_platform(:android)
+
+def repo_root
+  File.expand_path("..", __dir__)
+end
+
+def require_env!(name)
+  UI.user_error!("#{name} is required") if ENV[name].to_s.strip.empty?
+end
+
+def copy_ordered_assets(source_glob, destination_dir, prefix: nil)
+  FileUtils.mkdir_p(destination_dir)
+  paths = Dir[source_glob].sort
+  UI.user_error!("No assets found for #{source_glob}") if paths.empty?
+
+  paths.each_with_index do |path, index|
+    basename = File.basename(path)
+    output_name = prefix ? "#{prefix}-#{format('%02d', index + 1)}-#{basename}" : basename
+    FileUtils.cp(path, File.join(destination_dir, output_name))
+  end
+
+  paths.length
+end
+
+def prepare_android_listing_assets
+  source_root = File.join(repo_root, "assets", "store-listing", "google-play")
+  feature_graphic = File.join(source_root, "feature-graphic-1024x500.png")
+  UI.user_error!("Missing Google Play feature graphic at #{feature_graphic}") unless File.exist?(feature_graphic)
+
+  metadata_root = File.join(repo_root, "fastlane", "build", "metadata", "android")
+  images_dir = File.join(metadata_root, "en-US", "images")
+  phone_screenshots_dir = File.join(images_dir, "phoneScreenshots")
+
+  FileUtils.rm_rf(metadata_root)
+  FileUtils.mkdir_p(phone_screenshots_dir)
+  FileUtils.cp(feature_graphic, File.join(images_dir, "featureGraphic.png"))
+  screenshot_count = copy_ordered_assets(
+    File.join(source_root, "screenshots", "*.png"),
+    phone_screenshots_dir
+  )
+
+  UI.message("Prepared Google Play listing assets: 1 feature graphic, #{screenshot_count} phone screenshots")
+  metadata_root
+end
+
+def prepare_ios_listing_screenshots
+  source_glob = File.join(repo_root, "assets", "store-listing", "app-store", "iphone-6-9", "*.png")
+  screenshots_root = File.join(repo_root, "fastlane", "build", "screenshots")
+  locale_dir = File.join(screenshots_root, "en-US")
+
+  FileUtils.rm_rf(screenshots_root)
+  screenshot_count = copy_ordered_assets(source_glob, locale_dir, prefix: "iPhone 16 Pro Max")
+
+  UI.message("Prepared App Store listing assets: #{screenshot_count} iPhone screenshots")
+  screenshots_root
+end
+
+def app_store_connect_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+    issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+    key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_BASE64"),
+    is_key_content_base64: true,
+    duration: 1200,
+    in_house: false
+  )
+end
 
 platform :android do
   desc "Build and upload the Android app bundle to Google Play internal testing"
@@ -10,7 +78,7 @@ platform :android do
     package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
     track = ENV.fetch("ANDROID_PLAY_TRACK", "internal")
 
-    UI.user_error!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required") if ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"].to_s.strip.empty?
+    require_env!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
 
     gradle(
       project_dir: ".",
@@ -34,6 +102,26 @@ platform :android do
       skip_upload_screenshots: true
     )
   end
+
+  desc "Upload Google Play store-listing images and screenshots only"
+  lane :listing do
+    package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
+    require_env!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+
+    upload_to_play_store(
+      package_name: package_name,
+      json_key_data: ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+      metadata_path: prepare_android_listing_assets,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      sync_image_upload: true,
+      validate_only: ENV.fetch("ANDROID_PLAY_VALIDATE_ONLY", "false") == "true"
+    )
+  end
 end
 
 platform :ios do
@@ -44,14 +132,7 @@ platform :ios do
     marketing_version = ENV.fetch("IOS_MARKETING_VERSION", "1.0")
     provisioning_profile_name = ENV.fetch("IOS_PROVISIONING_PROFILE_NAME")
 
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
-      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
-      key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_BASE64"),
-      is_key_content_base64: true,
-      duration: 1200,
-      in_house: false
-    )
+    api_key = app_store_connect_key
 
     sh("./gradlew :shared:linkReleaseFrameworkIosArm64")
 
@@ -84,5 +165,27 @@ platform :ios do
       ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
       skip_waiting_for_build_processing: true
     )
+  end
+
+  desc "Upload App Store screenshots only"
+  lane :listing do
+    require_env!("APP_STORE_CONNECT_API_KEY_ID")
+    require_env!("APP_STORE_CONNECT_ISSUER_ID")
+    require_env!("APP_STORE_CONNECT_API_KEY_BASE64")
+
+    options = {
+      api_key: app_store_connect_key,
+      app_identifier: ENV.fetch("IOS_BUNDLE_ID", "com.jjswigut.oopsallprs.ios"),
+      screenshots_path: prepare_ios_listing_screenshots,
+      skip_binary_upload: true,
+      skip_metadata: true,
+      overwrite_screenshots: true,
+      submit_for_review: false,
+      force: true,
+      run_precheck_before_submit: false
+    }
+    options[:app_version] = ENV["IOS_APP_VERSION"] unless ENV["IOS_APP_VERSION"].to_s.strip.empty?
+
+    upload_to_app_store(**options)
   end
 end

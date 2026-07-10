@@ -173,7 +173,7 @@ private fun ExerciseResultRow(
     isSaving: Boolean,
     onSelect: () -> Unit
 ) {
-    FitListRow {
+    FitListRow(onClick = onSelect) {
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)

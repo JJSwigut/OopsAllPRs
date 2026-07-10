@@ -7,6 +7,7 @@ import com.jjswigut.oopsallprs.domain.model.OrderedPosition
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.testing.SAMPLE_CSV
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,7 +23,7 @@ class SqlActiveWorkoutRecoveryTest {
         val workout = repos.lifecycle.startEmpty(instant(1_000)).successValue()
         val exercise = repos.setLogging.addExercise(
             workout.id,
-            ExerciseReference(FoundationId("exercise-bench"), "Bench Press", isBodyweight = false),
+            ExerciseReference(FoundationId("exercise-bench"), "Bench Press", isBodyweight = false, equipmentSnapshot = "Barbell"),
             instant(1_100)
         ).successValue()
         repos.setLogging.confirmSet(
@@ -68,10 +69,30 @@ class SqlActiveWorkoutRecoveryTest {
 
         assertEquals(workout.id, active.id)
         assertEquals("Bench Press", active.exercises.single().reference.displayNameSnapshot)
+        assertEquals("Barbell", active.exercises.single().reference.equipmentSnapshot)
         assertEquals(WeightKg(100.0), active.exercises.single().sets.single().weight)
         assertEquals(instant(91_200), session.restEndsAt)
         assertEquals(exercise.id, ux.focusedExerciseInstanceId)
         assertEquals(listOf(draft), drafts)
+    }
+
+    @Test
+    fun activeWorkoutBackfillsMissingEquipmentSnapshotFromCatalog() = runTest {
+        val harness = SqlFoundationStoreTestHarness()
+        val repos = harness.repositories()
+        repos.exerciseCatalog.ensureSeeded(SAMPLE_CSV).successValue()
+        val bench = repos.exerciseCatalog.search("Bench").single()
+        val workout = repos.lifecycle.startEmpty(instant(1_000)).successValue()
+        repos.setLogging.addExercise(
+            workout.id,
+            ExerciseReference(bench.id, bench.displayName, isBodyweight = false),
+            instant(1_100)
+        ).successValue()
+
+        val recovered = harness.repositories()
+        val active = assertNotNull(recovered.lifecycle.currentActiveWorkout())
+
+        assertEquals("Barbell", active.exercises.single().reference.equipmentSnapshot)
     }
 
     @Test

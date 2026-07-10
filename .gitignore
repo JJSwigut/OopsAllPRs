@@ -24,6 +24,10 @@ Thumbs.db
 # Logs / local env
 *.log
 .env*
+.bundle/
+vendor/bundle/
+fastlane/build/
+iosApp/build/fastlane/
 
 # Swift / iOS local build output
 .build/

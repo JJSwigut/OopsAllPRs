@@ -8,6 +8,7 @@ import com.jjswigut.oopsallprs.db.Active_workouts
 import com.jjswigut.oopsallprs.db.Completed_workouts
 import com.jjswigut.oopsallprs.db.Exercise_catalog
 import com.jjswigut.oopsallprs.db.Exercise_sets
+import com.jjswigut.oopsallprs.db.Full_access_state
 import com.jjswigut.oopsallprs.db.Personal_records
 import com.jjswigut.oopsallprs.db.Progress_points
 import com.jjswigut.oopsallprs.db.Routine_exercises
@@ -16,6 +17,7 @@ import com.jjswigut.oopsallprs.db.Routines
 import com.jjswigut.oopsallprs.db.SelectLoggedSets
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActiveExerciseGroupContext
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
@@ -29,6 +31,8 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportSnapshot
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
+import com.jjswigut.oopsallprs.domain.model.FullAccessStoreStatus
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
@@ -53,6 +57,7 @@ import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
+import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
@@ -72,6 +77,7 @@ class SqlFoundationStore(
     RoutineRepository,
     ExerciseRepository,
     PreferencesRepository,
+    FullAccessRepository,
     ProgressRepository,
     ExportRepository {
 
@@ -148,9 +154,14 @@ class SqlFoundationStore(
                     active_workout_id = workout.sourceActiveWorkoutId.value,
                     exercise_catalog_id = exercise.exerciseCatalogId.value,
                     display_name_snapshot = exercise.displayNameSnapshot,
+                    equipment_snapshot = null,
                     is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
+                    group_id = null,
+                    group_position = null,
+                    group_label = null,
+                    group_rounds = null,
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -258,6 +269,11 @@ class SqlFoundationStore(
         set.validateForLogging()?.let { return foundationFailure(it) }
         activeWorkout(workoutId)
             ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $workoutId"))
+        setQueries.deleteUnloggedSetAtPosition(
+            workout_id = workoutId.value,
+            exercise_instance_id = set.exerciseInstanceId.value,
+            position = set.position.value.toLong()
+        )
         setQueries.upsertSet(workoutId, set)
         workoutQueries.updateWorkoutStatus(WorkoutStatus.ACTIVE.name, set.updatedAt.toDbLong(), workoutId.value)
         return foundationSuccess(set)
@@ -316,6 +332,9 @@ class SqlFoundationStore(
                     exercise_catalog_id = exercise.exerciseCatalogId.value,
                     display_name_snapshot = exercise.displayNameSnapshot,
                     position = exercise.position.value.toLong(),
+                    group_id = exercise.groupId?.value,
+                    group_position = exercise.groupPosition?.value?.toLong(),
+                    group_rounds = exercise.groupRounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -517,6 +536,27 @@ class SqlFoundationStore(
         return foundationSuccess(enabled)
     }
 
+    override suspend fun loadFullAccess(): FullAccessState =
+        workoutQueries.selectFullAccessState().executeAsOneOrNull()?.toFullAccessState()
+            ?: FullAccessState(completedFreeWorkouts = completedWorkouts().size)
+
+    override suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState> {
+        val now = state.updatedAt ?: Clock.System.now()
+        workoutQueries.upsertFullAccessState(
+            completed_free_workouts = state.normalizedCompletedFreeWorkouts.toLong(),
+            lifetime_active = state.lifetimeUnlocked.toDbLong(),
+            store_status = state.storeStatus.name,
+            last_error = state.lastError,
+            updated_at = now.toDbLong()
+        )
+        return foundationSuccess(
+            state.copy(
+                completedFreeWorkouts = state.normalizedCompletedFreeWorkouts,
+                updatedAt = now
+            )
+        )
+    }
+
     override suspend fun replaceRecords(
         records: List<PersonalRecord>,
         points: List<ProgressPoint>
@@ -617,9 +657,14 @@ class SqlFoundationStore(
                     active_workout_id = exercise.activeWorkoutId.value,
                     exercise_catalog_id = exercise.reference.exerciseCatalogId.value,
                     display_name_snapshot = exercise.reference.displayNameSnapshot,
+                    equipment_snapshot = exercise.reference.equipmentSnapshot,
                     is_bodyweight = exercise.reference.isBodyweight.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.reference.loggingMode.name,
+                    group_id = exercise.groupContext?.groupId?.value,
+                    group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
+                    group_label = exercise.groupContext?.label,
+                    group_rounds = exercise.groupContext?.rounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong()
                 )
@@ -658,15 +703,30 @@ class SqlFoundationStore(
                 exerciseCatalogId = FoundationId(exercise_catalog_id),
                 displayNameSnapshot = display_name_snapshot,
                 isBodyweight = is_bodyweight.toBooleanFlag(),
-                loggingMode = ExerciseLoggingMode.valueOf(logging_mode)
+                loggingMode = ExerciseLoggingMode.valueOf(logging_mode),
+                equipmentSnapshot = equipment_snapshot ?: exerciseQueries.selectExerciseById(exercise_catalog_id).executeAsOneOrNull()?.equipment
             ),
             position = OrderedPosition(position.toInt()),
+            groupContext = groupContext(),
             sets = sets.sortedBy { it.position.value },
             rest = RestConfiguration(
                 durationSeconds = rest_seconds.toInt(),
                 autoStart = rest_auto_start.toBooleanFlag()
             )
         )
+
+    private fun Active_exercises.groupContext(): ActiveExerciseGroupContext? {
+        val id = group_id ?: return null
+        val position = group_position ?: return null
+        val label = group_label ?: return null
+        val rounds = group_rounds ?: return null
+        return ActiveExerciseGroupContext(
+            groupId = FoundationId(id),
+            groupPosition = OrderedPosition(position.toInt()),
+            label = label,
+            rounds = rounds.toInt()
+        )
+    }
 
     private fun Completed_workouts.toCompletedWorkout(): CompletedWorkout {
         val completedId = FoundationId(id)
@@ -791,6 +851,9 @@ class SqlFoundationStore(
             exerciseCatalogId = FoundationId(exercise_catalog_id),
             displayNameSnapshot = display_name_snapshot,
             position = OrderedPosition(position.toInt()),
+            groupId = group_id?.let(::FoundationId),
+            groupPosition = group_position?.let { OrderedPosition(it.toInt()) },
+            groupRounds = group_rounds?.toInt(),
             plannedSets = routineQueries.selectRoutineSetTemplates(id).executeAsList().map { it.toRoutineSetTemplate() },
             rest = RestConfiguration(
                 durationSeconds = rest_seconds.toInt(),
@@ -855,6 +918,16 @@ class SqlFoundationStore(
             weight = weight_kg?.let(::WeightKg),
             reps = reps?.toInt(),
             recordedAt = recorded_at.toInstant()
+        )
+
+    private fun Full_access_state.toFullAccessState(): FullAccessState =
+        FullAccessState(
+            completedFreeWorkouts = completed_free_workouts.toInt().coerceAtLeast(0),
+            lifetimeUnlocked = lifetime_active.toBooleanFlag(),
+            storeStatus = runCatching { FullAccessStoreStatus.valueOf(store_status) }
+                .getOrDefault(FullAccessStoreStatus.NOT_CHECKED),
+            lastError = last_error,
+            updatedAt = Instant.fromEpochMilliseconds(updated_at)
         )
 
     private fun SetQueriesAccessor.upsertSet(workoutId: FoundationId, set: ExerciseSet) {

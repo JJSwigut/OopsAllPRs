@@ -100,6 +100,8 @@ fun AppShell(
 
     LaunchedEffect(Unit) {
         appState.hydrate()
+        scope.launch { appState.refreshFullAccessEntitlements() }
+        scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
     }
 
     LaunchedEffect(shellState.selectedDestination) {
@@ -107,7 +109,11 @@ fun AppShell(
             TopLevelDestination.HISTORY -> appState.history.refresh()
             TopLevelDestination.PROGRESS -> appState.progress.refresh()
             TopLevelDestination.TRAIN -> appState.workoutHome.hydrate()
-            TopLevelDestination.PROFILE -> appState.profile.hydrate()
+            TopLevelDestination.PROFILE -> {
+                appState.profile.hydrate()
+                scope.launch { appState.refreshFullAccessEntitlements() }
+                scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
+            }
         }
     }
 
@@ -268,6 +274,21 @@ fun AppShell(
                             }
                         }
                     },
+                    onRequestFinish = { appState.activeWorkout.requestFinish() },
+                    onCancelFinish = { appState.activeWorkout.cancelFinish() },
+                    onConfirmFinish = { workoutId ->
+                        scope.launch {
+                            when (val result = appState.routines.finishWorkout(workoutId)) {
+                                is FoundationResult.Failure -> Unit
+                                is FoundationResult.Success -> {
+                                    appState.hydrate()
+                                    appState.history.presentCompletedWorkout(result.value.id)
+                                    appState.progress.refresh()
+                                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
+                                }
+                            }
+                        }
+                    },
                     onRestTick = {
                         scope.launch {
                             appState.activeWorkout.refreshTimers()
@@ -295,21 +316,17 @@ fun AppShell(
                     onToggleExerciseRest = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleExerciseRest(exerciseId) }
                     },
+                    onGroupCircuit = { exerciseIds ->
+                        scope.launch { appState.activeWorkout.groupExercisesAsCircuit(exerciseIds) }
+                    },
+                    onUngroupCircuit = { exerciseId ->
+                        scope.launch { appState.activeWorkout.ungroupCircuit(exerciseId) }
+                    },
+                    onAdjustCircuitRounds = { exerciseId, delta ->
+                        scope.launch { appState.activeWorkout.adjustCircuitRounds(exerciseId, delta) }
+                    },
                     onFocusExercise = { exerciseId ->
                         scope.launch { appState.activeWorkout.setFocus(exerciseId) }
-                    },
-                    onFinishWorkout = { workoutId ->
-                        scope.launch {
-                            when (val result = appState.routines.finishWorkout(workoutId)) {
-                                is FoundationResult.Failure -> Unit
-                                is FoundationResult.Success -> {
-                                    appState.hydrate()
-                                    appState.history.presentCompletedWorkout(result.value.id)
-                                    appState.progress.refresh()
-                                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
-                                }
-                            }
-                        }
                     },
                     onDismiss = { scope.launch { appState.navigation.dismissActiveWorkout() } },
                     weightUnit = profileState.weightUnit,
@@ -366,6 +383,9 @@ fun AppShell(
                     onSetDurationChange = { exerciseId, setId, durationMs -> appState.routines.updateEditorSetDuration(exerciseId, setId, durationMs) },
                     onAdjustRest = { exerciseId, delta -> appState.routines.adjustEditorRest(exerciseId, delta) },
                     onToggleRest = { exerciseId -> appState.routines.toggleEditorRest(exerciseId) },
+                    onGroupSelected = { exerciseIds -> appState.routines.groupEditorExercises(exerciseIds) },
+                    onUngroup = { exerciseId -> appState.routines.ungroupEditorExercise(exerciseId) },
+                    onAdjustGroupRounds = { exerciseId, delta -> appState.routines.adjustEditorGroupRounds(exerciseId, delta) },
                     onSave = {
                         scope.launch {
                             when (appState.routines.saveEditor()) {
@@ -474,6 +494,7 @@ private fun DestinationContent(
     when (destination) {
         TopLevelDestination.TRAIN -> WorkoutHomeFlow(
             state = workoutHomeState,
+            fullAccessStatus = profileState.fullAccessStatus,
             onStartEmpty = {
                 scope.launch {
                     appState.workoutHome.startEmpty()
@@ -489,6 +510,18 @@ private fun DestinationContent(
                             appState.navigation.presentActiveWorkout()
                         }
                     }
+                }
+            },
+            onPurchaseLifetimeUnlock = {
+                scope.launch {
+                    appState.profile.purchaseLifetimeUnlock()
+                    appState.workoutHome.refreshFullAccess()
+                }
+            },
+            onRestorePurchases = {
+                scope.launch {
+                    appState.profile.restorePurchases()
+                    appState.workoutHome.refreshFullAccess()
                 }
             },
             onCreateRoutine = {
@@ -604,6 +637,43 @@ private fun DestinationContent(
             onExportRequested = { type ->
                 scope.launch { appState.profile.export(type) }
             },
+            onPurchaseLifetimeUnlock = {
+                scope.launch {
+                    appState.profile.purchaseLifetimeUnlock()
+                    appState.workoutHome.refreshFullAccess()
+                }
+            },
+            onRestorePurchases = {
+                scope.launch {
+                    appState.profile.restorePurchases()
+                    appState.workoutHome.refreshFullAccess()
+                }
+            },
+            onStartBackupSetup = { appState.profile.startBackupSetup() },
+            onBackupSetupNext = { appState.profile.advanceBackupSetup() },
+            onBackupSetupBack = { appState.profile.backUpBackupSetup() },
+            onBackupSetupDismiss = { appState.profile.dismissBackupSetup() },
+            onLinkBackupFile = { scope.launch { appState.profile.linkBackupFile() } },
+            onBackupNow = { scope.launch { appState.profile.backupNow() } },
+            onSyncNow = { scope.launch { appState.profile.syncNow() } },
+            onRestoreFromFile = {
+                scope.launch {
+                    when (appState.profile.restoreFromFile()) {
+                        is FoundationResult.Failure -> Unit
+                        is FoundationResult.Success -> appState.hydrate()
+                    }
+                }
+            },
+            onKeepLocalBackup = { scope.launch { appState.profile.keepLocalBackup() } },
+            onRestoreBackupConflict = {
+                scope.launch {
+                    when (appState.profile.restoreBackupConflict()) {
+                        is FoundationResult.Failure -> Unit
+                        is FoundationResult.Success -> appState.hydrate()
+                    }
+                }
+            },
+            onCancelBackupConflict = { scope.launch { appState.profile.cancelBackupConflict() } },
             onManageExercises = {
                 scope.launch { appState.exerciseManagement.open() }
             },
