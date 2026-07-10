@@ -16,17 +16,23 @@ Android and iOS both read this shared constant.
 
 ## Google Play Console
 
-Create one non-consumable in-app product for the Android release package `com.jjswigut.oopsallprs.android`:
+Create one Google Play one-time, non-consumable product for the Android release package `com.jjswigut.oopsallprs.android`:
 
 - Product ID: `lifetime_unlock`
-- Title: `Lifetime Unlock`
-- Price: `$14.99`
-- Status: active
+- Name: `Lifetime Unlock`
+- Description: Unlock unlimited workout logging forever.
+- Tax/compliance classification: digital content
+- Purchase option ID: `buy`
+- Purchase option type: Buy
+- US target price: `$14.99`
+- Regional pricing and availability: configured for all intended launch regions, with US available at the target price
+- Product and purchase option status: active
 - License testers for purchase, cancel, refund, restore, and unavailable-store checks
 
 Validation checklist:
 
 - Product lookup returns the localized store price on the unlock screen.
+- Checkout uses the same eligible `buy` purchase option offer token as the displayed localized price.
 - Purchase unlocks workout creation/logging immediately after Google Play confirms it.
 - Purchase acknowledgement succeeds.
 - Restore purchase unlocks when the current Google account owns `lifetime_unlock`.
