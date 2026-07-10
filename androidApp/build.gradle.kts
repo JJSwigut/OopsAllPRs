@@ -79,6 +79,47 @@ android {
     }
 }
 
+val verifyLauncherIconIdentity by tasks.registering {
+    group = "verification"
+    description = "Verifies production and debug launcher icon resources stay distinct and correctly wired."
+
+    val mainResDir = layout.projectDirectory.dir("src/main/res")
+    val debugResDir = layout.projectDirectory.dir("src/debug/res")
+    inputs.dir(mainResDir)
+    inputs.dir(debugResDir)
+
+    doLast {
+        val productionAdaptiveIcon = mainResDir.file("mipmap-anydpi-v26/ic_launcher.xml").asFile.readText()
+        val productionRoundIcon = mainResDir.file("mipmap-anydpi-v26/ic_launcher_round.xml").asFile.readText()
+        val debugAdaptiveIcon = debugResDir.file("mipmap-anydpi-v26/ic_launcher.xml").asFile.readText()
+        val debugRoundIcon = debugResDir.file("mipmap-anydpi-v26/ic_launcher_round.xml").asFile.readText()
+
+        require("@drawable/ic_launcher_background" in productionAdaptiveIcon)
+        require("@mipmap/ic_launcher_foreground" in productionAdaptiveIcon)
+        require("@drawable/ic_launcher_background" in productionRoundIcon)
+        require("@mipmap/ic_launcher_foreground" in productionRoundIcon)
+
+        listOf(debugAdaptiveIcon, debugRoundIcon).forEach { iconXml ->
+            require("@drawable/ic_launcher_debug_background" in iconXml)
+            require("@mipmap/ic_launcher_debug_foreground" in iconXml)
+            require("@drawable/ic_launcher_debug_monochrome" in iconXml)
+            require("@mipmap/ic_launcher_foreground" !in iconXml)
+            require("@drawable/ic_launcher_background" !in iconXml)
+        }
+
+        listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi").forEach { density ->
+            val densityDir = debugResDir.dir("mipmap-$density")
+            require(densityDir.file("ic_launcher.png").asFile.isFile)
+            require(densityDir.file("ic_launcher_round.png").asFile.isFile)
+            require(densityDir.file("ic_launcher_debug_foreground.png").asFile.isFile)
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyLauncherIconIdentity)
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
