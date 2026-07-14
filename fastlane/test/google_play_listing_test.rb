@@ -79,7 +79,7 @@ class GooglePlayListingTest < Minitest::Test
     assert_equal true, upload_options.fetch(:skip_upload_changelogs)
     assert_equal true, upload_options.fetch(:validate_only)
     assert_equal true, upload_options.fetch(:changes_not_sent_for_review)
-    assert_equal false, upload_options.fetch(:rescue_changes_not_sent_for_review)
+    assert_equal true, upload_options.fetch(:rescue_changes_not_sent_for_review)
     refute upload_options.key?(:apk)
     refute upload_options.key?(:aab)
     refute upload_options.key?(:track_promote_to)

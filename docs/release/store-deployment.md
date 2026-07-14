@@ -78,7 +78,7 @@ To commit only the listing edit, explicitly opt into upload mode:
 ANDROID_PLAY_VALIDATE_ONLY=false tools/fastlane.sh android listing
 ```
 
-The existing release lookup does not upload a binary, changelog, or release. The lane never builds or uploads an APK/AAB, never changes a release track, and sets `changes_not_sent_for_review` so the edit is not submitted for review. Upload mode is still a Google Play store mutation and requires explicit owner approval.
+The existing release lookup does not upload a binary, changelog, or release. The lane never builds or uploads an APK/AAB and never changes a release track. It requests `changes_not_sent_for_review` and enables Fastlane's compatibility retry: if Play says that query parameter must not be set, Fastlane retries the edit commit without it; if Play requires the parameter, Fastlane retries with it enabled. For this app's current Play publishing configuration, a successful listing commit saves the changes under **Changes not yet submitted for review** in Publishing overview. It does not press **Send app for review**; that remains a separate manual owner action. Upload mode is still a Google Play store mutation and requires explicit owner approval.
 
 The `Google Play Listing` GitHub Actions workflow is `workflow_dispatch` only. Its `mode` input defaults to `validate`; selecting `upload` commits the same listing-only edit. Both modes use the existing `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret, and neither mode submits an app or release for review. Do not dispatch `upload` unless the owner has approved the store mutation.
 
