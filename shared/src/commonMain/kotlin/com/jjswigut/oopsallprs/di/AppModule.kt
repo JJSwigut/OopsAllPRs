@@ -35,7 +35,20 @@ val foundationModule = module {
     single { SqlExerciseRepository(get<SqlFoundationStore>()) }
     single { SqlProgressRepository(get<SqlFoundationStore>()) }
     single { FullAccessUseCases(get<SqlFoundationStore>()) }
-    single { PreviousWorkoutDefaultsUseCase(get<SqlWorkoutRepository>()) }
+    single {
+        PreviousWorkoutDefaultsUseCase(
+            workouts = get<SqlWorkoutRepository>(),
+            configurations = get<SqlFoundationStore>()
+        )
+    }
+    single {
+        createExerciseLoggingComposition(
+            repositoryCapabilities = get<SqlFoundationStore>(),
+            exercises = get<SqlExerciseRepository>(),
+            workouts = get<SqlWorkoutRepository>(),
+            activeUx = get<SqlWorkoutRepository>()
+        )
+    }
     single {
         WorkoutLifecycleUseCases(
             workouts = get<SqlWorkoutRepository>(),
@@ -46,10 +59,39 @@ val foundationModule = module {
             previousDefaults = get<PreviousWorkoutDefaultsUseCase>()
         )
     }
-    single { SetLoggingUseCases(get<SqlWorkoutRepository>(), get<SqlSetLedgerRepository>(), get<SqlFoundationStore>()) }
-    single { PersonalRecordDerivationUseCase(get<SqlProgressRepository>()) }
-    single { RoutineUseCases(get<SqlWorkoutRepository>(), get<SqlRoutineRepository>(), get<SqlWorkoutRepository>(), get<PersonalRecordDerivationUseCase>(), get<SqlFoundationStore>(), fullAccess = get<FullAccessUseCases>()) }
-    single { ExerciseCatalogUseCases(get<SqlExerciseRepository>(), get<SqlWorkoutRepository>()) }
+    single {
+        SetLoggingUseCases(
+            workouts = get<SqlWorkoutRepository>(),
+            setLedger = get<SqlSetLedgerRepository>(),
+            preferences = get<SqlFoundationStore>(),
+            configurationManagement = get<ExerciseLoggingComposition>().management,
+            activeUx = get<SqlWorkoutRepository>()
+        )
+    }
+    single {
+        PersonalRecordDerivationUseCase(
+            progressRepository = get<SqlProgressRepository>(),
+            loggingConfigurationRepository = get<SqlFoundationStore>()
+        )
+    }
+    single {
+        RoutineUseCases(
+            workouts = get<SqlWorkoutRepository>(),
+            routines = get<SqlRoutineRepository>(),
+            activeUx = get<SqlWorkoutRepository>(),
+            personalRecords = get<PersonalRecordDerivationUseCase>(),
+            preferences = get<SqlFoundationStore>(),
+            fullAccess = get<FullAccessUseCases>(),
+            configurationManagement = get<ExerciseLoggingComposition>().management
+        )
+    }
+    single {
+        ExerciseCatalogUseCases(
+            exercises = get<SqlExerciseRepository>(),
+            workouts = get<SqlWorkoutRepository>(),
+            loggingConfigurations = get<ExerciseLoggingComposition>().configurations
+        )
+    }
     single { ExerciseCatalogInitializer(get<SqlExerciseRepository>()) }
     single { ProgressStateHolder(get<SqlProgressRepository>(), get<SqlWorkoutRepository>(), get<SqlFoundationStore>()) }
     single { WeightInputUseCases() }

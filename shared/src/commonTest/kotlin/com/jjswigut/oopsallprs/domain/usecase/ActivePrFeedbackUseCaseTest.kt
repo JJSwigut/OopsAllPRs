@@ -1,5 +1,25 @@
 package com.jjswigut.oopsallprs.domain.usecase
 
+import com.jjswigut.oopsallprs.data.repository.InMemoryFoundationStore
+import com.jjswigut.oopsallprs.domain.model.ActiveExercise
+import com.jjswigut.oopsallprs.domain.model.ActivePrFeedbackKind
+import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
+import com.jjswigut.oopsallprs.domain.model.CompletedExercise
+import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.ExerciseReference
+import com.jjswigut.oopsallprs.domain.model.ExerciseSet
+import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationSource
+import com.jjswigut.oopsallprs.domain.model.LoggingSchemaVersion
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
+import com.jjswigut.oopsallprs.domain.model.MeasureRequirement
+import com.jjswigut.oopsallprs.domain.model.MeasureSpec
+import com.jjswigut.oopsallprs.domain.model.OrderedPosition
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
+import com.jjswigut.oopsallprs.domain.model.ResolvedLoggingConfiguration
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.testing.FoundationHarness
@@ -140,5 +160,86 @@ class ActivePrFeedbackUseCaseTest {
         val active = harness.lifecycle.activeWorkout(workout.id)!!
 
         assertEquals("New PR: 1:15", useCase.feedbackFor(active, active.exercises.single(), set)?.label)
+    }
+
+    @Test
+    fun activeFeedbackAndRebuildShareLoadedBodyweightSemantics() = runTest {
+        val store = InMemoryFoundationStore()
+        val configuration = LoggingConfiguration(
+            id = LoggingConfigurationId("active-loaded-bodyweight"),
+            schemaVersion = LoggingSchemaVersion(1),
+            measures = listOf(
+                MeasureSpec(MeasureKind.REPETITIONS, MeasureRequirement.REQUIRED),
+                MeasureSpec(MeasureKind.LOAD, MeasureRequirement.OPTIONAL, LoadRole.ADDED_TO_BODYWEIGHT)
+            )
+        )
+        store.saveLoggingConfiguration(configuration)
+        val set = ExerciseSet(
+            id = FoundationId("active-loaded-set"),
+            exerciseInstanceId = FoundationId("active-exercise"),
+            position = OrderedPosition(0),
+            setKind = SetKind.BODYWEIGHT,
+            weight = WeightKg(20.0),
+            reps = 6,
+            loggedAt = instant(1_200),
+            createdAt = instant(1_100),
+            updatedAt = instant(1_200),
+            captureConfigurationId = configuration.id
+        )
+        val reference = ExerciseReference(
+            exerciseCatalogId = FoundationId("loaded-bodyweight-exercise"),
+            displayNameSnapshot = "Loaded bodyweight",
+            isBodyweight = true,
+            resolvedLoggingConfiguration = ResolvedLoggingConfiguration(
+                configuration = configuration,
+                source = LoggingConfigurationSource.WORKOUT_OVERRIDE
+            )
+        )
+        val exercise = ActiveExercise(
+            id = FoundationId("active-exercise"),
+            activeWorkoutId = FoundationId("active-workout"),
+            reference = reference,
+            position = OrderedPosition(0),
+            sets = listOf(set)
+        )
+        val workout = ActiveWorkout(
+            id = FoundationId("active-workout"),
+            startedAt = instant(1_000),
+            exercises = listOf(exercise),
+            createdAt = instant(1_000),
+            updatedAt = instant(1_200)
+        )
+
+        val feedback = assertNotNull(ActivePrFeedbackUseCase(store).feedbackFor(workout, exercise, set))
+        assertEquals(ActivePrFeedbackKind.WEIGHT_FOR_REPS, feedback.kind)
+        assertEquals(20.0, feedback.newValue)
+
+        val completed = CompletedWorkout(
+            id = FoundationId("completed-workout"),
+            sourceActiveWorkoutId = workout.id,
+            startedAt = workout.startedAt,
+            finishedAt = instant(2_000),
+            durationMs = 1_000,
+            routineId = null,
+            exercises = listOf(
+                CompletedExercise(
+                    id = FoundationId("completed-exercise"),
+                    completedWorkoutId = FoundationId("completed-workout"),
+                    exerciseCatalogId = reference.exerciseCatalogId,
+                    displayNameSnapshot = reference.displayNameSnapshot,
+                    position = OrderedPosition(0),
+                    loggedSets = listOf(set)
+                )
+            ),
+            createdAt = instant(2_000)
+        )
+        PersonalRecordDerivationUseCase(store).rebuildFrom(listOf(completed))
+
+        val rebuiltBestSet = assertNotNull(
+            store.progressPoints().singleOrNull {
+                it.metricCode == ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode
+            }
+        )
+        assertEquals(feedback.newValue, rebuiltBestSet.value)
     }
 }

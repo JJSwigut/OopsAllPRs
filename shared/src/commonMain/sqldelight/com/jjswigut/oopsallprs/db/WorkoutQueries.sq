@@ -45,6 +45,14 @@ upsertActiveSetDraft:
 INSERT OR REPLACE INTO active_set_drafts(draft_id, active_workout_id, exercise_instance_id, position, set_kind, reps, weight_kg, duration_ms, timer_started_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+upsertActiveSetDraftWithLoggingConfiguration:
+INSERT OR REPLACE INTO active_set_drafts(
+    draft_id, active_workout_id, exercise_instance_id, position, set_kind, reps,
+    weight_kg, duration_ms, timer_started_at, updated_at,
+    logging_configuration_id, distance_m, rpe_tenths, rir, failure_outcome
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
 selectActiveSetDrafts:
 SELECT * FROM active_set_drafts
 WHERE active_workout_id = ?

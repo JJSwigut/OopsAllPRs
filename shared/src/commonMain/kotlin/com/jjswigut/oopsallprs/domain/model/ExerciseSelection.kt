@@ -5,7 +5,14 @@ data class ExerciseReference(
     val displayNameSnapshot: String,
     val isBodyweight: Boolean,
     val loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
-    val equipmentSnapshot: String? = null
+    val equipmentSnapshot: String? = null,
+    val definitionOriginSnapshot: ExerciseDefinitionOrigin? = null,
+    val definitionRevisionSnapshot: ExerciseDefinitionRevision = ExerciseDefinitionRevision(1),
+    val seedKeySnapshot: ExerciseSeedKey? = null,
+    val resolvedLoggingConfiguration: ResolvedLoggingConfiguration = ResolvedLoggingConfiguration(
+        configuration = loggingMode.toLegacyLoggingConfiguration(),
+        source = LoggingConfigurationSource.DEFINITION_DEFAULT
+    )
 )
 
 data class ActiveExercise(
@@ -16,7 +23,20 @@ data class ActiveExercise(
     val groupContext: ActiveExerciseGroupContext? = null,
     val sets: List<ExerciseSet> = emptyList(),
     val rest: RestConfiguration = RestConfiguration.default()
-)
+) {
+    val resolvedLoggingConfiguration: ResolvedLoggingConfiguration
+        get() = reference.resolvedLoggingConfiguration
+
+    fun withWorkoutOverride(configuration: LoggingConfiguration): ActiveExercise =
+        copy(
+            reference = reference.copy(
+                resolvedLoggingConfiguration = ResolvedLoggingConfiguration(
+                    configuration = configuration,
+                    source = LoggingConfigurationSource.WORKOUT_OVERRIDE
+                )
+            )
+        )
+}
 
 data class ActiveExerciseGroupContext(
     val groupId: FoundationId,

@@ -6,10 +6,12 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ReusableRoutine
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.domain.model.WireCode
 import com.jjswigut.oopsallprs.ui.common.shortDateLabel
 import com.jjswigut.oopsallprs.ui.common.shortDateTimeLabel
 import kotlinx.datetime.Instant
@@ -46,12 +48,14 @@ data class CompletedSetSummary(
     val reps: Int?,
     val weight: WeightKg?,
     val durationMs: Long?,
+    val distanceMeters: Double? = null,
     val loggedAt: Instant,
     val prMarkers: List<CompletedPrMarker> = emptyList()
 )
 
 data class CompletedPrMarker(
     val kind: PersonalRecordKind,
+    val metricCode: WireCode = kind.legacyMetricCode(),
     val label: String,
     val value: Double,
     val weight: WeightKg? = null,
@@ -156,6 +160,7 @@ private fun ExerciseSet.toSummary(records: List<PersonalRecord>): CompletedSetSu
         reps = reps,
         weight = weight,
         durationMs = durationMs,
+        distanceMeters = distanceMeters,
         loggedAt = requireNotNull(loggedAt),
         prMarkers = records.map { it.toMarker() }
     )
@@ -163,15 +168,18 @@ private fun ExerciseSet.toSummary(records: List<PersonalRecord>): CompletedSetSu
 private fun PersonalRecord.toMarker(): CompletedPrMarker =
     CompletedPrMarker(
         kind = recordKind,
-        label = when (recordKind) {
-            PersonalRecordKind.WEIGHT_FOR_REPS -> {
+        metricCode = metricCode,
+        label = when (evidenceMetric()) {
+            ProgressEvidenceMetric.WEIGHT_FOR_REPS -> {
                 val repsLabel = reps?.let { " x $it" }.orEmpty()
                 "PR ${weight?.value?.formatCompact().orEmpty()}kg$repsLabel"
             }
-            PersonalRecordKind.BODYWEIGHT_REPS -> "PR ${reps ?: value.roundToInt()} reps"
-            PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${value.formatCompact()}kg"
-            PersonalRecordKind.VOLUME -> "PR volume ${value.formatCompact()}"
-            PersonalRecordKind.TIME -> "PR ${value.roundToLong().formatDurationMs()}"
+            ProgressEvidenceMetric.REPS -> "PR ${reps ?: value.roundToInt()} reps"
+            ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${value.formatCompact()}kg"
+            ProgressEvidenceMetric.VOLUME -> "PR volume ${value.formatCompact()}"
+            ProgressEvidenceMetric.LONGEST_DURATION -> "PR ${value.roundToLong().formatDurationMs()}"
+            ProgressEvidenceMetric.LONGEST_DISTANCE -> "PR ${value.formatCompact()} m"
+            null -> "PR ${value.formatCompact()}"
         },
         value = value,
         weight = weight,
@@ -180,31 +188,33 @@ private fun PersonalRecord.toMarker(): CompletedPrMarker =
     )
 
 internal fun CompletedSetSummary.historyDisplayLabel(weightUnit: WeightUnit): String {
-    val weightLabel = weight?.let { " • ${it.historyWeightLabel(weightUnit)}" }.orEmpty()
     val prs = if (prMarkers.isEmpty()) {
         ""
     } else {
         " • ${prMarkers.joinToString { it.historyDetailLabel(weightUnit) }}"
     }
-    val valueLabel = if (setKind == SetKind.TIMED) {
-        durationMs.formatDurationMs()
-    } else {
-        "${(reps ?: 0).coerceAtLeast(0)} reps$weightLabel"
-    }
+    val valueLabel = listOfNotNull(
+        reps?.let { "${it.coerceAtLeast(0)} reps" },
+        weight?.historyWeightLabel(weightUnit),
+        durationMs?.formatDurationMs(),
+        distanceMeters?.let { "${it.formatCompact()} m" }
+    ).joinToString(" • ").ifEmpty { "Performance unavailable" }
     return "Set ${position + 1}: $valueLabel$prs"
 }
 
 internal fun CompletedPrMarker.historyLabel(weightUnit: WeightUnit): String =
-    when (kind) {
-        PersonalRecordKind.WEIGHT_FOR_REPS -> {
+    when (ProgressEvidenceMetric.fromWireCode(metricCode.value)) {
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> {
             val weightLabel = (weight ?: WeightKg(value)).historyWeightLabel(weightUnit)
             val repsLabel = reps?.let { " x $it" }.orEmpty()
             "PR $weightLabel$repsLabel"
         }
-        PersonalRecordKind.BODYWEIGHT_REPS -> "PR ${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
-        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${WeightKg(value).historyWeightLabel(weightUnit)}"
-        PersonalRecordKind.VOLUME -> "PR volume ${WeightKg(value).historyWeightLabel(weightUnit)}"
-        PersonalRecordKind.TIME -> "PR ${value.roundToLong().formatDurationMs()}"
+        ProgressEvidenceMetric.REPS -> "PR ${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${WeightKg(value).historyWeightLabel(weightUnit)}"
+        ProgressEvidenceMetric.VOLUME -> "PR volume ${WeightKg(value).historyWeightLabel(weightUnit)}"
+        ProgressEvidenceMetric.LONGEST_DURATION -> "PR ${value.roundToLong().formatDurationMs()}"
+        ProgressEvidenceMetric.LONGEST_DISTANCE -> "PR ${value.formatCompact()} m"
+        null -> "PR ${value.formatCompact()}"
     }
 
 internal fun CompletedPrMarker.historyDetailLabel(weightUnit: WeightUnit): String =
@@ -243,3 +253,15 @@ private fun Double.formatCompact(): String {
     val whole = oneDecimal.roundToInt()
     return if (abs(oneDecimal - whole.toDouble()) < 0.0001) whole.toString() else oneDecimal.toString()
 }
+
+private fun PersonalRecord.evidenceMetric(): ProgressEvidenceMetric? =
+    ProgressEvidenceMetric.fromWireCode(metricCode.value)
+
+private fun PersonalRecordKind.legacyMetricCode(): WireCode =
+    when (this) {
+        PersonalRecordKind.WEIGHT_FOR_REPS -> ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode
+        PersonalRecordKind.BODYWEIGHT_REPS -> ProgressEvidenceMetric.REPS.wireCode
+        PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX.wireCode
+        PersonalRecordKind.VOLUME -> ProgressEvidenceMetric.VOLUME.wireCode
+        PersonalRecordKind.TIME -> ProgressEvidenceMetric.LONGEST_DURATION.wireCode
+    }

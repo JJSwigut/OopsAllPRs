@@ -9,6 +9,7 @@ class SqlBackupRestoreRepositoryTest {
     fun restorePackageIntoEmptyDatabaseHydratesCompletedWorkouts() = runTest {
         val sourceHarness = SqlFoundationStoreTestHarness()
         val sourceRepos = sourceHarness.repositories()
+        seedBackupExercises(sourceRepos)
         createCompletedMixedWorkout(sourceRepos)
         val sourceBackup = SqlBackupRepository(sourceHarness.database, sourceRepos.store)
         val pkg = sourceBackup.createPackage().successValue()
@@ -24,3 +25,25 @@ class SqlBackupRestoreRepositoryTest {
         assertEquals(2, destinationRepos.workouts.completedWorkouts().single().exercises.size)
     }
 }
+
+internal suspend fun seedBackupExercises(repos: SqlRepositoryBundle) {
+    repos.exercises.saveUserExercise(backupExercise("exercise-bench", "Bench Press", false)).successValue()
+    repos.exercises.saveUserExercise(backupExercise("exercise-pullup", "Pull-Up", true)).successValue()
+}
+
+private fun backupExercise(id: String, name: String, bodyweight: Boolean) =
+    com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem(
+        id = com.jjswigut.oopsallprs.domain.model.FoundationId(id),
+        canonicalName = name.lowercase(),
+        displayName = name,
+        muscleGroup = if (bodyweight) "Back" else "Chest",
+        equipment = if (bodyweight) "Bodyweight" else "Barbell",
+        movementPattern = if (bodyweight) "Pull" else "Push",
+        exerciseType = if (bodyweight) "Bodyweight" else "Strength",
+        experienceLevel = "Intermediate",
+        bodyRegion = "Upper Body",
+        isBodyweight = bodyweight,
+        isUserCreated = true,
+        createdAt = instant(100),
+        updatedAt = instant(100)
+    )

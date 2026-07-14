@@ -2,20 +2,21 @@ package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
-import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
-import com.jjswigut.oopsallprs.domain.model.ProgressMetric
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ui.common.shortDateLabel
 import com.jjswigut.oopsallprs.ui.history.formatDurationMs
 import kotlinx.datetime.Instant
+import kotlin.math.abs
+import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 data class ProgressChartState(
-    val selectedMetric: ProgressMetric?,
-    val availableMetrics: List<ProgressMetric>,
+    val selectedMetric: ProgressEvidenceMetric?,
+    val availableMetrics: List<ProgressEvidenceMetric>,
     val points: List<ProgressChartPoint>,
     val latestValueLabel: String?,
     val emptyMessage: String
@@ -26,7 +27,7 @@ data class ProgressChartState(
 data class ProgressChartPoint(
     val pointId: FoundationId,
     val exerciseCatalogId: FoundationId,
-    val metric: ProgressMetric,
+    val metric: ProgressEvidenceMetric,
     val value: Double,
     val valueLabel: String,
     val dateLabel: String,
@@ -40,13 +41,14 @@ internal fun buildProgressChartState(
     points: List<ProgressPoint>,
     records: List<PersonalRecord>,
     exerciseCatalogId: FoundationId,
-    selectedMetric: ProgressMetric?,
+    selectedMetric: ProgressEvidenceMetric?,
     weightUnit: WeightUnit
 ): ProgressChartState {
     val exercisePoints = points
         .filter { it.exerciseCatalogId == exerciseCatalogId && it.value.isFinite() }
+        .mapNotNull { point -> point.evidenceMetric()?.let { point to it } }
     val availableMetrics = exercisePoints
-        .map { it.metric }
+        .map { it.second }
         .distinct()
         .sortedBy { it.sortOrder() }
     val metric = selectedMetric
@@ -55,9 +57,10 @@ internal fun buildProgressChartState(
     val chartPoints = metric
         ?.let { selected ->
             exercisePoints
-                .filter { it.metric == selected }
+                .filter { it.second == selected }
+                .map { it.first }
                 .sortedWith(compareBy<ProgressPoint> { it.recordedAt }.thenBy { it.id.value })
-                .map { point -> point.toChartPoint(records, weightUnit) }
+                .map { point -> point.toChartPoint(selected, records, weightUnit) }
         }
         .orEmpty()
     return ProgressChartState(
@@ -73,43 +76,47 @@ internal fun buildProgressChartState(
     )
 }
 
-internal fun ProgressMetric.label(): String =
+internal fun ProgressEvidenceMetric.label(): String =
     when (this) {
-        ProgressMetric.BEST_SET -> "Best set"
-        ProgressMetric.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM"
-        ProgressMetric.VOLUME -> "Volume"
-        ProgressMetric.BODYWEIGHT_REPS -> "Bodyweight reps"
-        ProgressMetric.TIME -> "Time"
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> "Best set"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM"
+        ProgressEvidenceMetric.VOLUME -> "Volume"
+        ProgressEvidenceMetric.REPS -> "Bodyweight reps"
+        ProgressEvidenceMetric.LONGEST_DURATION -> "Time"
+        ProgressEvidenceMetric.LONGEST_DISTANCE -> "Longest distance"
     }
 
-internal fun ProgressMetric.shortLabel(): String =
+internal fun ProgressEvidenceMetric.shortLabel(): String =
     when (this) {
-        ProgressMetric.BEST_SET -> "Best"
-        ProgressMetric.ESTIMATED_ONE_REP_MAX -> "e1RM"
-        ProgressMetric.VOLUME -> "Volume"
-        ProgressMetric.BODYWEIGHT_REPS -> "Reps"
-        ProgressMetric.TIME -> "Time"
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> "Best"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "e1RM"
+        ProgressEvidenceMetric.VOLUME -> "Volume"
+        ProgressEvidenceMetric.REPS -> "Reps"
+        ProgressEvidenceMetric.LONGEST_DURATION -> "Time"
+        ProgressEvidenceMetric.LONGEST_DISTANCE -> "Distance"
     }
 
-internal fun ProgressMetric.sortOrder(): Int =
+internal fun ProgressEvidenceMetric.sortOrder(): Int =
     when (this) {
-        ProgressMetric.ESTIMATED_ONE_REP_MAX -> 0
-        ProgressMetric.BEST_SET -> 1
-        ProgressMetric.BODYWEIGHT_REPS -> 2
-        ProgressMetric.TIME -> 3
-        ProgressMetric.VOLUME -> 4
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> 0
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> 1
+        ProgressEvidenceMetric.REPS -> 2
+        ProgressEvidenceMetric.LONGEST_DURATION -> 3
+        ProgressEvidenceMetric.LONGEST_DISTANCE -> 4
+        ProgressEvidenceMetric.VOLUME -> 5
     }
 
 private fun ProgressPoint.toChartPoint(
+    evidenceMetric: ProgressEvidenceMetric,
     records: List<PersonalRecord>,
     weightUnit: WeightUnit
 ): ProgressChartPoint =
     ProgressChartPoint(
         pointId = id,
         exerciseCatalogId = exerciseCatalogId,
-        metric = metric,
+        metric = evidenceMetric,
         value = value,
-        valueLabel = valueLabel(weightUnit),
+        valueLabel = valueLabel(evidenceMetric, weightUnit),
         dateLabel = recordedAt.shortDateLabel(),
         sourceWorkoutId = sourceWorkoutId,
         sourceSetId = sourceSetId,
@@ -117,41 +124,42 @@ private fun ProgressPoint.toChartPoint(
         recordedAt = recordedAt
     )
 
-private fun ProgressPoint.valueLabel(weightUnit: WeightUnit): String =
-    when (metric) {
-        ProgressMetric.BEST_SET -> {
+private fun ProgressPoint.valueLabel(evidenceMetric: ProgressEvidenceMetric, weightUnit: WeightUnit): String =
+    when (evidenceMetric) {
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> {
             val weightLabel = (weight ?: WeightKg(value)).format(weightUnit)
             val repsLabel = reps?.let { " x $it" }.orEmpty()
             "$weightLabel$repsLabel"
         }
-        ProgressMetric.BODYWEIGHT_REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
-        ProgressMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} e1RM"
-        ProgressMetric.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
-        ProgressMetric.TIME -> value.roundToLong().formatDurationMs()
+        ProgressEvidenceMetric.REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} e1RM"
+        ProgressEvidenceMetric.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
+        ProgressEvidenceMetric.LONGEST_DURATION -> value.roundToLong().formatDurationMs()
+        ProgressEvidenceMetric.LONGEST_DISTANCE -> "${value.formatCompact()} m"
     }
 
 private fun ProgressPoint.sourceRecord(records: List<PersonalRecord>): FoundationId? {
-    val expectedKind = metric.toRecordKind()
     return records.firstOrNull { record ->
         record.exerciseCatalogId == exerciseCatalogId &&
             record.sourceWorkoutId == sourceWorkoutId &&
             record.sourceSetId == sourceSetId &&
-            record.recordKind == expectedKind
+            record.metricCode == metricCode
     }?.id
 }
 
-private fun ProgressMetric.toRecordKind(): PersonalRecordKind =
-    when (this) {
-        ProgressMetric.BEST_SET -> PersonalRecordKind.WEIGHT_FOR_REPS
-        ProgressMetric.BODYWEIGHT_REPS -> PersonalRecordKind.BODYWEIGHT_REPS
-        ProgressMetric.ESTIMATED_ONE_REP_MAX -> PersonalRecordKind.ESTIMATED_ONE_REP_MAX
-        ProgressMetric.VOLUME -> PersonalRecordKind.VOLUME
-        ProgressMetric.TIME -> PersonalRecordKind.TIME
-    }
-
-private fun List<ProgressMetric>.defaultMetric(): ProgressMetric? =
-    firstOrNull { it == ProgressMetric.ESTIMATED_ONE_REP_MAX }
-        ?: firstOrNull { it == ProgressMetric.BEST_SET }
-        ?: firstOrNull { it == ProgressMetric.BODYWEIGHT_REPS }
-        ?: firstOrNull { it == ProgressMetric.TIME }
+private fun List<ProgressEvidenceMetric>.defaultMetric(): ProgressEvidenceMetric? =
+    firstOrNull { it == ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX }
+        ?: firstOrNull { it == ProgressEvidenceMetric.WEIGHT_FOR_REPS }
+        ?: firstOrNull { it == ProgressEvidenceMetric.REPS }
+        ?: firstOrNull { it == ProgressEvidenceMetric.LONGEST_DURATION }
+        ?: firstOrNull { it == ProgressEvidenceMetric.LONGEST_DISTANCE }
         ?: firstOrNull()
+
+private fun ProgressPoint.evidenceMetric(): ProgressEvidenceMetric? =
+    ProgressEvidenceMetric.fromWireCode(metricCode.value)
+
+private fun Double.formatCompact(): String {
+    val oneDecimal = round(this * 10.0) / 10.0
+    val whole = oneDecimal.roundToInt()
+    return if (abs(oneDecimal - whole.toDouble()) < 0.0001) whole.toString() else oneDecimal.toString()
+}

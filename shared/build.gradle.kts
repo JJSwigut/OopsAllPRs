@@ -1,3 +1,4 @@
+import app.cash.sqldelight.gradle.VerifyMigrationTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -46,6 +47,7 @@ kotlin {
             implementation(libs.uuid)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.coroutines)
+            implementation(libs.okio)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -84,6 +86,15 @@ sqldelight {
     databases {
         create("WorkoutDatabase") {
             packageName.set("com.jjswigut.oopsallprs.db")
+            schemaOutputDirectory.set(file("src/androidUnitTest/resources/schema-10"))
+            // The legacy 1.sqm is not a replayable baseline. Generation must not derive from it;
+            // the task override below verifies only committed schema-10 databases through 10.sqm.
+            verifyMigrations.set(false)
         }
     }
+}
+
+tasks.withType<VerifyMigrationTask>().configureEach {
+    verifyMigrations.set(true)
+    verifyDefinitions.set(true)
 }

@@ -19,7 +19,12 @@ data class PersistedSetDraft(
     val weight: WeightKg?,
     val durationMs: Long? = null,
     val timerStartedAt: Instant? = null,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    val captureConfigurationId: LoggingConfigurationId = setKind
+        .toLegacyLoggingConfiguration(hasLegacyLoad = setKind == SetKind.BODYWEIGHT && weight != null)
+        .id,
+    val distanceMeters: Double? = null,
+    val observedEffort: Effort? = null
 )
 
 enum class ActivePrFeedbackKind {

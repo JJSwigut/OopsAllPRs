@@ -70,13 +70,26 @@ class WorkoutLifecycleUseCases(
             val activeExerciseId = newFoundationId("active-exercise")
             val loggingMode = exercise.plannedSets.loggingMode()
             val isBodyweight = loggingMode == ExerciseLoggingMode.BODYWEIGHT || loggingMode == ExerciseLoggingMode.TIMED
-            val previous = previousDefaults?.snapshotFor(exercise.exerciseCatalogId, isBodyweight, loggingMode)
+            val previous = previousDefaults?.snapshotFor(
+                exerciseCatalogId = exercise.exerciseCatalogId,
+                isBodyweight = isBodyweight,
+                loggingMode = loggingMode,
+                loggingConfiguration = exercise.resolvedLoggingConfiguration.configuration
+            )
             val groupContext = routine.exercises.groupContextFor(exercise)
             val plannedSets = exercise.plannedSets.expandedForGroupRounds(groupContext?.rounds)
             ActiveExercise(
                 id = activeExerciseId,
                 activeWorkoutId = workoutId,
-                reference = ExerciseReference(exercise.exerciseCatalogId, exercise.displayNameSnapshot, isBodyweight, loggingMode),
+                reference = ExerciseReference(
+                    exerciseCatalogId = exercise.exerciseCatalogId,
+                    displayNameSnapshot = exercise.displayNameSnapshot,
+                    isBodyweight = isBodyweight,
+                    loggingMode = loggingMode,
+                    definitionRevisionSnapshot = exercise.definitionRevisionSnapshot,
+                    seedKeySnapshot = exercise.seedKeySnapshot,
+                    resolvedLoggingConfiguration = exercise.resolvedLoggingConfiguration
+                ),
                 position = exercise.position,
                 groupContext = groupContext,
                 sets = plannedSets.mapIndexed { setIndex, planned ->
@@ -87,8 +100,11 @@ class WorkoutLifecycleUseCases(
                         position = OrderedPosition(setIndex),
                         setKind = planned.setKind,
                         weight = planned.targetWeight ?: previousValue?.weight,
-                        reps = (planned.targetReps ?: previousValue?.reps).takeIf { planned.setKind != SetKind.TIMED },
-                        durationMs = (planned.targetDurationMs ?: previousValue?.durationMs).takeIf { planned.setKind == SetKind.TIMED },
+                        reps = planned.targetReps ?: previousValue?.reps,
+                        durationMs = planned.targetDurationMs ?: previousValue?.durationMs,
+                        captureConfigurationId = exercise.resolvedLoggingConfiguration.configuration.id,
+                        distanceMeters = planned.targetDistanceMeters ?: previousValue?.distanceMeters,
+                        observedEffort = null,
                         loggedAt = null,
                         createdAt = now,
                         updatedAt = now

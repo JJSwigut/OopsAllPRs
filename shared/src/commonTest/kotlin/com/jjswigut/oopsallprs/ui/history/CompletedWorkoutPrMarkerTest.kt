@@ -3,6 +3,7 @@ package com.jjswigut.oopsallprs.ui.history
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.testing.instant
@@ -41,5 +42,31 @@ class CompletedWorkoutPrMarkerTest {
             "Set 1: 5 reps • 220.5 lb • PR 220.5 lb x 5 • 1970-01-01",
             summary.exercises.first().setRows.single().historyDisplayLabel(WeightUnit.POUNDS)
         )
+    }
+
+    @Test
+    fun longestDistanceMetricCodeNeverUsesDurationLabel() {
+        val workout = mixedCompletedWorkout()
+        val summary = workout.toSummary(
+            listOf(
+                PersonalRecord(
+                    id = FoundationId("pr-distance"),
+                    exerciseCatalogId = FoundationId("exercise-bench"),
+                    recordKind = PersonalRecordKind.TIME,
+                    reps = null,
+                    weight = null,
+                    value = 1_500.0,
+                    sourceWorkoutId = workout.id,
+                    sourceSetId = FoundationId("set-weighted"),
+                    achievedAt = instant(10_000),
+                    createdAt = instant(10_000),
+                    metricCode = ProgressEvidenceMetric.LONGEST_DISTANCE.wireCode
+                )
+            )
+        )
+
+        val marker = summary.exercises.first().setRows.single().prMarkers.single()
+        assertEquals("PR 1500 m", marker.historyLabel(WeightUnit.KILOGRAMS))
+        assertTrue("1:30" !in marker.historyLabel(WeightUnit.KILOGRAMS))
     }
 }

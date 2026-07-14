@@ -16,6 +16,7 @@ import com.jjswigut.oopsallprs.dev.DeveloperSeedUseCase
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.ExerciseLoggingConfigurationUseCases
 import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
@@ -37,6 +38,7 @@ import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
 import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
 import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
+import com.jjswigut.oopsallprs.di.createExerciseLoggingComposition
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.Clock
@@ -56,6 +58,7 @@ class AppState(
     val history: HistoryStateHolder,
     val profile: ProfileStateHolder,
     private val fullAccess: FullAccessUseCases,
+    val exerciseLoggingConfiguration: ExerciseLoggingConfigurationUseCases? = null,
     val developerSeeds: DeveloperSeedStateHolder? = null
 ) {
     private val _activeSession = MutableStateFlow<ActiveSessionState?>(null)
@@ -122,9 +125,15 @@ class AppState(
             val sets = SqlSetLedgerRepository(store)
             val routineRepo = SqlRoutineRepository(store)
             val exerciseRepo = SqlExerciseRepository(store)
+            val exerciseLogging = createExerciseLoggingComposition(
+                repositoryCapabilities = store,
+                exercises = exerciseRepo,
+                workouts = workouts,
+                activeUx = workouts
+            )
             val progress = SqlProgressRepository(store)
             val fullAccess = FullAccessUseCases(store, fullAccessBilling)
-            val previousDefaults = PreviousWorkoutDefaultsUseCase(workouts)
+            val previousDefaults = PreviousWorkoutDefaultsUseCase(workouts, store)
             val lifecycle = WorkoutLifecycleUseCases(
                 workouts = workouts,
                 sessions = workouts,
@@ -134,9 +143,15 @@ class AppState(
                 notifications = restNotificationScheduler,
                 previousDefaults = previousDefaults
             )
-            val setLogging = SetLoggingUseCases(workouts, sets, store)
-            val activePrFeedback = ActivePrFeedbackUseCase(progress)
-            val personalRecordDerivation = PersonalRecordDerivationUseCase(progress)
+            val setLogging = SetLoggingUseCases(
+                workouts = workouts,
+                setLedger = sets,
+                preferences = store,
+                configurationManagement = exerciseLogging.management,
+                activeUx = workouts
+            )
+            val activePrFeedback = ActivePrFeedbackUseCase(progress, store)
+            val personalRecordDerivation = PersonalRecordDerivationUseCase(progress, store)
             val routineUseCases = RoutineUseCases(
                 workouts,
                 routineRepo,
@@ -144,10 +159,18 @@ class AppState(
                 personalRecordDerivation,
                 store,
                 restNotificationScheduler,
-                fullAccess
+                fullAccess,
+                exerciseLogging.management
             )
-            val activeWorkout = ActiveWorkoutStateHolder(setLogging, lifecycle, workouts, activePrFeedback, previousDefaults)
-            val exerciseCatalog = ExerciseCatalogUseCases(exerciseRepo, workouts)
+            val activeWorkout = ActiveWorkoutStateHolder(
+                setLogging = setLogging,
+                lifecycle = lifecycle,
+                activeUx = workouts,
+                activePrFeedback = activePrFeedback,
+                previousDefaults = previousDefaults,
+                configurationManagement = exerciseLogging.management
+            )
+            val exerciseCatalog = ExerciseCatalogUseCases(exerciseRepo, workouts, exerciseLogging.configurations)
             val developerSeeds = if (developerToolsEnabled) {
                 DeveloperSeedStateHolder(
                     DeveloperSeedUseCase(
@@ -184,6 +207,7 @@ class AppState(
                     fullAccess = fullAccess
                 ),
                 fullAccess = fullAccess,
+                exerciseLoggingConfiguration = exerciseLogging.management,
                 developerSeeds = developerSeeds
             )
         }

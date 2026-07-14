@@ -2,6 +2,16 @@ insertExercise:
 INSERT OR REPLACE INTO exercise_catalog(id, canonical_name, display_name, muscle_group, equipment, movement_pattern, exercise_type, experience_level, body_region, is_bodyweight, logging_mode, is_user_created, created_at, updated_at, archived_at, source_seed_version, user_notes)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+insertExerciseWithLoggingConfiguration:
+INSERT OR REPLACE INTO exercise_catalog(
+    id, canonical_name, display_name, muscle_group, equipment, movement_pattern,
+    exercise_type, experience_level, body_region, is_bodyweight, logging_mode,
+    is_user_created, created_at, updated_at, archived_at, source_seed_version,
+    user_notes, definition_origin, definition_revision, seed_id,
+    seed_manifest_revision, default_logging_configuration_id
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
 selectExercises:
 SELECT * FROM exercise_catalog
 WHERE archived_at IS NULL
