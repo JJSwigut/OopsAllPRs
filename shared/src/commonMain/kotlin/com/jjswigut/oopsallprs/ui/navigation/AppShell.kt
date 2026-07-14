@@ -330,6 +330,7 @@ fun AppShell(
                     onFocusExercise = { exerciseId ->
                         scope.launch { appState.activeWorkout.setFocus(exerciseId) }
                     },
+                    onShowExerciseOverview = { appState.activeWorkout.showExerciseOverview() },
                     onDismiss = { scope.launch { appState.navigation.dismissActiveWorkout() } },
                     weightUnit = profileState.weightUnit,
                     weightStepAmount = profileState.weightStep
