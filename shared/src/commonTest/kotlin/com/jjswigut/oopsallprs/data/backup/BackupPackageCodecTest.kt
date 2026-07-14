@@ -12,6 +12,51 @@ import kotlin.test.assertTrue
 
 class BackupPackageCodecTest {
     @Test
+    fun releasedSchema8V1BackupRemainsAccepted() {
+        val releasedV1 = """
+            {
+              "formatVersion": 1,
+              "createdAt": 1000,
+              "deviceId": "released-device",
+              "lastLocalRevision": "released-revision",
+              "appSchemaVersion": 8,
+              "summary": {
+                "workoutCount": 0,
+                "setCount": 0,
+                "routineCount": 0,
+                "customExerciseCount": 0,
+                "progressRecordCount": 0,
+                "hasActiveWorkout": false,
+                "latestWorkoutTimestamp": null,
+                "latestUpdatedTimestamp": null
+              },
+              "preferences": {
+                "weightUnit": "POUNDS",
+                "weightStepPounds": 5.0,
+                "weightStepKilograms": 2.5,
+                "defaultRestSeconds": 120,
+                "restSoundEnabled": true
+              },
+              "exercises": [],
+              "routines": [],
+              "activeWorkout": null,
+              "activeSession": null,
+              "activeUxSession": null,
+              "activeSetDrafts": [],
+              "completedWorkouts": [],
+              "personalRecords": [],
+              "progressPoints": [],
+              "exportMetadata": []
+            }
+        """.trimIndent()
+
+        val decoded = BackupPackageCodec().decode(releasedV1).successValue()
+
+        assertEquals(BACKUP_FORMAT_VERSION, decoded.formatVersion)
+        assertEquals(8, decoded.appSchemaVersion)
+    }
+
+    @Test
     fun backupPackageRoundTripsAsPlainJson() = runTest {
         val harness = FoundationHarness()
         harness.seedExerciseCatalog()

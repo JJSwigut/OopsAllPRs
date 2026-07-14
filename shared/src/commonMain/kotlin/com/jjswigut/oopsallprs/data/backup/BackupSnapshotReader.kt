@@ -1,5 +1,6 @@
 package com.jjswigut.oopsallprs.data.backup
 
+import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
 import com.jjswigut.oopsallprs.domain.model.BackupRevision
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
@@ -26,7 +27,7 @@ class BackupSnapshotReader(
     private val preferences: PreferencesRepository,
     private val progress: ProgressRepository,
     private val deviceId: String = "local-device",
-    private val schemaVersion: Int = 8,
+    private val schemaVersion: Int = WorkoutDatabase.Schema.version.toInt(),
     private val revisionCalculator: LocalRevisionCalculator = LocalRevisionCalculator()
 ) {
     suspend fun createPackage(now: Instant = Clock.System.now()): FoundationResult<BackupPackage> {
