@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.Effort
+import com.jjswigut.oopsallprs.domain.model.EffortKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ds.component.FitButton
@@ -36,6 +38,8 @@ import com.jjswigut.oopsallprs.ds.component.FitCard
 import com.jjswigut.oopsallprs.ds.component.FitDialog
 import com.jjswigut.oopsallprs.ds.component.FitIconButton
 import com.jjswigut.oopsallprs.ds.component.FitListRow
+import com.jjswigut.oopsallprs.ds.component.FitSegmentedControl
+import com.jjswigut.oopsallprs.ds.component.FitToggle
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
@@ -47,14 +51,22 @@ fun ActiveWorkoutFlow(
     state: ActiveWorkoutState,
     onAddExercise: () -> Unit,
     onLogSet: (FoundationId) -> Unit,
-    onDraftRepsChange: (FoundationId, Int) -> Unit,
+    onDraftRepsChange: (FoundationId, Int?) -> Unit,
     onDraftWeightChange: (FoundationId, WeightKg?) -> Unit,
+    onDraftWeightInputChange: (FoundationId, MeasureInputUpdate<WeightKg>) -> Unit,
     onDraftDurationChange: (FoundationId, Long?) -> Unit,
+    onDraftDistanceChange: (FoundationId, Double?) -> Unit,
+    onDraftDistanceInputChange: (FoundationId, MeasureInputUpdate<Double>) -> Unit,
+    onDraftEffortChange: (FoundationId, MeasureInputUpdate<Effort>) -> Unit,
     onDraftTimerToggle: (FoundationId) -> Unit,
     onBeginEditSet: (FoundationId) -> Unit,
-    onEditRepsChange: (Int) -> Unit,
+    onEditRepsChange: (Int?) -> Unit,
     onEditWeightChange: (WeightKg?) -> Unit,
+    onEditWeightInputChange: (MeasureInputUpdate<WeightKg>) -> Unit,
     onEditDurationChange: (Long?) -> Unit,
+    onEditDistanceChange: (Double?) -> Unit,
+    onEditDistanceInputChange: (MeasureInputUpdate<Double>) -> Unit,
+    onEditEffortChange: (MeasureInputUpdate<Effort>) -> Unit,
     onSaveEditedSet: () -> Unit,
     onCancelEditSet: () -> Unit,
     onDeleteSet: (FoundationId) -> Unit,
@@ -71,10 +83,15 @@ fun ActiveWorkoutFlow(
     onSkipActiveRest: () -> Unit,
     onAdjustExerciseRest: (FoundationId, Int) -> Unit,
     onToggleExerciseRest: (FoundationId) -> Unit,
+    onTrackAddedWeightChange: (FoundationId, Boolean) -> Unit,
+    onTrackEffortChange: (FoundationId, Boolean) -> Unit,
+    onEffortKindChange: (FoundationId, EffortKind) -> Unit,
+    onSaveConfigurationAsDefault: (FoundationId) -> Unit,
     onGroupCircuit: (List<FoundationId>) -> Unit,
     onUngroupCircuit: (FoundationId) -> Unit,
     onAdjustCircuitRounds: (FoundationId, Int) -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
+    onShowExerciseOverview: () -> Unit,
     onDismiss: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
     weightStepAmount: Double = weightStep(weightUnit),
@@ -119,7 +136,14 @@ fun ActiveWorkoutFlow(
                     state.workout?.takeIf { it.exerciseBlocks.size >= 2 }?.let {
                         FoundationTextAction("Organize", onClick = { isOrganizerOpen = true })
                     }
-                    FoundationTextAction("Close", onDismiss)
+                    FoundationTextAction(
+                        "Close",
+                        if (state.isExerciseOverviewVisible || state.workout?.exerciseBlocks.isNullOrEmpty()) {
+                            onDismiss
+                        } else {
+                            onShowExerciseOverview
+                        }
+                    )
                 }
             }
             state.workout?.let { workout ->
@@ -134,7 +158,8 @@ fun ActiveWorkoutFlow(
                         ExerciseBlockGroupCard(
                             group = group,
                             modifier = Modifier.fillMaxWidth(),
-                            focusedExerciseId = workout.focus?.exerciseInstanceId,
+                            focusedExerciseId = workout.focus?.exerciseInstanceId
+                                ?.takeUnless { state.isExerciseOverviewVisible },
                             weightUnit = weightUnit,
                             onFocus = onFocusExercise,
                             onSettings = { settingsExerciseId = it },
@@ -146,7 +171,8 @@ fun ActiveWorkoutFlow(
                             ExerciseBlock(
                                 block = block,
                                 modifier = Modifier.fillMaxWidth(),
-                                isFocused = workout.focus?.exerciseInstanceId == block.exerciseInstanceId,
+                                isFocused = !state.isExerciseOverviewVisible &&
+                                    workout.focus?.exerciseInstanceId == block.exerciseInstanceId,
                                 weightUnit = weightUnit,
                                 onFocus = { onFocusExercise(block.exerciseInstanceId) },
                                 onSettings = { settingsExerciseId = it },
@@ -176,11 +202,19 @@ fun ActiveWorkoutFlow(
                 onLogSet = onLogSet,
                 onDraftRepsChange = onDraftRepsChange,
                 onDraftWeightChange = onDraftWeightChange,
+                onDraftWeightInputChange = onDraftWeightInputChange,
                 onDraftDurationChange = onDraftDurationChange,
+                onDraftDistanceChange = onDraftDistanceChange,
+                onDraftDistanceInputChange = onDraftDistanceInputChange,
+                onDraftEffortChange = onDraftEffortChange,
                 onDraftTimerToggle = onDraftTimerToggle,
                 onEditRepsChange = onEditRepsChange,
                 onEditWeightChange = onEditWeightChange,
+                onEditWeightInputChange = onEditWeightInputChange,
                 onEditDurationChange = onEditDurationChange,
+                onEditDistanceChange = onEditDistanceChange,
+                onEditDistanceInputChange = onEditDistanceInputChange,
+                onEditEffortChange = onEditEffortChange,
                 onSaveEditedSet = onSaveEditedSet,
                 onCancelEditSet = onCancelEditSet,
                 onUndoLastSet = onUndoLastSet,
@@ -193,6 +227,7 @@ fun ActiveWorkoutFlow(
                 onAdjustActiveRest = onAdjustActiveRest,
                 onSkipActiveRest = onSkipActiveRest,
                 onFocusExercise = onFocusExercise,
+                showExerciseOverview = state.isExerciseOverviewVisible,
                 weightUnit = weightUnit,
                 weightStepAmount = displayWeightStep,
                 modifier = Modifier.fillMaxWidth()
@@ -218,6 +253,10 @@ fun ActiveWorkoutFlow(
                 onDecreaseRest = { onAdjustExerciseRest(block.exerciseInstanceId, -30) },
                 onIncreaseRest = { onAdjustExerciseRest(block.exerciseInstanceId, 30) },
                 onToggleRest = { onToggleExerciseRest(block.exerciseInstanceId) },
+                onTrackAddedWeightChange = { onTrackAddedWeightChange(block.exerciseInstanceId, it) },
+                onTrackEffortChange = { onTrackEffortChange(block.exerciseInstanceId, it) },
+                onEffortKindChange = { onEffortKindChange(block.exerciseInstanceId, it) },
+                onSaveAsDefault = { onSaveConfigurationAsDefault(block.exerciseInstanceId) },
                 onDismiss = { settingsExerciseId = null }
             )
         }
@@ -229,6 +268,10 @@ private fun ExerciseSettingsDialog(
     onDecreaseRest: () -> Unit,
     onIncreaseRest: () -> Unit,
     onToggleRest: () -> Unit,
+    onTrackAddedWeightChange: (Boolean) -> Unit,
+    onTrackEffortChange: (Boolean) -> Unit,
+    onEffortKindChange: (EffortKind) -> Unit,
+    onSaveAsDefault: () -> Unit,
     onDismiss: () -> Unit
 ) {
     FitDialog(onDismissRequest = onDismiss) {
@@ -264,6 +307,43 @@ private fun ExerciseSettingsDialog(
                 )
             }
 
+            if (block.isBodyweight) {
+                SettingToggleRow(
+                    label = "Track added weight",
+                    helper = "Show an optional added-weight field for this workout.",
+                    checked = block.tracksAddedWeight,
+                    onCheckedChange = onTrackAddedWeightChange
+                )
+            }
+
+            SettingToggleRow(
+                label = "Track effort",
+                helper = null,
+                checked = block.effortKind != null,
+                onCheckedChange = onTrackEffortChange
+            )
+            block.effortKind?.let { selected ->
+                val kinds = listOf(EffortKind.RIR, EffortKind.RPE, EffortKind.FAILURE_OUTCOME)
+                FitSegmentedControl(
+                    options = listOf("RIR", "RPE", "Failure"),
+                    selectedIndex = kinds.indexOf(selected).coerceAtLeast(0),
+                    onSelect = { onEffortKindChange(kinds[it]) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (block.canSaveConfigurationAsDefault) {
+                Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                    FitButton(
+                        text = "Save as default",
+                        onClick = onSaveAsDefault,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = FitButtonStyle.Secondary
+                    )
+                    FoundationMutedText("Use this setting for future workouts. Existing routines won't change.")
+                }
+            }
+
             FitButton(
                 text = "Done",
                 onClick = onDismiss,
@@ -271,6 +351,30 @@ private fun ExerciseSettingsDialog(
                 style = FitButtonStyle.Primary
             )
         }
+    }
+}
+
+@Composable
+private fun SettingToggleRow(
+    label: String,
+    helper: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+            FoundationText(label, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+            helper?.let { FoundationMutedText(it) }
+        }
+        FitToggle(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            label = label
+        )
     }
 }
 
@@ -501,13 +605,21 @@ private fun ActiveWorkoutBottomBar(
     workout: ActiveWorkoutView,
     onAddExercise: () -> Unit,
     onLogSet: (FoundationId) -> Unit,
-    onDraftRepsChange: (FoundationId, Int) -> Unit,
+    onDraftRepsChange: (FoundationId, Int?) -> Unit,
     onDraftWeightChange: (FoundationId, WeightKg?) -> Unit,
+    onDraftWeightInputChange: (FoundationId, MeasureInputUpdate<WeightKg>) -> Unit,
     onDraftDurationChange: (FoundationId, Long?) -> Unit,
+    onDraftDistanceChange: (FoundationId, Double?) -> Unit,
+    onDraftDistanceInputChange: (FoundationId, MeasureInputUpdate<Double>) -> Unit,
+    onDraftEffortChange: (FoundationId, MeasureInputUpdate<Effort>) -> Unit,
     onDraftTimerToggle: (FoundationId) -> Unit,
-    onEditRepsChange: (Int) -> Unit,
+    onEditRepsChange: (Int?) -> Unit,
     onEditWeightChange: (WeightKg?) -> Unit,
+    onEditWeightInputChange: (MeasureInputUpdate<WeightKg>) -> Unit,
     onEditDurationChange: (Long?) -> Unit,
+    onEditDistanceChange: (Double?) -> Unit,
+    onEditDistanceInputChange: (MeasureInputUpdate<Double>) -> Unit,
+    onEditEffortChange: (MeasureInputUpdate<Effort>) -> Unit,
     onSaveEditedSet: () -> Unit,
     onCancelEditSet: () -> Unit,
     onUndoLastSet: () -> Unit,
@@ -520,6 +632,7 @@ private fun ActiveWorkoutBottomBar(
     onAdjustActiveRest: (Int) -> Unit,
     onSkipActiveRest: () -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
+    showExerciseOverview: Boolean,
     weightUnit: WeightUnit,
     weightStepAmount: Double,
     modifier: Modifier = Modifier
@@ -601,7 +714,7 @@ private fun ActiveWorkoutBottomBar(
                         style = FitButtonStyle.Secondary
                     )
                     FitButton(
-                        text = "Finish",
+                        text = "Finish workout",
                         onClick = { onConfirmFinish(workout.workoutId) },
                         modifier = Modifier.weight(1f),
                         style = FitButtonStyle.Primary
@@ -625,7 +738,11 @@ private fun ActiveWorkoutBottomBar(
                     draft = edit.rowDraft,
                     onRepsChange = onEditRepsChange,
                     onWeightChange = onEditWeightChange,
+                    onWeightInputChange = onEditWeightInputChange,
                     onDurationChange = onEditDurationChange,
+                    onDistanceChange = onEditDistanceChange,
+                    onDistanceInputChange = onEditDistanceInputChange,
+                    onEffortChange = onEditEffortChange,
                     onLog = onSaveEditedSet,
                     weightUnit = weightUnit,
                     weightStepAmount = weightStepAmount,
@@ -638,6 +755,39 @@ private fun ActiveWorkoutBottomBar(
                     modifier = Modifier.fillMaxWidth(),
                     style = FitButtonStyle.Secondary
                 )
+                return@Column
+            }
+
+            if (showExerciseOverview && workout.exerciseBlocks.isNotEmpty()) {
+                FoundationText(
+                    text = "Exercises",
+                    style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                )
+                FoundationMutedText("Choose an exercise to keep logging.")
+                FitButton(
+                    text = "Add exercise",
+                    onClick = onAddExercise,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitButtonStyle.Primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FitButton(
+                        text = "Discard workout",
+                        onClick = onRequestDiscard,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Finish workout",
+                        onClick = onRequestFinish,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                }
                 return@Column
             }
 
@@ -654,7 +804,7 @@ private fun ActiveWorkoutBottomBar(
                         style = FitButtonStyle.Primary
                     )
                     FitButton(
-                        text = "Finish",
+                        text = "Finish workout",
                         onClick = onRequestFinish,
                         modifier = Modifier.weight(1f),
                         style = FitButtonStyle.Secondary
@@ -683,9 +833,25 @@ private fun ActiveWorkoutBottomBar(
                         onFocusExercise(block.exerciseInstanceId)
                         onDraftWeightChange(block.exerciseInstanceId, it)
                     },
+                    onWeightInputChange = {
+                        onFocusExercise(block.exerciseInstanceId)
+                        onDraftWeightInputChange(block.exerciseInstanceId, it)
+                    },
                     onDurationChange = {
                         onFocusExercise(block.exerciseInstanceId)
                         onDraftDurationChange(block.exerciseInstanceId, it)
+                    },
+                    onDistanceChange = {
+                        onFocusExercise(block.exerciseInstanceId)
+                        onDraftDistanceChange(block.exerciseInstanceId, it)
+                    },
+                    onDistanceInputChange = {
+                        onFocusExercise(block.exerciseInstanceId)
+                        onDraftDistanceInputChange(block.exerciseInstanceId, it)
+                    },
+                    onEffortChange = {
+                        onFocusExercise(block.exerciseInstanceId)
+                        onDraftEffortChange(block.exerciseInstanceId, it)
                     },
                     onTimerToggle = {
                         onFocusExercise(block.exerciseInstanceId)
@@ -735,13 +901,13 @@ private fun ActiveWorkoutBottomBar(
                     text = "Add exercise",
                     onClick = onAddExercise,
                     modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Secondary
+                    style = FitButtonStyle.Primary
                 )
                 FitButton(
-                    text = "Finish",
+                    text = "Finish workout",
                     onClick = onRequestFinish,
                     modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Primary
+                    style = FitButtonStyle.Secondary
                 )
             }
         }

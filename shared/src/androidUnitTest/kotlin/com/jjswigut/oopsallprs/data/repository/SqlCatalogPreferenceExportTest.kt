@@ -68,7 +68,9 @@ class SqlCatalogPreferenceExportTest {
         assertTrue(export.content.contains("Bench Press"))
         assertTrue(export.content.contains("Pull-Up"))
         assertEquals(2, export.snapshot.rowCount)
+        assertEquals(2, export.snapshot.formatVersion)
         assertEquals(1, snapshots.size)
+        assertEquals(2L, snapshots.single().format_version)
     }
 }
 

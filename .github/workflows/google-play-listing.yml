@@ -1,0 +1,52 @@
+name: Google Play Listing
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validate the listing edit or upload it without submitting for review"
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - upload
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-play-listing
+  cancel-in-progress: false
+
+jobs:
+  listing:
+    name: ${{ inputs.mode == 'upload' && 'Upload' || 'Validate' }} Android listing
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
+      ANDROID_PLAY_LISTING_TRACK: internal
+      ANDROID_PLAY_VALIDATE_ONLY: ${{ inputs.mode != 'upload' }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - name: Check Google Play credential
+        run: |
+          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
+            echo "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Validate listing assets
+        run: ruby tools/validate_google_play_assets.rb
+
+      - name: Validate or upload Google Play listing
+        run: tools/fastlane.sh android listing

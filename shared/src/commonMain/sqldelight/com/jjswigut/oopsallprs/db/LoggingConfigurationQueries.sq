@@ -1,0 +1,74 @@
+insertLoggingConfiguration:
+INSERT INTO logging_configurations(
+    id,
+    schema_version,
+    content_hash,
+    source_code,
+    legacy_logging_mode,
+    legacy_set_kind,
+    legacy_had_unexplained_load,
+    created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+insertLoggingConfigurationMeasure:
+INSERT INTO logging_configuration_measures(
+    logging_configuration_id,
+    position,
+    measure_code,
+    requirement_code,
+    canonical_unit_code,
+    load_role_code
+)
+VALUES (?, ?, ?, ?, ?, ?);
+
+insertLoggingConfigurationEffortKind:
+INSERT INTO logging_configuration_effort_kinds(
+    logging_configuration_id,
+    position,
+    effort_kind_code
+)
+VALUES (?, ?, ?);
+
+selectLoggingConfiguration:
+SELECT * FROM logging_configurations
+WHERE id = ?
+LIMIT 1;
+
+selectLoggingConfigurations:
+SELECT * FROM logging_configurations
+ORDER BY id ASC;
+
+selectLoggingConfigurationByContentHash:
+SELECT * FROM logging_configurations
+WHERE content_hash = ?
+LIMIT 1;
+
+selectLoggingConfigurationMeasures:
+SELECT * FROM logging_configuration_measures
+WHERE logging_configuration_id = ?
+ORDER BY position ASC;
+
+selectLoggingConfigurationEffortKinds:
+SELECT * FROM logging_configuration_effort_kinds
+WHERE logging_configuration_id = ?
+ORDER BY position ASC;
+
+upsertUserExerciseConfiguration:
+INSERT OR REPLACE INTO user_exercise_configurations(
+    exercise_catalog_id,
+    logging_configuration_id,
+    based_on_definition_revision,
+    created_at,
+    updated_at
+)
+VALUES (?, ?, ?, ?, ?);
+
+selectUserExerciseConfiguration:
+SELECT * FROM user_exercise_configurations
+WHERE exercise_catalog_id = ?
+LIMIT 1;
+
+deleteUserExerciseConfiguration:
+DELETE FROM user_exercise_configurations
+WHERE exercise_catalog_id = ?;

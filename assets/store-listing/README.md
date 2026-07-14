@@ -4,8 +4,12 @@ Generated store-listing artwork for Oops All PRs.
 
 ## Google Play
 
+- `google-play/listing/en-US/*.txt`: approved English title and descriptions
+- `google-play/icon-512x512.png`: Play icon derived from the production launcher icon
 - `google-play/feature-graphic-1024x500.png`
 - `google-play/screenshots/*.png` at 1080x1920
+- `google-play/seven-inch-tablet-screenshots/*.png`: runtime captures from a 7-inch Android emulator
+- `google-play/ten-inch-tablet-screenshots/*.png`: runtime captures from a 10.1-inch Android emulator
 
 ## App Store
 
@@ -15,3 +19,4 @@ Generated store-listing artwork for Oops All PRs.
 
 - `source/oops-dumbbell-cereal-backdrop.png`: AI-generated dumbbell-cereal backdrop used for compositing.
 - Screenshots are sourced from validation captures under `specs/*/validation/screenshots`.
+- Tablet screenshots are direct captures of the current Android app; their emulator configuration and capture date are documented alongside the files.

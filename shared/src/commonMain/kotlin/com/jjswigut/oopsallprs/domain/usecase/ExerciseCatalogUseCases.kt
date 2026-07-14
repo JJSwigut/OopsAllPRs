@@ -4,13 +4,16 @@ import com.jjswigut.oopsallprs.data.exercise.ExerciseCsvParser
 import com.jjswigut.oopsallprs.data.exercise.ExerciseSeedIngestion
 import com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
 import com.jjswigut.oopsallprs.domain.model.ExerciseSeedImport
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.canonicalExerciseName
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
+import com.jjswigut.oopsallprs.domain.model.toLegacyLoggingConfiguration
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
+import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.datetime.Clock
@@ -18,7 +21,8 @@ import kotlinx.datetime.Instant
 
 class ExerciseCatalogUseCases(
     private val exercises: ExerciseRepository,
-    private val workouts: WorkoutRepository? = null
+    private val workouts: WorkoutRepository? = null,
+    private val loggingConfigurations: LoggingConfigurationRepository? = null
 ) {
     suspend fun defaultResults(limit: Int = DEFAULT_LIMIT): List<ExerciseCatalogItem> =
         exercises.all().take(limit)
@@ -53,11 +57,20 @@ class ExerciseCatalogUseCases(
         name: String,
         isBodyweight: Boolean,
         now: Instant = Clock.System.now(),
-        loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED
+        loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
+        defaultLoggingConfiguration: LoggingConfiguration? = null
     ): FoundationResult<ExerciseCatalogItem> {
         val displayName = name.trim()
         if (displayName.isEmpty()) {
             return foundationFailure(FoundationError.Validation("Exercise name cannot be blank"))
+        }
+        val requestedConfiguration = defaultLoggingConfiguration ?: loggingMode.toLegacyLoggingConfiguration()
+        val canonicalConfiguration = when (
+            val saved = loggingConfigurations?.saveLoggingConfiguration(requestedConfiguration)
+                ?: foundationSuccess(requestedConfiguration)
+        ) {
+            is FoundationResult.Failure -> return saved
+            is FoundationResult.Success -> saved.value
         }
         val item = ExerciseCatalogItem(
             id = newFoundationId("exercise"),
@@ -75,6 +88,7 @@ class ExerciseCatalogUseCases(
             bodyRegion = "Custom",
             isBodyweight = isBodyweight || loggingMode == ExerciseLoggingMode.TIMED,
             loggingMode = loggingMode,
+            defaultLoggingConfiguration = canonicalConfiguration,
             isUserCreated = true,
             createdAt = now,
             updatedAt = now
@@ -87,7 +101,8 @@ class ExerciseCatalogUseCases(
         name: String,
         isBodyweight: Boolean,
         now: Instant = Clock.System.now(),
-        loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED
+        loggingMode: ExerciseLoggingMode = if (isBodyweight) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
+        defaultLoggingConfiguration: LoggingConfiguration? = null
     ): FoundationResult<ExerciseCatalogItem> {
         val existing = exercises.exercise(id)
             ?: return foundationFailure(FoundationError.NotFound("Exercise not found: $id"))
@@ -97,6 +112,16 @@ class ExerciseCatalogUseCases(
         val displayName = name.trim()
         if (displayName.isEmpty()) {
             return foundationFailure(FoundationError.Validation("Exercise name cannot be blank"))
+        }
+        val requestedConfiguration = defaultLoggingConfiguration
+            ?: existing.defaultLoggingConfiguration.takeIf { loggingMode == existing.loggingMode }
+            ?: loggingMode.toLegacyLoggingConfiguration()
+        val canonicalConfiguration = when (
+            val saved = loggingConfigurations?.saveLoggingConfiguration(requestedConfiguration)
+                ?: foundationSuccess(requestedConfiguration)
+        ) {
+            is FoundationResult.Failure -> return saved
+            is FoundationResult.Success -> saved.value
         }
         val updated = existing.copy(
             canonicalName = canonicalExerciseName(displayName),
@@ -109,6 +134,7 @@ class ExerciseCatalogUseCases(
             },
             isBodyweight = isBodyweight || loggingMode == ExerciseLoggingMode.TIMED,
             loggingMode = loggingMode,
+            defaultLoggingConfiguration = canonicalConfiguration,
             updatedAt = now,
             archivedAt = null,
             sourceSeedVersion = null

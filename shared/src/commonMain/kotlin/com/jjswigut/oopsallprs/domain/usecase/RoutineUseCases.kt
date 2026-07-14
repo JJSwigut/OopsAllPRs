@@ -29,7 +29,8 @@ class RoutineUseCases(
     private val personalRecords: PersonalRecordDerivationUseCase? = null,
     private val preferences: PreferencesRepository? = null,
     private val restNotifications: RestAlertScheduler? = null,
-    private val fullAccess: FullAccessUseCases? = null
+    private val fullAccess: FullAccessUseCases? = null,
+    private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null
 ) {
     suspend fun finishWorkout(activeWorkoutId: FoundationId, finishedAt: Instant = Clock.System.now()): FoundationResult<CompletedWorkout> {
         val active = workouts.activeWorkout(activeWorkoutId)
@@ -77,7 +78,7 @@ class RoutineUseCases(
         val routineId = newFoundationId("routine")
         val exercises = completed.exercises.map { completedExercise ->
             val routineExerciseId = newFoundationId("routine-exercise")
-            RoutineExercise(
+            val exercise = RoutineExercise(
                 id = routineExerciseId,
                 routineId = routineId,
                 exerciseCatalogId = completedExercise.exerciseCatalogId,
@@ -93,12 +94,24 @@ class RoutineUseCases(
                         routineExerciseId = routineExerciseId,
                         position = OrderedPosition(index),
                         targetWeight = set.weight,
-                        targetReps = set.reps.takeIf { set.setKind != SetKind.TIMED },
-                        targetDurationMs = set.durationMs.takeIf { set.setKind == SetKind.TIMED },
-                        setKind = set.setKind
+                        targetReps = set.reps,
+                        targetDurationMs = set.durationMs,
+                        setKind = set.setKind,
+                        targetDistanceMeters = set.distanceMeters,
+                        effortTarget = null
                     )
                 }
             )
+            val capturedConfigurationId = completedExercise.loggedSets.lastOrNull()?.captureConfigurationId
+            when (
+                val snapshot = configurationManagement?.snapshotRoutineExercise(
+                    exercise,
+                    capturedConfigurationId
+                ) ?: foundationSuccess(exercise)
+            ) {
+                is FoundationResult.Failure -> return snapshot
+                is FoundationResult.Success -> snapshot.value
+            }
         }
         return routines.saveRoutine(
             ReusableRoutine(
@@ -131,23 +144,31 @@ class RoutineUseCases(
             return foundationFailure(FoundationError.NotFound("Routine not found: $routineId"))
         }
         val resolvedRoutineId = routineId ?: newFoundationId("routine")
+        val normalizedExercises = exercises.mapIndexed { index, exercise ->
+            val routineExerciseId = exercise.id
+            val normalized = exercise.copy(
+                id = routineExerciseId,
+                routineId = resolvedRoutineId,
+                position = OrderedPosition(index),
+                plannedSets = exercise.plannedSets.mapIndexed { setIndex, set ->
+                    set.copy(
+                        routineExerciseId = routineExerciseId,
+                        position = OrderedPosition(setIndex)
+                    )
+                }
+            )
+            when (
+                val snapshot = configurationManagement?.snapshotRoutineExercise(normalized)
+                    ?: foundationSuccess(normalized)
+            ) {
+                is FoundationResult.Failure -> return snapshot
+                is FoundationResult.Success -> snapshot.value
+            }
+        }
         val routine = ReusableRoutine(
             id = resolvedRoutineId,
             name = trimmedName,
-            exercises = exercises.mapIndexed { index, exercise ->
-                val routineExerciseId = exercise.id
-                exercise.copy(
-                    id = routineExerciseId,
-                    routineId = resolvedRoutineId,
-                    position = OrderedPosition(index),
-                    plannedSets = exercise.plannedSets.mapIndexed { setIndex, set ->
-                        set.copy(
-                            routineExerciseId = routineExerciseId,
-                            position = OrderedPosition(setIndex)
-                        )
-                    }
-                )
-            },
+            exercises = normalizedExercises,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
             sourceCompletedWorkoutId = existing?.sourceCompletedWorkoutId ?: sourceCompletedWorkoutId,

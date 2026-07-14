@@ -22,9 +22,25 @@ insertRoutineExercise:
 INSERT OR REPLACE INTO routine_exercises(id, routine_id, exercise_catalog_id, display_name_snapshot, position, group_id, group_position, group_rounds, rest_seconds, rest_auto_start)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+insertRoutineExerciseWithLoggingConfiguration:
+INSERT OR REPLACE INTO routine_exercises(
+    id, routine_id, exercise_catalog_id, display_name_snapshot, position,
+    group_id, group_position, group_rounds, rest_seconds, rest_auto_start,
+    logging_configuration_id
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
 insertRoutineSetTemplate:
 INSERT OR REPLACE INTO routine_set_templates(id, routine_exercise_id, position, target_weight_kg, target_reps, target_duration_ms, set_kind)
 VALUES (?, ?, ?, ?, ?, ?, ?);
+
+insertRoutineSetTemplateWithLoggingConfiguration:
+INSERT OR REPLACE INTO routine_set_templates(
+    id, routine_exercise_id, position, target_weight_kg, target_reps,
+    target_duration_ms, set_kind, logging_configuration_id, target_distance_m,
+    target_effort_kind, target_rpe_tenths, target_rir
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectRoutine:
 SELECT * FROM routines

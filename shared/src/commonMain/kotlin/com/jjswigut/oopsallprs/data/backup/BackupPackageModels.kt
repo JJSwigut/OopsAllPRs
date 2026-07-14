@@ -2,7 +2,7 @@ package com.jjswigut.oopsallprs.data.backup
 
 import kotlinx.serialization.Serializable
 
-const val BACKUP_FORMAT_VERSION: Int = 1
+const val BACKUP_FORMAT_VERSION: Int = 2
 const val BACKUP_FILE_EXTENSION: String = "json"
 
 @Serializable
@@ -14,6 +14,8 @@ data class BackupPackageDto(
     val appSchemaVersion: Int,
     val summary: SnapshotSummaryDto,
     val preferences: PreferencesSnapshotDto,
+    val loggingConfigurations: List<LoggingConfigurationDto>,
+    val userExerciseConfigurations: List<UserExerciseConfigurationDto>,
     val exercises: List<ExerciseCatalogItemDto>,
     val routines: List<RoutineDto>,
     val activeWorkout: ActiveWorkoutDto?,
@@ -48,6 +50,31 @@ data class PreferencesSnapshotDto(
 )
 
 @Serializable
+data class LoggingConfigurationDto(
+    val id: String,
+    val schemaVersion: Int,
+    val contentHash: String,
+    val measures: List<LoggingMeasureDto>,
+    val observedEffortKinds: List<String>
+)
+
+@Serializable
+data class LoggingMeasureDto(
+    val kind: String,
+    val requirement: String,
+    val canonicalUnit: String,
+    val loadRole: String?
+)
+
+@Serializable
+data class UserExerciseConfigurationDto(
+    val exerciseDefinitionId: String,
+    val loggingConfigurationId: String,
+    val basedOnDefinitionRevision: Long,
+    val configuredAt: Long
+)
+
+@Serializable
 data class ExerciseCatalogItemDto(
     val id: String,
     val canonicalName: String,
@@ -65,7 +92,12 @@ data class ExerciseCatalogItemDto(
     val updatedAt: Long,
     val archivedAt: Long?,
     val sourceSeedVersion: String?,
-    val userNotes: String?
+    val userNotes: String?,
+    val origin: String,
+    val definitionRevision: Long,
+    val seedKey: String?,
+    val seedManifestRevision: String?,
+    val defaultLoggingConfigurationId: String
 )
 
 @Serializable
@@ -101,7 +133,12 @@ data class ActiveExerciseDto(
     val groupLabel: String? = null,
     val groupRounds: Int? = null,
     val sets: List<ExerciseSetDto>,
-    val rest: RestConfigurationDto
+    val rest: RestConfigurationDto,
+    val definitionOriginSnapshot: String?,
+    val definitionRevisionSnapshot: Long,
+    val seedKeySnapshot: String?,
+    val loggingConfigurationId: String,
+    val loggingConfigurationSource: String
 )
 
 @Serializable
@@ -116,7 +153,12 @@ data class ExerciseSetDto(
     val loggedAt: Long?,
     val createdAt: Long,
     val updatedAt: Long,
-    val editedAt: Long?
+    val editedAt: Long?,
+    val captureConfigurationId: String,
+    val distanceMeters: Double?,
+    val rpeTenths: Int?,
+    val rir: Int?,
+    val failureOutcome: String?
 )
 
 @Serializable
@@ -149,7 +191,12 @@ data class PersistedSetDraftDto(
     val weightKg: Double?,
     val durationMs: Long?,
     val timerStartedAt: Long?,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val captureConfigurationId: String,
+    val distanceMeters: Double?,
+    val rpeTenths: Int?,
+    val rir: Int?,
+    val failureOutcome: String?
 )
 
 @Serializable
@@ -174,7 +221,11 @@ data class RoutineExerciseDto(
     val groupPosition: Int? = null,
     val groupRounds: Int? = null,
     val plannedSets: List<RoutineSetTemplateDto>,
-    val rest: RestConfigurationDto
+    val rest: RestConfigurationDto,
+    val definitionRevisionSnapshot: Long,
+    val seedKeySnapshot: String?,
+    val loggingConfigurationId: String,
+    val loggingConfigurationSource: String
 )
 
 @Serializable
@@ -185,7 +236,12 @@ data class RoutineSetTemplateDto(
     val targetWeightKg: Double?,
     val targetReps: Int?,
     val targetDurationMs: Long?,
-    val setKind: String
+    val setKind: String,
+    val loggingConfigurationId: String,
+    val targetDistanceMeters: Double?,
+    val effortTargetKind: String?,
+    val targetRpeTenths: Int?,
+    val targetRir: Int?
 )
 
 @Serializable
@@ -222,7 +278,9 @@ data class PersonalRecordDto(
     val sourceWorkoutId: String,
     val sourceSetId: String,
     val achievedAt: Long,
-    val createdAt: Long
+    val createdAt: Long,
+    val metricCode: String,
+    val derivationVersion: Int
 )
 
 @Serializable
@@ -235,7 +293,9 @@ data class ProgressPointDto(
     val value: Double,
     val weightKg: Double?,
     val reps: Int?,
-    val recordedAt: Long
+    val recordedAt: Long,
+    val metricCode: String,
+    val derivationVersion: Int
 )
 
 @Serializable

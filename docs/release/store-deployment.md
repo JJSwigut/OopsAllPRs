@@ -1,9 +1,10 @@
 # Store Deployment Setup
 
-GitHub Actions has two workflows:
+GitHub Actions has three workflows:
 
 - `CI`: runs Gradle checks, Android debug/release assembly, and an iOS simulator build for pull requests and pushes to `development` or `main`.
 - `Deploy Stores`: runs `tools/release_gate.sh --skip-ios` on pushes to `main`, uploads Android release artifacts and release-gate proof files to GitHub Actions, creates a GitHub Release, attempts a timeout-bounded iOS Release simulator package, uploads Android to Google Play internal testing when secrets exist, and uploads iOS to TestFlight once Apple signing secrets exist.
+- `Google Play Listing`: a manual-only workflow for validating or uploading Android store-presence metadata and artwork. It has no push or pull-request trigger.
 
 Manual dispatch accepts:
 
@@ -54,13 +55,32 @@ The Google Play service account needs Play Console access for:
 
 The deploy workflow skips Android store upload with a GitHub Actions notice until all required Android secrets are present. The Play Console app must exist before the first Fastlane upload. Use package name `com.jjswigut.oopsallprs.android`.
 
-Upload only the Google Play listing artwork:
+Validate the source-controlled listing dimensions and prepare the exact Supply directory without contacting Google Play:
 
 ```sh
-tools/fastlane.sh android listing
+ruby tools/validate_google_play_assets.rb
+tools/fastlane.sh android listing_package
 ```
 
-Set `ANDROID_PLAY_VALIDATE_ONLY=true` to validate the Play edit without publishing it.
+Then validate the complete Google Play listing edit through the Play API:
+
+```sh
+ANDROID_PLAY_VALIDATE_ONLY=true tools/fastlane.sh android listing
+```
+
+The lane assembles `fastlane/build/metadata/android` from the source-controlled English listing copy, Play icon, feature graphic, phone screenshots, seven-inch tablet screenshots, and ten-inch tablet screenshots. The generated directories follow Fastlane Supply conventions (`en-US/images/phoneScreenshots`, `sevenInchScreenshots`, and `tenInchScreenshots`). Validation is the lane default and asks Google Play to validate the edit without committing it.
+
+Fastlane 2.237.0 requires listing-only uploads to identify an existing release even when changelog upload is disabled. Before opening the listing edit, the lane reads version codes from the `internal` track, selects the highest existing version code, and passes that track and version code to Supply. Set `ANDROID_PLAY_LISTING_TRACK` to another populated track only when necessary. Both validation and upload fail before changing listing data if the selected track has no existing release.
+
+To commit only the listing edit, explicitly opt into upload mode:
+
+```sh
+ANDROID_PLAY_VALIDATE_ONLY=false tools/fastlane.sh android listing
+```
+
+The existing release lookup does not upload a binary, changelog, or release. The lane never builds or uploads an APK/AAB and never changes a release track. It requests `changes_not_sent_for_review` and enables Fastlane's compatibility retry: if Play says that query parameter must not be set, Fastlane retries the edit commit without it; if Play requires the parameter, Fastlane retries with it enabled. For this app's current Play publishing configuration, a successful listing commit saves the changes under **Changes not yet submitted for review** in Publishing overview. It does not press **Send app for review**; that remains a separate manual owner action. Upload mode is still a Google Play store mutation and requires explicit owner approval.
+
+The `Google Play Listing` GitHub Actions workflow is `workflow_dispatch` only. Its `mode` input defaults to `validate`; selecting `upload` commits the same listing-only edit. Both modes use the existing `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret, and neither mode submits an app or release for review. Do not dispatch `upload` unless the owner has approved the store mutation.
 
 ## iOS
 

@@ -22,8 +22,30 @@ data class RoutineExercise(
     val groupPosition: OrderedPosition? = null,
     val groupRounds: Int? = null,
     val plannedSets: List<RoutineSetTemplate>,
-    val rest: RestConfiguration = RestConfiguration.default()
-)
+    val rest: RestConfiguration = RestConfiguration.default(),
+    val definitionRevisionSnapshot: ExerciseDefinitionRevision = ExerciseDefinitionRevision(1),
+    val seedKeySnapshot: ExerciseSeedKey? = null,
+    val resolvedLoggingConfiguration: ResolvedLoggingConfiguration = ResolvedLoggingConfiguration(
+        configuration = plannedSets.firstOrNull()?.setKind
+            ?.toLegacyLoggingConfiguration(hasLegacyLoad = plannedSets.any { it.targetWeight != null })
+            ?: LegacyLoggingConfigurations.weighted,
+        source = LoggingConfigurationSource.DEFINITION_DEFAULT
+    )
+) {
+    fun updateConfigurationSnapshot(
+        definition: ExerciseCatalogItem,
+        userDefault: UserExerciseConfiguration? = null
+    ): RoutineExercise {
+        require(exerciseCatalogId == definition.id) {
+            "Routine exercise does not belong to definition ${definition.id}"
+        }
+        return copy(
+            definitionRevisionSnapshot = definition.definitionRevision,
+            seedKeySnapshot = definition.seedKey,
+            resolvedLoggingConfiguration = definition.resolveLoggingConfiguration(userDefault)
+        )
+    }
+}
 
 data class RoutineSetTemplate(
     val id: FoundationId,
@@ -32,8 +54,16 @@ data class RoutineSetTemplate(
     val targetWeight: WeightKg?,
     val targetReps: Int?,
     val targetDurationMs: Long? = null,
-    val setKind: SetKind
-)
+    val setKind: SetKind,
+    val targetDistanceMeters: Double? = null,
+    val effortTarget: EffortTarget? = null
+) {
+    init {
+        require(targetDistanceMeters == null || (targetDistanceMeters.isFinite() && targetDistanceMeters >= 0.0)) {
+            "Routine target distance must be finite and non-negative"
+        }
+    }
+}
 
 data class CompletedExercise(
     val id: FoundationId,

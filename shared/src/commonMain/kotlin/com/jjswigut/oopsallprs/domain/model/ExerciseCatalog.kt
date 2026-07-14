@@ -1,11 +1,41 @@
 package com.jjswigut.oopsallprs.domain.model
 
 import kotlinx.datetime.Instant
+import kotlin.jvm.JvmInline
 
 enum class ExerciseLoggingMode {
     WEIGHTED,
     BODYWEIGHT,
     TIMED
+}
+
+enum class ExerciseDefinitionOrigin(code: String) : WireCoded {
+    SEED("seed"),
+    USER("user");
+
+    override val wireCode: WireCode = WireCode(code)
+
+    companion object {
+        private val byWireCode = LoggingContractValidation.indexByWireCode(entries, "exercise definition origin")
+
+        fun fromWireCode(value: String): ExerciseDefinitionOrigin? = byWireCode[value]
+    }
+}
+
+@JvmInline
+value class ExerciseDefinitionRevision(val value: Long) {
+    init {
+        require(value > 0L) { "Exercise definition revision must be greater than zero" }
+    }
+}
+
+@JvmInline
+value class ExerciseSeedKey(val value: String) {
+    init {
+        require(value.isNotBlank()) { "Exercise seed key cannot be blank" }
+    }
+
+    override fun toString(): String = value
 }
 
 data class ExerciseCatalogItem(
@@ -30,8 +60,54 @@ data class ExerciseCatalogItem(
     val updatedAt: Instant,
     val archivedAt: Instant? = null,
     val sourceSeedVersion: String? = null,
-    val userNotes: String? = null
+    val userNotes: String? = null,
+    val origin: ExerciseDefinitionOrigin = if (isUserCreated) ExerciseDefinitionOrigin.USER else ExerciseDefinitionOrigin.SEED,
+    val definitionRevision: ExerciseDefinitionRevision = ExerciseDefinitionRevision(1),
+    val seedKey: ExerciseSeedKey? = if (origin == ExerciseDefinitionOrigin.SEED) {
+        canonicalExerciseSeedKey(canonicalName)
+    } else {
+        null
+    },
+    val defaultLoggingConfiguration: LoggingConfiguration = loggingMode.toLegacyLoggingConfiguration()
+) {
+    init {
+        require(isUserCreated == (origin == ExerciseDefinitionOrigin.USER)) {
+            "Exercise origin must agree with isUserCreated"
+        }
+        require((origin == ExerciseDefinitionOrigin.SEED) == (seedKey != null)) {
+            "Seed exercises require a seed key and user exercises cannot carry one"
+        }
+    }
+}
+
+data class UserExerciseConfiguration(
+    val exerciseDefinitionId: FoundationId,
+    val configuration: LoggingConfiguration,
+    val basedOnDefinitionRevision: ExerciseDefinitionRevision,
+    val configuredAt: Instant
 )
+
+fun ExerciseCatalogItem.resolveLoggingConfiguration(
+    userDefault: UserExerciseConfiguration? = null,
+    workoutOverride: LoggingConfiguration? = null
+): ResolvedLoggingConfiguration =
+    LoggingConfigurationResolver.resolve(this, userDefault, workoutOverride)
+
+fun ExerciseCatalogItem.snapshotReference(
+    userDefault: UserExerciseConfiguration? = null,
+    workoutOverride: LoggingConfiguration? = null
+): ExerciseReference =
+    ExerciseReference(
+        exerciseCatalogId = id,
+        displayNameSnapshot = displayName,
+        isBodyweight = isBodyweight,
+        loggingMode = loggingMode,
+        equipmentSnapshot = equipment,
+        definitionOriginSnapshot = origin,
+        definitionRevisionSnapshot = definitionRevision,
+        seedKeySnapshot = seedKey,
+        resolvedLoggingConfiguration = resolveLoggingConfiguration(userDefault, workoutOverride)
+    )
 
 data class ExerciseSeedImport(
     val id: FoundationId,
@@ -82,6 +158,9 @@ data class RejectedSeedRow(
 
 fun canonicalExerciseName(name: String): String =
     name.trim().lowercase().replace(Regex("\\s+"), " ")
+
+fun canonicalExerciseSeedKey(canonicalName: String): ExerciseSeedKey =
+    ExerciseSeedKey("oopsallprs_baseline:${canonicalExerciseName(canonicalName)}")
 
 fun defaultExerciseLoggingMode(
     canonicalName: String,

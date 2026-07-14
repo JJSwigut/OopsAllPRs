@@ -29,17 +29,6 @@ import kotlin.coroutines.cancellation.CancellationException
 
 const val DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT: Int = FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT
 
-data class LocalReadinessStatus(
-    val storageLabel: String = "Local database",
-    val syncLabel: String = "Cloud sync off",
-    val backupLabel: String = "Android Auto Backup eligible",
-    val restNotificationLabel: String = "Timers recover if alerts are off",
-    val exportLabel: String = "CSV export available",
-    val alphaGateLabel: String = "Manual alpha smoke pending"
-)
-
-typealias LocalOwnershipStatus = LocalReadinessStatus
-
 data class ProfileExportResult(
     val type: ExportType,
     val fileName: String,
@@ -86,11 +75,13 @@ data class ProfileState(
     val draftWeightStep: Double = WeightStepPreference.DEFAULT_POUNDS_STEP,
     val weightStepError: String? = null,
     val defaultRestSeconds: Int = RestConfiguration.DEFAULT_SECONDS,
+    val isDefaultRestPickerVisible: Boolean = false,
+    val draftDefaultRestSeconds: Int = RestConfiguration.DEFAULT_SECONDS,
+    val defaultRestError: String? = null,
     val restSoundEnabled: Boolean = true,
     val paletteMode: PaletteMode = PaletteMode.DARK,
     val hapticsEnabled: Boolean = true,
     val reduceMotion: Boolean = false,
-    val localStatus: LocalReadinessStatus = LocalReadinessStatus(),
     val isHydrated: Boolean = false,
     val isExporting: Boolean = false,
     val lastExport: ProfileExportResult? = null,
@@ -129,8 +120,10 @@ class ProfileStateHolder(
             draftWeightStep = step,
             weightStepError = null,
             defaultRestSeconds = restSeconds,
+            isDefaultRestPickerVisible = false,
+            draftDefaultRestSeconds = restSeconds,
+            defaultRestError = null,
             restSoundEnabled = soundEnabled,
-            localStatus = LocalReadinessStatus(),
             isHydrated = true,
             exportError = null,
             backupStatus = backupSync?.loadState()?.toProfileStatus() ?: ProfileBackupStatus(),
@@ -138,15 +131,46 @@ class ProfileStateHolder(
         )
     }
 
-    suspend fun setDefaultRestSeconds(seconds: Int): FoundationResult<Int> {
-        val result = preferences?.setDefaultRestSeconds(seconds) ?: foundationSuccess(seconds)
+    fun openDefaultRestPicker() {
+        _state.value = _state.value.copy(
+            isDefaultRestPickerVisible = true,
+            draftDefaultRestSeconds = _state.value.defaultRestSeconds,
+            defaultRestError = null
+        )
+    }
+
+    fun cancelDefaultRestPicker() {
+        _state.value = _state.value.copy(
+            isDefaultRestPickerVisible = false,
+            draftDefaultRestSeconds = _state.value.defaultRestSeconds,
+            defaultRestError = null
+        )
+    }
+
+    fun setDraftDefaultRestSeconds(seconds: Int) {
+        _state.value = _state.value.copy(
+            draftDefaultRestSeconds = seconds,
+            defaultRestError = null
+        )
+    }
+
+    suspend fun saveDefaultRest(): FoundationResult<Int> {
+        val current = _state.value
+        val result = preferences?.setDefaultRestSeconds(current.draftDefaultRestSeconds)
+            ?: foundationSuccess(current.draftDefaultRestSeconds)
         return when (result) {
             is FoundationResult.Failure -> {
-                _state.value = _state.value.copy(exportError = result.error.message)
+                _state.value = current.copy(defaultRestError = result.error.message)
                 result
             }
             is FoundationResult.Success -> {
-                _state.value = _state.value.copy(defaultRestSeconds = result.value, exportError = null)
+                _state.value = current.copy(
+                    defaultRestSeconds = result.value,
+                    isDefaultRestPickerVisible = false,
+                    draftDefaultRestSeconds = result.value,
+                    defaultRestError = null,
+                    exportError = null
+                )
                 result
             }
         }

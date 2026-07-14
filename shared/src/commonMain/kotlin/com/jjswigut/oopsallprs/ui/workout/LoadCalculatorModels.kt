@@ -1,6 +1,9 @@
 package com.jjswigut.oopsallprs.ui.workout
 
 import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import kotlin.math.abs
@@ -47,6 +50,12 @@ fun loadCalculatorKind(equipment: String?, setKind: SetKind): LoadCalculatorKind
         "dumbbell" in normalized -> LoadCalculatorKind.DUMBBELL
         else -> null
     }
+}
+
+fun loadCalculatorKind(equipment: String?, configuration: LoggingConfiguration): LoadCalculatorKind? {
+    val load = configuration.measures.firstOrNull { it.kind == MeasureKind.LOAD } ?: return null
+    if (load.loadRole != LoadRole.EXTERNAL_RESISTANCE) return null
+    return loadCalculatorKind(equipment, SetKind.WEIGHTED)
 }
 
 fun defaultBarbellState(unit: WeightUnit): BarbellLoadCalculatorState =

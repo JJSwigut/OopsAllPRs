@@ -1,5 +1,6 @@
 package com.jjswigut.oopsallprs.data.backup
 
+import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
 import com.jjswigut.oopsallprs.domain.model.RoutineExercise
@@ -18,6 +19,24 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BackupSnapshotReaderTest {
+    @Test
+    fun snapshotUsesGeneratedDatabaseSchemaVersion() = runTest {
+        val harness = FoundationHarness()
+        val reader = BackupSnapshotReader(
+            workouts = harness.store,
+            sessions = harness.store,
+            activeUx = harness.store,
+            routines = harness.store,
+            exercises = harness.store,
+            preferences = harness.store,
+            progress = harness.store
+        )
+
+        val pkg = reader.createPackage(instant(1_000)).successValue()
+
+        assertEquals(WorkoutDatabase.Schema.version.toInt(), pkg.appSchemaVersion)
+    }
+
     @Test
     fun snapshotIncludesCompletedLedgerExercisesPreferencesAndProgressContainers() = runTest {
         val harness = FoundationHarness()

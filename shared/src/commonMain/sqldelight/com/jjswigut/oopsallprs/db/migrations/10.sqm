@@ -1,0 +1,300 @@
+CREATE TABLE logging_configurations (
+    id TEXT NOT NULL PRIMARY KEY,
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    content_hash TEXT NOT NULL UNIQUE,
+    source_code TEXT NOT NULL,
+    legacy_logging_mode TEXT,
+    legacy_set_kind TEXT,
+    legacy_had_unexplained_load INTEGER NOT NULL DEFAULT 0 CHECK (legacy_had_unexplained_load IN (0, 1)),
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE logging_configuration_measures (
+    logging_configuration_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    measure_code TEXT NOT NULL,
+    requirement_code TEXT NOT NULL,
+    canonical_unit_code TEXT NOT NULL,
+    load_role_code TEXT,
+    PRIMARY KEY(logging_configuration_id, position),
+    UNIQUE(logging_configuration_id, measure_code),
+    CHECK (
+        (measure_code = 'load' AND load_role_code IS NOT NULL) OR
+        (measure_code != 'load' AND load_role_code IS NULL)
+    ),
+    FOREIGN KEY(logging_configuration_id) REFERENCES logging_configurations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE logging_configuration_effort_kinds (
+    logging_configuration_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    effort_kind_code TEXT NOT NULL,
+    PRIMARY KEY(logging_configuration_id, position),
+    UNIQUE(logging_configuration_id, effort_kind_code),
+    FOREIGN KEY(logging_configuration_id) REFERENCES logging_configurations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_exercise_configurations (
+    exercise_catalog_id TEXT NOT NULL PRIMARY KEY,
+    logging_configuration_id TEXT NOT NULL,
+    based_on_definition_revision INTEGER NOT NULL CHECK (based_on_definition_revision > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(exercise_catalog_id) REFERENCES exercise_catalog(id) ON DELETE CASCADE,
+    FOREIGN KEY(logging_configuration_id) REFERENCES logging_configurations(id)
+);
+
+ALTER TABLE exercise_catalog ADD COLUMN definition_origin TEXT;
+ALTER TABLE exercise_catalog ADD COLUMN definition_revision INTEGER CHECK (definition_revision IS NULL OR definition_revision > 0);
+ALTER TABLE exercise_catalog ADD COLUMN seed_id TEXT;
+ALTER TABLE exercise_catalog ADD COLUMN seed_manifest_revision TEXT;
+ALTER TABLE exercise_catalog ADD COLUMN default_logging_configuration_id TEXT REFERENCES logging_configurations(id);
+
+CREATE UNIQUE INDEX exercise_catalog_seed_id_unique
+ON exercise_catalog(seed_id)
+WHERE seed_id IS NOT NULL;
+
+ALTER TABLE active_exercises ADD COLUMN logging_configuration_id TEXT REFERENCES logging_configurations(id);
+ALTER TABLE routine_exercises ADD COLUMN logging_configuration_id TEXT REFERENCES logging_configurations(id);
+
+ALTER TABLE routine_set_templates ADD COLUMN logging_configuration_id TEXT REFERENCES logging_configurations(id);
+ALTER TABLE routine_set_templates ADD COLUMN target_distance_m REAL CHECK (target_distance_m IS NULL OR target_distance_m >= 0);
+ALTER TABLE routine_set_templates ADD COLUMN target_effort_kind TEXT;
+ALTER TABLE routine_set_templates ADD COLUMN target_rpe_tenths INTEGER CHECK (target_rpe_tenths IS NULL OR target_rpe_tenths BETWEEN 10 AND 100);
+ALTER TABLE routine_set_templates ADD COLUMN target_rir INTEGER
+    CHECK (target_rir IS NULL OR target_rir BETWEEN 0 AND 10)
+    CHECK (
+        (target_effort_kind IS NULL AND target_rpe_tenths IS NULL AND target_rir IS NULL) OR
+        (target_effort_kind = 'rpe' AND target_rpe_tenths IS NOT NULL AND target_rir IS NULL) OR
+        (target_effort_kind = 'rir' AND target_rpe_tenths IS NULL AND target_rir IS NOT NULL) OR
+        (target_effort_kind = 'to_failure' AND target_rpe_tenths IS NULL AND target_rir IS NULL)
+    );
+
+ALTER TABLE active_set_drafts ADD COLUMN logging_configuration_id TEXT REFERENCES logging_configurations(id);
+ALTER TABLE active_set_drafts ADD COLUMN distance_m REAL CHECK (distance_m IS NULL OR distance_m >= 0);
+ALTER TABLE active_set_drafts ADD COLUMN rpe_tenths INTEGER CHECK (rpe_tenths IS NULL OR rpe_tenths BETWEEN 10 AND 100);
+ALTER TABLE active_set_drafts ADD COLUMN rir INTEGER CHECK (rir IS NULL OR rir BETWEEN 0 AND 10);
+ALTER TABLE active_set_drafts ADD COLUMN failure_outcome TEXT;
+
+ALTER TABLE exercise_sets ADD COLUMN capture_configuration_id TEXT REFERENCES logging_configurations(id);
+ALTER TABLE exercise_sets ADD COLUMN distance_m REAL CHECK (distance_m IS NULL OR distance_m >= 0);
+ALTER TABLE exercise_sets ADD COLUMN rpe_tenths INTEGER CHECK (rpe_tenths IS NULL OR rpe_tenths BETWEEN 10 AND 100);
+ALTER TABLE exercise_sets ADD COLUMN rir INTEGER CHECK (rir IS NULL OR rir BETWEEN 0 AND 10);
+ALTER TABLE exercise_sets ADD COLUMN failure_outcome TEXT;
+
+ALTER TABLE personal_records ADD COLUMN metric_code TEXT;
+ALTER TABLE personal_records ADD COLUMN derivation_version INTEGER CHECK (derivation_version IS NULL OR derivation_version > 0);
+ALTER TABLE progress_points ADD COLUMN metric_code TEXT;
+ALTER TABLE progress_points ADD COLUMN derivation_version INTEGER CHECK (derivation_version IS NULL OR derivation_version > 0);
+
+-- content_hash is lowercase SHA-256 over the UTF-8 canonical representation of semantic
+-- configuration content only. IDs and source metadata are deliberately excluded:
+-- schema_version=1|measures=0:reps:required:count;1:load:required:kilograms:external_resistance|effort=
+-- schema_version=1|measures=0:reps:required:count|effort=
+-- schema_version=1|measures=0:duration:required:milliseconds|effort=
+-- schema_version=1|measures=0:reps:required:count;1:load:optional:kilograms:legacy_unspecified|effort=
+INSERT INTO logging_configurations(
+    id, schema_version, content_hash, source_code, legacy_logging_mode, legacy_set_kind,
+    legacy_had_unexplained_load, created_at
+) VALUES
+    ('legacy_weighted_v1', 1, 'a95f4c8c20818a111f0962ba2a4c2df4270df33ffa201985b186211e855f3afb', 'legacy_schema_10', 'WEIGHTED', 'WEIGHTED', 0, 0),
+    ('legacy_bodyweight_v1', 1, '7bc6a57e4a1d2b61aa4cc2f4ed9e78422f32e31a0fb2de58641b76cf89633189', 'legacy_schema_10', 'BODYWEIGHT', 'BODYWEIGHT', 0, 0),
+    ('legacy_timed_v1', 1, '32b6ff66f63b10927c42255af876fb581f927b77c450c4737afef98cba274f6a', 'legacy_schema_10', 'TIMED', 'TIMED', 0, 0),
+    ('legacy_bodyweight_unspecified_load_v1', 1, '3cc991c66359c37731d301f2df205233817b2568c043f258c2128bac1fa71f6f', 'legacy_schema_10', 'BODYWEIGHT', 'BODYWEIGHT', 1, 0);
+
+INSERT INTO logging_configuration_measures(
+    logging_configuration_id, position, measure_code, requirement_code, canonical_unit_code, load_role_code
+) VALUES
+    ('legacy_weighted_v1', 0, 'reps', 'required', 'count', NULL),
+    ('legacy_weighted_v1', 1, 'load', 'required', 'kilograms', 'external_resistance'),
+    ('legacy_bodyweight_v1', 0, 'reps', 'required', 'count', NULL),
+    ('legacy_timed_v1', 0, 'duration', 'required', 'milliseconds', NULL),
+    ('legacy_bodyweight_unspecified_load_v1', 0, 'reps', 'required', 'count', NULL),
+    ('legacy_bodyweight_unspecified_load_v1', 1, 'load', 'optional', 'kilograms', 'legacy_unspecified');
+
+UPDATE exercise_catalog
+SET definition_origin = CASE WHEN is_user_created = 0 THEN 'seed' ELSE 'user' END,
+    definition_revision = 1,
+    seed_id = CASE WHEN is_user_created = 0 THEN 'oopsallprs_baseline:' || canonical_name ELSE NULL END,
+    seed_manifest_revision = CASE WHEN is_user_created = 0 THEN source_seed_version ELSE NULL END,
+    default_logging_configuration_id = CASE logging_mode
+        WHEN 'WEIGHTED' THEN 'legacy_weighted_v1'
+        WHEN 'BODYWEIGHT' THEN 'legacy_bodyweight_v1'
+        WHEN 'TIMED' THEN 'legacy_timed_v1'
+        ELSE NULL
+    END;
+
+UPDATE exercise_sets
+SET capture_configuration_id = CASE
+    WHEN set_kind = 'BODYWEIGHT' AND weight_kg IS NOT NULL THEN 'legacy_bodyweight_unspecified_load_v1'
+    WHEN set_kind = 'WEIGHTED' THEN 'legacy_weighted_v1'
+    WHEN set_kind = 'BODYWEIGHT' THEN 'legacy_bodyweight_v1'
+    WHEN set_kind = 'TIMED' THEN 'legacy_timed_v1'
+    ELSE NULL
+END;
+
+UPDATE active_set_drafts
+SET logging_configuration_id = CASE
+    WHEN set_kind = 'BODYWEIGHT' AND weight_kg IS NOT NULL THEN 'legacy_bodyweight_unspecified_load_v1'
+    WHEN set_kind = 'WEIGHTED' THEN 'legacy_weighted_v1'
+    WHEN set_kind = 'BODYWEIGHT' THEN 'legacy_bodyweight_v1'
+    WHEN set_kind = 'TIMED' THEN 'legacy_timed_v1'
+    ELSE NULL
+END;
+
+UPDATE routine_set_templates
+SET logging_configuration_id = CASE
+    WHEN set_kind = 'BODYWEIGHT' AND target_weight_kg IS NOT NULL THEN 'legacy_bodyweight_unspecified_load_v1'
+    WHEN set_kind = 'WEIGHTED' THEN 'legacy_weighted_v1'
+    WHEN set_kind = 'BODYWEIGHT' THEN 'legacy_bodyweight_v1'
+    WHEN set_kind = 'TIMED' THEN 'legacy_timed_v1'
+    ELSE NULL
+END;
+
+UPDATE active_exercises
+SET logging_configuration_id = CASE
+    WHEN logging_mode = 'BODYWEIGHT' AND (
+        EXISTS (
+            SELECT 1
+            FROM exercise_sets
+            WHERE exercise_sets.exercise_instance_id = active_exercises.id
+              AND exercise_sets.set_kind = 'BODYWEIGHT'
+              AND exercise_sets.weight_kg IS NOT NULL
+        ) OR EXISTS (
+            SELECT 1
+            FROM active_set_drafts
+            WHERE active_set_drafts.exercise_instance_id = active_exercises.id
+              AND active_set_drafts.set_kind = 'BODYWEIGHT'
+              AND active_set_drafts.weight_kg IS NOT NULL
+        )
+    ) THEN 'legacy_bodyweight_unspecified_load_v1'
+    WHEN logging_mode = 'WEIGHTED' THEN 'legacy_weighted_v1'
+    WHEN logging_mode = 'BODYWEIGHT' THEN 'legacy_bodyweight_v1'
+    WHEN logging_mode = 'TIMED' THEN 'legacy_timed_v1'
+    ELSE NULL
+END;
+
+UPDATE routine_exercises
+SET logging_configuration_id = CASE
+    WHEN EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND routine_set_templates.logging_configuration_id = 'legacy_bodyweight_unspecified_load_v1'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND (
+              routine_set_templates.logging_configuration_id IS NULL OR
+              routine_set_templates.logging_configuration_id != 'legacy_bodyweight_unspecified_load_v1'
+          )
+    ) THEN 'legacy_bodyweight_unspecified_load_v1'
+    WHEN EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND routine_set_templates.logging_configuration_id = 'legacy_weighted_v1'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND (
+              routine_set_templates.logging_configuration_id IS NULL OR
+              routine_set_templates.logging_configuration_id != 'legacy_weighted_v1'
+          )
+    ) THEN 'legacy_weighted_v1'
+    WHEN EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND routine_set_templates.logging_configuration_id = 'legacy_bodyweight_v1'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND (
+              routine_set_templates.logging_configuration_id IS NULL OR
+              routine_set_templates.logging_configuration_id != 'legacy_bodyweight_v1'
+          )
+    ) THEN 'legacy_bodyweight_v1'
+    WHEN EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND routine_set_templates.logging_configuration_id = 'legacy_timed_v1'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM routine_set_templates
+        WHERE routine_set_templates.routine_exercise_id = routine_exercises.id
+          AND (
+              routine_set_templates.logging_configuration_id IS NULL OR
+              routine_set_templates.logging_configuration_id != 'legacy_timed_v1'
+          )
+    ) THEN 'legacy_timed_v1'
+    ELSE NULL
+END;
+
+UPDATE personal_records
+SET metric_code = CASE record_kind
+        WHEN 'WEIGHT_FOR_REPS' THEN 'weight_for_reps'
+        WHEN 'BODYWEIGHT_REPS' THEN 'reps'
+        WHEN 'ESTIMATED_ONE_REP_MAX' THEN 'estimated_one_rep_max'
+        WHEN 'VOLUME' THEN 'volume'
+        WHEN 'TIME' THEN 'longest_duration'
+        ELSE NULL
+    END,
+    derivation_version = CASE
+        WHEN record_kind IN ('WEIGHT_FOR_REPS', 'BODYWEIGHT_REPS', 'ESTIMATED_ONE_REP_MAX', 'VOLUME', 'TIME') THEN 1
+        ELSE NULL
+    END;
+
+UPDATE progress_points
+SET metric_code = CASE metric
+        WHEN 'BEST_SET' THEN 'weight_for_reps'
+        WHEN 'ESTIMATED_ONE_REP_MAX' THEN 'estimated_one_rep_max'
+        WHEN 'VOLUME' THEN 'volume'
+        WHEN 'BODYWEIGHT_REPS' THEN 'reps'
+        WHEN 'TIME' THEN 'longest_duration'
+        ELSE NULL
+    END,
+    derivation_version = CASE
+        WHEN metric IN ('BEST_SET', 'ESTIMATED_ONE_REP_MAX', 'VOLUME', 'BODYWEIGHT_REPS', 'TIME') THEN 1
+        ELSE NULL
+    END;
+
+CREATE TRIGGER logging_configurations_no_update
+BEFORE UPDATE ON logging_configurations
+BEGIN
+    SELECT RAISE(ABORT, 'logging configurations are immutable');
+END;
+
+CREATE TRIGGER logging_configurations_no_delete
+BEFORE DELETE ON logging_configurations
+BEGIN
+    SELECT RAISE(ABORT, 'logging configurations are immutable');
+END;
+
+CREATE TRIGGER logging_configuration_measures_no_update
+BEFORE UPDATE ON logging_configuration_measures
+BEGIN
+    SELECT RAISE(ABORT, 'logging configuration measures are immutable');
+END;
+
+CREATE TRIGGER logging_configuration_measures_no_delete
+BEFORE DELETE ON logging_configuration_measures
+BEGIN
+    SELECT RAISE(ABORT, 'logging configuration measures are immutable');
+END;
+
+CREATE TRIGGER logging_configuration_effort_kinds_no_update
+BEFORE UPDATE ON logging_configuration_effort_kinds
+BEGIN
+    SELECT RAISE(ABORT, 'logging configuration effort kinds are immutable');
+END;
+
+CREATE TRIGGER logging_configuration_effort_kinds_no_delete
+BEFORE DELETE ON logging_configuration_effort_kinds
+BEGIN
+    SELECT RAISE(ABORT, 'logging configuration effort kinds are immutable');
+END;

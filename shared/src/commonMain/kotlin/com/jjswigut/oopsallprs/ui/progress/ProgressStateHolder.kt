@@ -2,7 +2,7 @@ package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
-import com.jjswigut.oopsallprs.domain.model.ProgressMetric
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
@@ -19,7 +19,7 @@ data class ProgressState(
     val exerciseGroups: List<ProgressExerciseGroup> = emptyList(),
     val selectedExerciseId: FoundationId? = null,
     val selectedExercise: ProgressExerciseGroup? = null,
-    val selectedChartMetric: ProgressMetric? = null,
+    val selectedChartMetric: ProgressEvidenceMetric? = null,
     val selectedEvidence: ProgressEvidence? = null,
     val weightUnit: WeightUnit = WeightUnit.POUNDS,
     val emptyMessage: String = "Finish workouts to build PRs here."
@@ -51,7 +51,7 @@ class ProgressStateHolder(
         )
     }
 
-    fun selectChartMetric(metric: ProgressMetric) {
+    fun selectChartMetric(metric: ProgressEvidenceMetric) {
         val selected = _state.value.selectedExercise ?: return
         if (metric !in selected.chart.availableMetrics) return
         val chart = buildProgressChartState(
@@ -90,7 +90,7 @@ class ProgressStateHolder(
 
     private suspend fun buildState(
         selectedExerciseId: FoundationId?,
-        selectedChartMetric: ProgressMetric?,
+        selectedChartMetric: ProgressEvidenceMetric?,
         selectedEvidenceRecordId: FoundationId?
     ): ProgressState {
         val records = progress.personalRecords()

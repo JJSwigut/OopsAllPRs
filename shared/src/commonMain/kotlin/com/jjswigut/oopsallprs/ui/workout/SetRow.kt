@@ -10,6 +10,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.jjswigut.oopsallprs.domain.model.ActivePrFeedback
 import com.jjswigut.oopsallprs.domain.model.ActivePrFeedbackKind
+import com.jjswigut.oopsallprs.domain.model.Effort
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
@@ -20,9 +23,13 @@ import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
 @Composable
 fun SetRow(
     draft: SetRowDraft,
-    onRepsChange: (Int) -> Unit,
+    onRepsChange: (Int?) -> Unit,
     onWeightChange: (WeightKg?) -> Unit,
     onDurationChange: (Long?) -> Unit = {},
+    onDistanceChange: (Double?) -> Unit = {},
+    onDistanceInputChange: (MeasureInputUpdate<Double>) -> Unit = {},
+    onWeightInputChange: (MeasureInputUpdate<WeightKg>) -> Unit = {},
+    onEffortChange: (MeasureInputUpdate<Effort>) -> Unit = {},
     onTimerToggle: () -> Unit = {},
     onLog: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
@@ -38,6 +45,10 @@ fun SetRow(
         onRepsChange = onRepsChange,
         onWeightChange = onWeightChange,
         onDurationChange = onDurationChange,
+        onDistanceChange = onDistanceChange,
+        onDistanceInputChange = onDistanceInputChange,
+        onWeightInputChange = onWeightInputChange,
+        onEffortChange = onEffortChange,
         onTimerToggle = onTimerToggle,
         onLog = onLog,
         weightUnit = weightUnit,
@@ -69,12 +80,23 @@ fun LoggedSetRowView(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
         ) {
-            val weight = row.weight?.let { " @ ${formatDisplayWeight(it, weightUnit)} ${weightUnitLabel(weightUnit)}" }.orEmpty()
-            val value = if (row.setKind == com.jjswigut.oopsallprs.domain.model.SetKind.TIMED) {
-                formatDurationMs(row.durationMs)
-            } else {
-                "${row.reps ?: 0} reps$weight"
-            }
+            val value = row.loggingConfiguration?.let { configuration ->
+                configuration.measures.mapNotNull { measure ->
+                    when (measure.kind) {
+                        MeasureKind.REPETITIONS -> row.reps?.let { "$it reps" }
+                        MeasureKind.LOAD -> row.weight?.let { weight ->
+                            if (measure.loadRole == LoadRole.ADDED_TO_BODYWEIGHT && weight.value == 0.0) {
+                                "Unloaded"
+                            } else {
+                                "${requireNotNull(measure.loadRole).displayLabel(weightUnit)} " +
+                                    "${formatDisplayWeight(weight, weightUnit)} ${weightUnitLabel(weightUnit)}"
+                            }
+                        }
+                        MeasureKind.DURATION -> row.durationMs?.let(::formatDurationMs)
+                        MeasureKind.DISTANCE -> row.distanceMeters?.let { "${it.formatCompact()} m" }
+                    }
+                }.plus(listOfNotNull(row.observedEffort?.displayLabel())).joinToString(" • ")
+            } ?: "Configuration unavailable"
             FoundationText(
                 text = "${row.position.value + 1}. $value",
                 style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
@@ -86,10 +108,21 @@ fun LoggedSetRowView(
                 )
             } ?: FoundationMutedText(if (row.editedAt != null) "Edited" else "Logged")
         }
-        FoundationTextAction("Edit", onEdit)
+        if (row.loggingConfiguration != null) FoundationTextAction("Edit", onEdit)
         FoundationTextAction("Delete", onDelete)
     }
 }
+
+private fun Effort.displayLabel(): String? =
+    when {
+        rir != null -> "RIR $rir"
+        rpeTenths != null -> "RPE ${(rpeTenths / 10.0).formatCompact()}"
+        failureOutcome != null -> when (failureOutcome) {
+            com.jjswigut.oopsallprs.domain.model.FailureOutcome.REACHED -> "Failure reached"
+            com.jjswigut.oopsallprs.domain.model.FailureOutcome.NOT_REACHED -> "Failure not reached"
+        }
+        else -> null
+    }
 
 internal fun ActivePrFeedback.displayLabel(reps: Int?, weightUnit: WeightUnit): String {
     val prefix = if (previousValue == null) "New PR" else "PR"

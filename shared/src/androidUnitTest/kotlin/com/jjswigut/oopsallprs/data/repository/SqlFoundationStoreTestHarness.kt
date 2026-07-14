@@ -11,7 +11,7 @@ import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
 import kotlinx.datetime.Instant
 
 internal class SqlFoundationStoreTestHarness {
-    private val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
     val database: WorkoutDatabase
 
     init {

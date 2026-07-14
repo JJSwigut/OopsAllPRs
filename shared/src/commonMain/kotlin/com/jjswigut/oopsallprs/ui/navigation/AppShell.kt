@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalUriHandler
 import com.jjswigut.oopsallprs.AppState
 import com.jjswigut.oopsallprs.dev.DeveloperSeedState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
@@ -44,6 +45,7 @@ import com.jjswigut.oopsallprs.ui.exercise.ExerciseManagementFlow
 import com.jjswigut.oopsallprs.ui.exercise.ExercisePickerFlow
 import com.jjswigut.oopsallprs.ui.history.HistoryFlow
 import com.jjswigut.oopsallprs.ui.profile.ProfileFlow
+import com.jjswigut.oopsallprs.ui.profile.openPrivacyPolicy
 import com.jjswigut.oopsallprs.ui.progress.ProgressFlow
 import com.jjswigut.oopsallprs.ui.routine.RoutineEditorFlow
 import com.jjswigut.oopsallprs.ui.workout.ActiveWorkoutFlow
@@ -234,8 +236,20 @@ fun AppShell(
                     onDraftWeightChange = { exerciseId, weight ->
                         scope.launch { appState.activeWorkout.updateDraftWeight(exerciseId, weight) }
                     },
+                    onDraftWeightInputChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftWeightInput(exerciseId, update) }
+                    },
                     onDraftDurationChange = { exerciseId, durationMs ->
                         scope.launch { appState.activeWorkout.updateDraftDuration(exerciseId, durationMs) }
+                    },
+                    onDraftDistanceChange = { exerciseId, distanceMeters ->
+                        scope.launch { appState.activeWorkout.updateDraftDistance(exerciseId, distanceMeters) }
+                    },
+                    onDraftDistanceInputChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftDistanceInput(exerciseId, update) }
+                    },
+                    onDraftEffortChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftEffort(exerciseId, update) }
                     },
                     onDraftTimerToggle = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleDraftTimer(exerciseId) }
@@ -243,7 +257,11 @@ fun AppShell(
                     onBeginEditSet = { setId -> appState.activeWorkout.beginEditSet(setId) },
                     onEditRepsChange = { reps -> appState.activeWorkout.updateEditReps(reps) },
                     onEditWeightChange = { weight -> appState.activeWorkout.updateEditWeight(weight) },
+                    onEditWeightInputChange = { update -> appState.activeWorkout.updateEditWeightInput(update) },
                     onEditDurationChange = { durationMs -> appState.activeWorkout.updateEditDuration(durationMs) },
+                    onEditDistanceChange = { distanceMeters -> appState.activeWorkout.updateEditDistance(distanceMeters) },
+                    onEditDistanceInputChange = { update -> appState.activeWorkout.updateEditDistanceInput(update) },
+                    onEditEffortChange = { update -> appState.activeWorkout.updateEditEffort(update) },
                     onSaveEditedSet = {
                         scope.launch { appState.activeWorkout.confirmEditSet() }
                     },
@@ -316,6 +334,18 @@ fun AppShell(
                     onToggleExerciseRest = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleExerciseRest(exerciseId) }
                     },
+                    onTrackAddedWeightChange = { exerciseId, enabled ->
+                        scope.launch { appState.activeWorkout.setBodyweightAddedLoad(exerciseId, enabled) }
+                    },
+                    onTrackEffortChange = { exerciseId, enabled ->
+                        scope.launch { appState.activeWorkout.setTrackEffort(exerciseId, enabled) }
+                    },
+                    onEffortKindChange = { exerciseId, effortKind ->
+                        scope.launch { appState.activeWorkout.setEffortKind(exerciseId, effortKind) }
+                    },
+                    onSaveConfigurationAsDefault = { exerciseId ->
+                        scope.launch { appState.activeWorkout.saveActiveConfigurationAsDefault(exerciseId) }
+                    },
                     onGroupCircuit = { exerciseIds ->
                         scope.launch { appState.activeWorkout.groupExercisesAsCircuit(exerciseIds) }
                     },
@@ -328,6 +358,7 @@ fun AppShell(
                     onFocusExercise = { exerciseId ->
                         scope.launch { appState.activeWorkout.setFocus(exerciseId) }
                     },
+                    onShowExerciseOverview = { appState.activeWorkout.showExerciseOverview() },
                     onDismiss = { scope.launch { appState.navigation.dismissActiveWorkout() } },
                     weightUnit = profileState.weightUnit,
                     weightStepAmount = profileState.weightStep
@@ -491,6 +522,7 @@ private fun DestinationContent(
     developerSeedState: DeveloperSeedState?
 ) {
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
     when (destination) {
         TopLevelDestination.TRAIN -> WorkoutHomeFlow(
             state = workoutHomeState,
@@ -604,9 +636,10 @@ private fun DestinationContent(
             onWeightStepDraftChange = { step -> appState.profile.setDraftWeightStep(step) },
             onWeightStepSave = { scope.launch { appState.profile.saveWeightStep() } },
             onWeightStepCancel = { appState.profile.cancelWeightStepPicker() },
-            onDefaultRestSelected = { seconds ->
-                scope.launch { appState.profile.setDefaultRestSeconds(seconds) }
-            },
+            onDefaultRestClick = { appState.profile.openDefaultRestPicker() },
+            onDefaultRestDraftChange = { seconds -> appState.profile.setDraftDefaultRestSeconds(seconds) },
+            onDefaultRestSave = { scope.launch { appState.profile.saveDefaultRest() } },
+            onDefaultRestCancel = { appState.profile.cancelDefaultRestPicker() },
             onRestSoundChanged = { enabled ->
                 scope.launch { appState.profile.setRestSoundEnabled(enabled) }
             },
@@ -677,6 +710,7 @@ private fun DestinationContent(
             onManageExercises = {
                 scope.launch { appState.exerciseManagement.open() }
             },
+            onPrivacyPolicy = { openPrivacyPolicy(uriHandler::openUri) },
             developerSeedState = developerSeedState,
             onDeveloperSeedSelected = { scenario ->
                 scope.launch {

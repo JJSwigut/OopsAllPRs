@@ -1,0 +1,3 @@
+# Use composable immutable exercise logging configurations
+
+Exercise tracking will model repetitions, load, duration, distance, load meaning, and optional effort as independent values in an immutable logging configuration. We rejected a growing logging-mode enum and a top-level sealed hierarchy because both multiply independent variations, make seeded and user-created exercises diverge, and risk reinterpreting historical sets when defaults change. Exercise definitions, user preferences, routines, workouts, and sets therefore refer to versioned configuration identities, while bodyweight remains movement metadata and workout-only changes remain explicit snapshots.

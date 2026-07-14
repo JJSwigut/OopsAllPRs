@@ -1,4 +1,5 @@
 require "fileutils"
+require_relative "google_play_listing"
 
 opt_out_usage
 
@@ -28,22 +29,47 @@ end
 
 def prepare_android_listing_assets
   source_root = File.join(repo_root, "assets", "store-listing", "google-play")
+  listing_root = File.join(source_root, "listing", "en-US")
+  icon = File.join(source_root, "icon-512x512.png")
   feature_graphic = File.join(source_root, "feature-graphic-1024x500.png")
+  UI.user_error!("Missing Google Play icon at #{icon}") unless File.exist?(icon)
   UI.user_error!("Missing Google Play feature graphic at #{feature_graphic}") unless File.exist?(feature_graphic)
 
   metadata_root = File.join(repo_root, "fastlane", "build", "metadata", "android")
-  images_dir = File.join(metadata_root, "en-US", "images")
+  locale_dir = File.join(metadata_root, "en-US")
+  images_dir = File.join(locale_dir, "images")
   phone_screenshots_dir = File.join(images_dir, "phoneScreenshots")
+  seven_inch_screenshots_dir = File.join(images_dir, "sevenInchScreenshots")
+  ten_inch_screenshots_dir = File.join(images_dir, "tenInchScreenshots")
 
   FileUtils.rm_rf(metadata_root)
-  FileUtils.mkdir_p(phone_screenshots_dir)
+  FileUtils.mkdir_p(locale_dir)
+  %w[title.txt short_description.txt full_description.txt].each do |filename|
+    source = File.join(listing_root, filename)
+    UI.user_error!("Missing Google Play listing text at #{source}") unless File.exist?(source)
+    FileUtils.cp(source, File.join(locale_dir, filename))
+  end
+  FileUtils.mkdir_p(images_dir)
+  FileUtils.cp(icon, File.join(images_dir, "icon.png"))
   FileUtils.cp(feature_graphic, File.join(images_dir, "featureGraphic.png"))
-  screenshot_count = copy_ordered_assets(
+  phone_screenshot_count = copy_ordered_assets(
     File.join(source_root, "screenshots", "*.png"),
     phone_screenshots_dir
   )
+  seven_inch_screenshot_count = copy_ordered_assets(
+    File.join(source_root, "seven-inch-tablet-screenshots", "*.png"),
+    seven_inch_screenshots_dir
+  )
+  ten_inch_screenshot_count = copy_ordered_assets(
+    File.join(source_root, "ten-inch-tablet-screenshots", "*.png"),
+    ten_inch_screenshots_dir
+  )
 
-  UI.message("Prepared Google Play listing assets: 1 feature graphic, #{screenshot_count} phone screenshots")
+  UI.message(
+    "Prepared Google Play listing: metadata, icon, feature graphic, " \
+    "#{phone_screenshot_count} phone, #{seven_inch_screenshot_count} seven-inch, " \
+    "and #{ten_inch_screenshot_count} ten-inch screenshots"
+  )
   metadata_root
 end
 
@@ -103,23 +129,44 @@ platform :android do
     )
   end
 
-  desc "Upload Google Play store-listing images and screenshots only"
+  desc "Prepare Google Play listing metadata and artwork without contacting Google Play"
+  lane :listing_package do
+    prepare_android_listing_assets
+  end
+
+  desc "Validate or upload Google Play listing metadata and artwork only"
   lane :listing do
     package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
+    listing_track = ENV.fetch("ANDROID_PLAY_LISTING_TRACK", "internal")
     require_env!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    json_key_data = ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    version_code = GooglePlayListing.latest_version_code(
+      google_play_track_version_codes(
+        package_name: package_name,
+        json_key_data: json_key_data,
+        track: listing_track
+      ),
+      track: listing_track
+    )
+
+    UI.message("Using existing version code #{version_code} from '#{listing_track}' for listing metadata")
 
     upload_to_play_store(
       package_name: package_name,
-      json_key_data: ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+      json_key_data: json_key_data,
       metadata_path: prepare_android_listing_assets,
+      track: listing_track,
+      version_code: version_code,
       skip_upload_apk: true,
       skip_upload_aab: true,
-      skip_upload_metadata: true,
+      skip_upload_metadata: false,
       skip_upload_changelogs: true,
       skip_upload_images: false,
       skip_upload_screenshots: false,
       sync_image_upload: true,
-      validate_only: ENV.fetch("ANDROID_PLAY_VALIDATE_ONLY", "false") == "true"
+      validate_only: ENV.fetch("ANDROID_PLAY_VALIDATE_ONLY", "true") == "true",
+      changes_not_sent_for_review: true,
+      rescue_changes_not_sent_for_review: true
     )
   end
 end

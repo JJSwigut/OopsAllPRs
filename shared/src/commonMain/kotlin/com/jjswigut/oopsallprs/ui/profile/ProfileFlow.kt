@@ -37,7 +37,10 @@ fun ProfileFlow(
     onWeightStepDraftChange: (Double) -> Unit,
     onWeightStepSave: () -> Unit,
     onWeightStepCancel: () -> Unit,
-    onDefaultRestSelected: (Int) -> Unit,
+    onDefaultRestClick: () -> Unit,
+    onDefaultRestDraftChange: (Int) -> Unit,
+    onDefaultRestSave: () -> Unit,
+    onDefaultRestCancel: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit,
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
@@ -57,6 +60,7 @@ fun ProfileFlow(
     onRestoreBackupConflict: () -> Unit,
     onCancelBackupConflict: () -> Unit,
     onManageExercises: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
     developerSeedState: DeveloperSeedState? = null,
     onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit = {},
     modifier: Modifier = Modifier
@@ -75,8 +79,8 @@ fun ProfileFlow(
             onWeightUnitSelected = onWeightUnitSelected,
             onWeightStepClick = onWeightStepClick
         )
-        RestPreferencesCard(state, onDefaultRestSelected, onRestSoundChanged)
-        ExportCard(state, onExportRequested)
+        RestPreferencesCard(state, onDefaultRestClick, onRestSoundChanged)
+        ExercisesCard(onManageExercises)
         BackupCard(
             state = state,
             onStartBackupSetup = onStartBackupSetup,
@@ -88,7 +92,7 @@ fun ProfileFlow(
             onRestoreBackupConflict = onRestoreBackupConflict,
             onCancelBackupConflict = onCancelBackupConflict
         )
-        LocalStatusCard(state.localStatus, onManageExercises)
+        ExportCard(state, onExportRequested)
         developerSeedState?.let { seedState ->
             DeveloperSeedCard(seedState, onDeveloperSeedSelected)
         }
@@ -98,6 +102,7 @@ fun ProfileFlow(
             onHapticsChanged = onHapticsChanged,
             onReduceMotionChanged = onReduceMotionChanged
         )
+        PrivacyCard(onPrivacyPolicy)
     }
 
     if (state.isWeightStepPickerVisible) {
@@ -106,6 +111,14 @@ fun ProfileFlow(
             onDraftChange = onWeightStepDraftChange,
             onSave = onWeightStepSave,
             onCancel = onWeightStepCancel
+        )
+    }
+    if (state.isDefaultRestPickerVisible) {
+        DefaultRestDialog(
+            state = state,
+            onDraftChange = onDefaultRestDraftChange,
+            onSave = onDefaultRestSave,
+            onCancel = onDefaultRestCancel
         )
     }
     state.backupSetupStep?.let { step ->
@@ -424,17 +437,26 @@ private fun DeveloperSeedCard(
 @Composable
 private fun RestPreferencesCard(
     state: ProfileState,
-    onDefaultRestSelected: (Int) -> Unit,
+    onDefaultRestClick: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit
 ) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             SectionLabel("Rest")
-            FoundationMutedText("Default ${formatRestDurationSeconds(state.defaultRestSeconds)}")
-            RestDurationRoller(
-                seconds = state.defaultRestSeconds,
-                onSecondsChange = onDefaultRestSelected
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    FoundationText("Default rest")
+                    FoundationMutedText(formatRestDurationSeconds(state.defaultRestSeconds))
+                }
+                FitButton(
+                    text = "Change",
+                    onClick = onDefaultRestClick,
+                    style = FitButtonStyle.Secondary
+                )
+            }
             ToggleRow(
                 label = "Rest sound",
                 value = if (state.restSoundEnabled) "On" else "Off",
@@ -442,6 +464,48 @@ private fun RestPreferencesCard(
                 onCheckedChange = onRestSoundChanged
             )
             FoundationMutedText("New exercises use ${formatRestDurationSeconds(state.defaultRestSeconds)} rest.")
+        }
+    }
+}
+
+@Composable
+private fun DefaultRestDialog(
+    state: ProfileState,
+    onDraftChange: (Int) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit
+) {
+    FitDialog(onDismissRequest = onCancel) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            SectionLabel("Default rest")
+            FoundationMutedText(formatRestDurationSeconds(state.draftDefaultRestSeconds))
+            RestDurationRoller(
+                seconds = state.draftDefaultRestSeconds,
+                onSecondsChange = onDraftChange
+            )
+            state.defaultRestError?.let { error ->
+                FoundationText(
+                    text = error,
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FitButton(
+                    text = "Cancel",
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = "Save",
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Primary
+                )
+            }
         }
     }
 }
@@ -468,8 +532,10 @@ private fun UnitsCard(
                 horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    FoundationText("Weight step")
-                    FoundationMutedText("${formatWeightStep(state.weightStep)} ${state.weightUnit.abbreviation()}")
+                    FoundationText("Weight increment")
+                    FoundationMutedText(
+                        "The +/- buttons change by ${formatWeightStep(state.weightStep)} ${state.weightUnit.abbreviation()}."
+                    )
                 }
                 FitButton(
                     text = "Change",
@@ -492,8 +558,10 @@ private fun WeightStepDialog(
     val unitLabel = state.weightUnit.abbreviation()
     FitDialog(onDismissRequest = onCancel) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
-            SectionLabel("Weight step")
-            FoundationMutedText("${formatWeightStep(state.draftWeightStep)} $unitLabel")
+            SectionLabel("Weight increment")
+            FoundationMutedText("Choose how much the +/- buttons change weight.")
+            FoundationMutedText("Match the smallest change you make with plates or dumbbells.")
+            FoundationMutedText("${formatWeightStep(state.draftWeightStep)} $unitLabel per tap")
             FitRoller(
                 value = state.draftWeightStep.toFloat(),
                 onValueChange = { onDraftChange(it.toDouble()) },
@@ -559,24 +627,16 @@ private fun ExportCard(
 }
 
 @Composable
-private fun LocalStatusCard(
-    status: LocalReadinessStatus,
-    onManageExercises: () -> Unit
-) {
+private fun ExercisesCard(onManageExercises: () -> Unit) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
-            SectionLabel("Data")
-            StatusRow("Storage", status.storageLabel)
-            StatusRow("Sync", status.syncLabel)
-            StatusRow("Backup", status.backupLabel)
-            StatusRow("Rest alerts", status.restNotificationLabel)
-            StatusRow("Export", status.exportLabel)
-            StatusRow("Alpha", status.alphaGateLabel)
+            SectionLabel("Exercises")
+            FoundationMutedText("Add, edit, or archive the exercises in your library.")
             FitButton(
                 text = "Manage exercises",
                 onClick = onManageExercises,
                 modifier = Modifier.fillMaxWidth(),
-                style = FitButtonStyle.Secondary
+                style = FitButtonStyle.Primary
             )
         }
     }
@@ -609,6 +669,22 @@ private fun InteractionCard(
                 value = if (state.reduceMotion) "On" else "Off",
                 checked = state.reduceMotion,
                 onCheckedChange = onReduceMotionChanged
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrivacyCard(onPrivacyPolicy: () -> Unit) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Privacy")
+            FoundationMutedText("Learn how Oops All PRs handles your workout data.")
+            FitButton(
+                text = "Privacy policy",
+                onClick = onPrivacyPolicy,
+                modifier = Modifier.fillMaxWidth(),
+                style = FitButtonStyle.Secondary
             )
         }
     }
