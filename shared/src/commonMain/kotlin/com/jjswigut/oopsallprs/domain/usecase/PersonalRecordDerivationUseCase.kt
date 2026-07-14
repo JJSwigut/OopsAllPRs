@@ -29,26 +29,44 @@ class PersonalRecordDerivationUseCase(
             }
         }
 
-        val records = points
-            .groupBy { point -> point.recordBucket() }
-            .mapNotNull { (bucket, values) ->
-                values.maxByOrNull { it.value }?.let { point ->
-                    PersonalRecord(
-                        id = newFoundationId("pr"),
-                        exerciseCatalogId = point.exerciseCatalogId,
-                        recordKind = bucket.kind,
-                        reps = point.reps,
-                        weight = point.weight,
-                        value = point.value,
-                        sourceWorkoutId = point.sourceWorkoutId,
-                        sourceSetId = point.sourceSetId ?: return@let null,
-                        achievedAt = point.recordedAt,
-                        createdAt = Clock.System.now()
+        val weightedRecords = points
+            .filter { it.metric == ProgressMetric.BEST_SET }
+            .groupBy { it.exerciseCatalogId }
+            .values
+            .flatMap { exercisePoints ->
+                exercisePoints.nondominatedWeightedSets { point ->
+                    WeightedSetPerformance(
+                        weightKg = point.weight?.value ?: point.value,
+                        reps = point.reps ?: 0
                     )
                 }
             }
+            .mapNotNull { point -> point.toPersonalRecord(PersonalRecordKind.WEIGHT_FOR_REPS) }
 
-        progressRepository.replaceRecords(records, points)
+        val scalarRecords = points
+            .filter { it.metric != ProgressMetric.BEST_SET }
+            .groupBy { point -> point.recordBucket() }
+            .mapNotNull { (bucket, values) ->
+                values.maxByOrNull { it.value }?.toPersonalRecord(bucket.kind)
+            }
+
+        progressRepository.replaceRecords(weightedRecords + scalarRecords, points)
+    }
+
+    private fun ProgressPoint.toPersonalRecord(kind: PersonalRecordKind): PersonalRecord? {
+        val recordSourceSetId = sourceSetId ?: return null
+        return PersonalRecord(
+            id = newFoundationId("pr"),
+            exerciseCatalogId = exerciseCatalogId,
+            recordKind = kind,
+            reps = reps,
+            weight = weight,
+            value = value,
+            sourceWorkoutId = sourceWorkoutId,
+            sourceSetId = recordSourceSetId,
+            achievedAt = recordedAt,
+            createdAt = Clock.System.now()
+        )
     }
 
     private fun ExerciseSet.toProgressPoints(

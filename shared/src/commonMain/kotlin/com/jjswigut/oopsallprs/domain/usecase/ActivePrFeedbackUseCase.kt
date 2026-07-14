@@ -23,7 +23,19 @@ class ActivePrFeedbackUseCase(
             SetKind.TIMED -> set.durationMs?.toDouble() ?: return null
         }
         val reps = set.reps
-        val previous = previousBest(workout, exercise, set, reps)
+        val previous = if (set.setKind == SetKind.WEIGHTED) {
+            val candidate = WeightedSetPerformance(
+                weightKg = set.weight?.value ?: return null,
+                reps = reps ?: return null
+            )
+            val previousSets = previousWeightedSets(workout, exercise, set)
+            if (previousSets.any { it.blocksNewPersonalRecord(candidate) }) {
+                return null
+            }
+            previousSets.filter { it.reps == candidate.reps }.maxOfOrNull { it.weightKg }
+        } else {
+            previousBest(workout, exercise, set, reps)
+        }
         if (previous != null && newValue <= previous) {
             return null
         }
@@ -40,6 +52,42 @@ class ActivePrFeedbackUseCase(
             previousValue = previous,
             newValue = newValue
         )
+    }
+
+    private suspend fun previousWeightedSets(
+        workout: ActiveWorkout,
+        exercise: ActiveExercise,
+        set: ExerciseSet
+    ): List<WeightedSetPerformance> {
+        val recordSets = progressRepository.personalRecords()
+            .asSequence()
+            .filter { record ->
+                record.exerciseCatalogId == exercise.reference.exerciseCatalogId &&
+                    record.sourceSetId != set.id &&
+                    record.recordKind == PersonalRecordKind.WEIGHT_FOR_REPS
+            }
+            .mapNotNull { record ->
+                val reps = record.reps ?: return@mapNotNull null
+                WeightedSetPerformance(record.weight?.value ?: record.value, reps)
+            }
+
+        val activeSets = workout.exercises
+            .asSequence()
+            .filter { it.reference.exerciseCatalogId == exercise.reference.exerciseCatalogId }
+            .flatMap { it.sets.asSequence() }
+            .filter { candidate ->
+                candidate.isLogged &&
+                    candidate.id != set.id &&
+                    candidate.loggedAt != null &&
+                    candidate.setKind == SetKind.WEIGHTED
+            }
+            .mapNotNull { candidate ->
+                val weight = candidate.weight ?: return@mapNotNull null
+                val reps = candidate.reps ?: return@mapNotNull null
+                WeightedSetPerformance(weight.value, reps)
+            }
+
+        return (recordSets + activeSets).toList()
     }
 
     private suspend fun previousBest(
