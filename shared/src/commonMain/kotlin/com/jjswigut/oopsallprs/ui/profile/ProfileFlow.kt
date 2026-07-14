@@ -60,6 +60,7 @@ fun ProfileFlow(
     onRestoreBackupConflict: () -> Unit,
     onCancelBackupConflict: () -> Unit,
     onManageExercises: () -> Unit,
+    onPrivacyPolicy: () -> Unit,
     developerSeedState: DeveloperSeedState? = null,
     onDeveloperSeedSelected: (DeveloperSeedScenario) -> Unit = {},
     modifier: Modifier = Modifier
@@ -101,6 +102,7 @@ fun ProfileFlow(
             onHapticsChanged = onHapticsChanged,
             onReduceMotionChanged = onReduceMotionChanged
         )
+        PrivacyCard(onPrivacyPolicy)
     }
 
     if (state.isWeightStepPickerVisible) {
@@ -663,6 +665,22 @@ private fun InteractionCard(
                 value = if (state.reduceMotion) "On" else "Off",
                 checked = state.reduceMotion,
                 onCheckedChange = onReduceMotionChanged
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrivacyCard(onPrivacyPolicy: () -> Unit) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Privacy")
+            FoundationMutedText("Learn how Oops All PRs handles your workout data.")
+            FitButton(
+                text = "Privacy policy",
+                onClick = onPrivacyPolicy,
+                modifier = Modifier.fillMaxWidth(),
+                style = FitButtonStyle.Secondary
             )
         }
     }

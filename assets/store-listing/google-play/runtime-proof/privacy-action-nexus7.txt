@@ -1,0 +1,18 @@
+Google Play privacy action runtime proof
+Captured: 2026-07-13
+
+AVD: OopsPlay7
+Hardware profile: Nexus 7 (2013), 7.02-inch
+System image: Android 15 / API 35, Google Play, ARM64
+Display: 1200x1920 at 320 dpi
+App: locally signed release build, com.jjswigut.oopsallprs.android
+
+UIAutomator observed the production Profile surface after scrolling:
+  text="Privacy"
+  text="Learn how Oops All PRs handles your workout data."
+  text="Privacy policy" bounds="[690,1721][854,1751]"
+
+After tapping the Privacy policy action, ActivityTaskManager logged:
+  START u0 {act=android.intent.action.VIEW dat=https://jjswigut.github.io/... cmp=com.android.chrome/com.google.android.apps.chrome.IntentDispatcher} result code=0
+
+Chrome became the resumed activity. The focused PrivacyPolicyTest separately asserts the complete dispatched URL, including the exact `/oops-all-prs-site/privacy/` path and trailing slash.
