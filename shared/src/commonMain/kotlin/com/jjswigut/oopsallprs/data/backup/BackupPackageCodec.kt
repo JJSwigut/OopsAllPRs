@@ -6,6 +6,9 @@ import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 
 class BackupPackageCodec(
     private val json: Json = Json {
@@ -16,14 +19,36 @@ class BackupPackageCodec(
 ) {
     fun encode(pkg: BackupPackage): FoundationResult<String> =
         try {
+            require(pkg.formatVersion == BACKUP_FORMAT_VERSION) {
+                "Only Backup V2 packages can be encoded"
+            }
             foundationSuccess(json.encodeToString(BackupPackageDto.serializer(), pkg))
         } catch (error: SerializationException) {
             foundationFailure(FoundationError.Persistence("Backup encoding failed: ${error.message}"))
+        } catch (error: IllegalArgumentException) {
+            foundationFailure(FoundationError.Validation(error.message ?: "Backup package is invalid"))
         }
 
     fun decode(content: String): FoundationResult<BackupPackage> =
         try {
-            val decoded = json.decodeFromString(BackupPackageDto.serializer(), content)
+            val raw = json.parseToJsonElement(content).jsonObject
+            val formatVersion = raw["formatVersion"]?.jsonPrimitive?.intOrNull
+                ?: return foundationFailure(FoundationError.Validation("Backup format version is missing or invalid"))
+            val decoded = when (formatVersion) {
+                BACKUP_FORMAT_VERSION_V1 ->
+                    json.decodeFromJsonElement(BackupPackageV1Dto.serializer(), raw).normalizeToV2()
+                BACKUP_FORMAT_VERSION ->
+                    json.decodeFromJsonElement(BackupPackageDto.serializer(), raw)
+                else -> return foundationFailure(
+                    FoundationError.Validation(
+                        if (formatVersion > BACKUP_FORMAT_VERSION) {
+                            "Backup format is newer than this app supports"
+                        } else {
+                            "Backup format version is invalid"
+                        }
+                    )
+                )
+            }
             validate(decoded)
         } catch (error: SerializationException) {
             foundationFailure(FoundationError.Validation("Backup file is not a valid Oops All PRs backup"))
@@ -32,15 +57,10 @@ class BackupPackageCodec(
         }
 
     fun validate(pkg: BackupPackage): FoundationResult<BackupPackage> =
-        when {
-            pkg.formatVersion > BACKUP_FORMAT_VERSION ->
-                foundationFailure(FoundationError.Validation("Backup format is newer than this app supports"))
-            pkg.formatVersion <= 0 ->
-                foundationFailure(FoundationError.Validation("Backup format version is invalid"))
-            pkg.deviceId.isBlank() ->
-                foundationFailure(FoundationError.Validation("Backup is missing device metadata"))
-            pkg.lastLocalRevision.isBlank() ->
-                foundationFailure(FoundationError.Validation("Backup is missing revision metadata"))
-            else -> foundationSuccess(pkg)
+        try {
+            BackupPackageValidator.validate(pkg)
+            foundationSuccess(pkg)
+        } catch (error: IllegalArgumentException) {
+            foundationFailure(FoundationError.Validation(error.message ?: "Backup file is invalid"))
         }
 }

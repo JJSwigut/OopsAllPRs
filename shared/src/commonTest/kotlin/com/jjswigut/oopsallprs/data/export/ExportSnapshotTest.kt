@@ -10,6 +10,7 @@ import com.jjswigut.oopsallprs.testing.workoutWithLoggedWeightedSet
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 class ExportSnapshotTest {
     @Test
@@ -18,7 +19,11 @@ class ExportSnapshotTest {
         val workoutId = harness.workoutWithLoggedWeightedSet()
         harness.routines.finishWorkout(workoutId, instant(2_000))
         val export = ExportService(harness.store).export(ExportType.WORKOUTS, WeightUnit.POUNDS).successValue()
-        assertTrue(export.content.contains("workout_id,exercise,reps,weight,duration_ms,duration_label,kind,logged_at"))
+        assertEquals(
+            "workout_id,exercise,reps,weight,duration_ms,duration_label,kind,logged_at," +
+                "config_id,distance_m,rpe,rir,failure_outcome,load_role",
+            export.content.lineSequence().first()
+        )
         assertTrue(export.content.contains("Bench Press"))
     }
 

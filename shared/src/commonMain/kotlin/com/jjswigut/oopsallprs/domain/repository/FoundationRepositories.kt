@@ -18,11 +18,14 @@ import com.jjswigut.oopsallprs.domain.model.ExportType
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
 import com.jjswigut.oopsallprs.domain.model.ReusableRoutine
 import com.jjswigut.oopsallprs.domain.model.SnapshotSummary
+import com.jjswigut.oopsallprs.domain.model.UserExerciseConfiguration
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import kotlinx.datetime.Instant
 
@@ -75,6 +78,18 @@ interface ExerciseRepository {
     suspend fun saveUserExercise(item: ExerciseCatalogItem): FoundationResult<ExerciseCatalogItem>
     suspend fun updateUserExercise(item: ExerciseCatalogItem): FoundationResult<ExerciseCatalogItem>
     suspend fun archiveUserExercise(id: FoundationId, now: Instant): FoundationResult<Unit>
+}
+
+interface LoggingConfigurationRepository {
+    suspend fun loggingConfiguration(id: LoggingConfigurationId): LoggingConfiguration?
+    suspend fun loggingConfigurations(): List<LoggingConfiguration>
+    suspend fun saveLoggingConfiguration(configuration: LoggingConfiguration): FoundationResult<LoggingConfiguration>
+}
+
+interface UserExerciseConfigurationRepository {
+    suspend fun userExerciseConfiguration(exerciseDefinitionId: FoundationId): UserExerciseConfiguration?
+    suspend fun saveUserExerciseConfiguration(configuration: UserExerciseConfiguration): FoundationResult<UserExerciseConfiguration>
+    suspend fun clearUserExerciseConfiguration(exerciseDefinitionId: FoundationId): FoundationResult<Unit>
 }
 
 interface PreferencesRepository {

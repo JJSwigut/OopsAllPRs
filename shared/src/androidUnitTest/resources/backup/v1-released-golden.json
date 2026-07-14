@@ -1,0 +1,144 @@
+{
+  "formatVersion": 1,
+  "createdAt": 4000,
+  "deviceId": "released-v1-device",
+  "lastLocalRevision": "3000:1:1:1:0:2:false",
+  "appSchemaVersion": 10,
+  "summary": {
+    "workoutCount": 1,
+    "setCount": 1,
+    "routineCount": 1,
+    "customExerciseCount": 0,
+    "progressRecordCount": 2,
+    "hasActiveWorkout": false,
+    "latestWorkoutTimestamp": 2000,
+    "latestUpdatedTimestamp": 3000
+  },
+  "preferences": {
+    "weightUnit": "POUNDS",
+    "weightStepPounds": 5.0,
+    "weightStepKilograms": 2.5,
+    "defaultRestSeconds": 120,
+    "restSoundEnabled": true
+  },
+  "exercises": [
+    {
+      "id": "exercise-pull-up",
+      "canonicalName": "pull-up",
+      "displayName": "Pull-Up",
+      "muscleGroup": "Back",
+      "equipment": "Bodyweight",
+      "movementPattern": "Pull",
+      "exerciseType": "Bodyweight",
+      "experienceLevel": "Intermediate",
+      "bodyRegion": "Upper Body",
+      "isBodyweight": true,
+      "loggingMode": "BODYWEIGHT",
+      "isUserCreated": false,
+      "createdAt": 100,
+      "updatedAt": 100,
+      "archivedAt": null,
+      "sourceSeedVersion": "released-v1",
+      "userNotes": null
+    }
+  ],
+  "routines": [
+    {
+      "id": "routine-1",
+      "name": "Weighted Pull-Ups",
+      "exercises": [
+        {
+          "id": "routine-exercise-1",
+          "routineId": "routine-1",
+          "exerciseCatalogId": "exercise-pull-up",
+          "displayNameSnapshot": "Pull-Up",
+          "position": 0,
+          "plannedSets": [
+            {
+              "id": "routine-set-1",
+              "routineExerciseId": "routine-exercise-1",
+              "position": 0,
+              "targetWeightKg": 5.0,
+              "targetReps": 5,
+              "targetDurationMs": null,
+              "setKind": "BODYWEIGHT"
+            }
+          ],
+          "rest": { "durationSeconds": 120, "autoStart": true }
+        }
+      ],
+      "createdAt": 500,
+      "updatedAt": 500,
+      "sourceCompletedWorkoutId": null,
+      "archivedAt": null
+    }
+  ],
+  "activeWorkout": null,
+  "activeSession": null,
+  "activeUxSession": null,
+  "activeSetDrafts": [],
+  "completedWorkouts": [
+    {
+      "id": "completed-1",
+      "sourceActiveWorkoutId": "active-source-1",
+      "startedAt": 1000,
+      "finishedAt": 2000,
+      "durationMs": 1000,
+      "routineId": null,
+      "exercises": [
+        {
+          "id": "completed-exercise-1",
+          "completedWorkoutId": "completed-1",
+          "exerciseCatalogId": "exercise-pull-up",
+          "displayNameSnapshot": "Pull-Up",
+          "position": 0,
+          "loggedSets": [
+            {
+              "id": "completed-set-1",
+              "exerciseInstanceId": "completed-exercise-1",
+              "position": 0,
+              "setKind": "BODYWEIGHT",
+              "weightKg": 10.0,
+              "reps": 8,
+              "durationMs": null,
+              "loggedAt": 1500,
+              "createdAt": 1400,
+              "updatedAt": 1500,
+              "editedAt": null
+            }
+          ],
+          "rest": { "durationSeconds": 120, "autoStart": true }
+        }
+      ],
+      "createdAt": 2000
+    }
+  ],
+  "personalRecords": [
+    {
+      "id": "record-1",
+      "exerciseCatalogId": "exercise-pull-up",
+      "recordKind": "BODYWEIGHT_REPS",
+      "reps": 8,
+      "weightKg": 10.0,
+      "value": 8.0,
+      "sourceWorkoutId": "completed-1",
+      "sourceSetId": "completed-set-1",
+      "achievedAt": 1500,
+      "createdAt": 3000
+    }
+  ],
+  "progressPoints": [
+    {
+      "id": "point-1",
+      "exerciseCatalogId": "exercise-pull-up",
+      "sourceWorkoutId": "completed-1",
+      "sourceSetId": "completed-set-1",
+      "metric": "BODYWEIGHT_REPS",
+      "value": 8.0,
+      "weightKg": 10.0,
+      "reps": 8,
+      "recordedAt": 1500
+    }
+  ],
+  "exportMetadata": []
+}

@@ -2,6 +2,7 @@ package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressMetric
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.successValue
@@ -39,7 +40,7 @@ class ProgressChartStateHolderTest {
         holder.refresh()
         holder.selectExercise(exerciseId)
 
-        assertEquals(ProgressMetric.ESTIMATED_ONE_REP_MAX, holder.state.value.selectedChartMetric)
+        assertEquals(ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX, holder.state.value.selectedChartMetric)
         assertEquals(listOf(FoundationId("point-e1rm")), holder.state.value.selectedExercise?.chart?.points?.map { it.pointId })
     }
 
@@ -58,12 +59,12 @@ class ProgressChartStateHolderTest {
 
         holder.refresh()
         holder.selectExercise(exerciseId)
-        holder.selectChartMetric(ProgressMetric.VOLUME)
+        holder.selectChartMetric(ProgressEvidenceMetric.VOLUME)
 
         val selected = holder.state.value.selectedExercise
         assertEquals(exerciseId, holder.state.value.selectedExerciseId)
-        assertEquals(ProgressMetric.VOLUME, holder.state.value.selectedChartMetric)
-        assertTrue(selected?.chart?.points.orEmpty().all { it.metric == ProgressMetric.VOLUME })
+        assertEquals(ProgressEvidenceMetric.VOLUME, holder.state.value.selectedChartMetric)
+        assertTrue(selected?.chart?.points.orEmpty().all { it.metric == ProgressEvidenceMetric.VOLUME })
         assertEquals(2, selected?.chart?.points?.size)
     }
 }

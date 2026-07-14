@@ -3,34 +3,49 @@ package com.jjswigut.oopsallprs.domain.usecase
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
-import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
-import com.jjswigut.oopsallprs.domain.model.ProgressMetric
+import com.jjswigut.oopsallprs.domain.model.ProgressDerivationVersions
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
-import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.WireCode
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
+import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class PersonalRecordDerivationUseCase(
-    private val progressRepository: ProgressRepository
+    private val progressRepository: ProgressRepository,
+    private val loggingConfigurationRepository: LoggingConfigurationRepository? =
+        progressRepository as? LoggingConfigurationRepository
 ) {
     suspend fun rebuildFrom(workouts: List<CompletedWorkout>) {
-        val points = workouts.flatMap { workout ->
-            workout.exercises.flatMap { exercise ->
-                exercise.loggedSets.flatMap { set ->
-                    set.toProgressPoints(
-                        exerciseCatalogId = exercise.exerciseCatalogId,
-                        sourceWorkoutId = workout.id,
-                        fallbackRecordedAt = workout.finishedAt
-                    )
+        val configurationCache = mutableMapOf<LoggingConfigurationId, LoggingConfiguration?>()
+        val points = mutableListOf<ProgressPoint>()
+        for (workout in workouts) {
+            for (exercise in workout.exercises) {
+                for (set in exercise.loggedSets) {
+                    val configuration = configurationCache.getOrPutSuspending(set.captureConfigurationId) {
+                        resolveConfiguration(set.captureConfigurationId)
+                    } ?: continue
+                    points += SetProgressEvidenceDerivation.derive(set, configuration).map { evidence ->
+                        evidence.toProgressPoint(
+                            exerciseCatalogId = exercise.exerciseCatalogId,
+                            sourceWorkoutId = workout.id,
+                            fallbackRecordedAt = workout.finishedAt
+                        )
+                    }
                 }
             }
         }
 
         val weightedRecords = points
-            .filter { it.metric == ProgressMetric.BEST_SET }
+            .filter { it.metricCode == ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode }
             .groupBy { it.exerciseCatalogId }
             .values
             .flatMap { exercisePoints ->
@@ -41,140 +56,134 @@ class PersonalRecordDerivationUseCase(
                     )
                 }
             }
-            .mapNotNull { point -> point.toPersonalRecord(PersonalRecordKind.WEIGHT_FOR_REPS) }
+            .mapNotNull { it.toPersonalRecord() }
 
         val scalarRecords = points
-            .filter { it.metric != ProgressMetric.BEST_SET }
-            .groupBy { point -> point.recordBucket() }
-            .mapNotNull { (bucket, values) ->
-                values.maxByOrNull { it.value }?.toPersonalRecord(bucket.kind)
-            }
+            .filter { it.metricCode != ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode }
+            .groupBy { it.recordBucket() }
+            .mapNotNull { (_, values) -> values.maxByOrNull(ProgressPoint::value)?.toPersonalRecord() }
 
         progressRepository.replaceRecords(weightedRecords + scalarRecords, points)
     }
 
-    private fun ProgressPoint.toPersonalRecord(kind: PersonalRecordKind): PersonalRecord? {
+    private suspend fun resolveConfiguration(id: LoggingConfigurationId): LoggingConfiguration? =
+        loggingConfigurationRepository?.loggingConfiguration(id)
+            ?: LegacyLoggingConfigurations.all.firstOrNull { it.id == id }
+
+    private fun ProgressPoint.toPersonalRecord(): PersonalRecord? {
         val recordSourceSetId = sourceSetId ?: return null
+        val evidenceMetric = ProgressEvidenceMetric.fromWireCode(metricCode.value) ?: return null
         return PersonalRecord(
             id = newFoundationId("pr"),
             exerciseCatalogId = exerciseCatalogId,
-            recordKind = kind,
+            recordKind = evidenceMetric.legacyRecordKind,
             reps = reps,
             weight = weight,
             value = value,
             sourceWorkoutId = sourceWorkoutId,
             sourceSetId = recordSourceSetId,
             achievedAt = recordedAt,
-            createdAt = Clock.System.now()
+            createdAt = Clock.System.now(),
+            metricCode = metricCode,
+            derivationVersion = derivationVersion
         )
     }
 
-    private fun ExerciseSet.toProgressPoints(
+    private fun ProgressPoint.recordBucket(): RecordBucket =
+        RecordBucket(exerciseId = exerciseCatalogId, metricCode = metricCode)
+
+    private data class RecordBucket(
+        val exerciseId: FoundationId,
+        val metricCode: WireCode
+    )
+}
+
+internal data class DerivedSetEvidence(
+    val metric: ProgressEvidenceMetric,
+    val value: Double,
+    val sourceSet: ExerciseSet
+) {
+    fun toProgressPoint(
         exerciseCatalogId: FoundationId,
         sourceWorkoutId: FoundationId,
         fallbackRecordedAt: Instant
-    ): List<ProgressPoint> {
-        val recordedAt = loggedAt ?: fallbackRecordedAt
-        return when (setKind) {
-            SetKind.BODYWEIGHT -> listOfNotNull(
-                reps?.let { repCount ->
-                    progressPoint(
-                        exerciseCatalogId = exerciseCatalogId,
-                        sourceWorkoutId = sourceWorkoutId,
-                        metric = ProgressMetric.BODYWEIGHT_REPS,
-                        value = repCount.toDouble(),
-                        recordedAt = recordedAt
-                    )
-                }
-            )
-            SetKind.TIMED -> listOfNotNull(
-                durationMs?.takeIf { it > 0L }?.let { duration ->
-                    progressPoint(
-                        exerciseCatalogId = exerciseCatalogId,
-                        sourceWorkoutId = sourceWorkoutId,
-                        metric = ProgressMetric.TIME,
-                        value = duration.toDouble(),
-                        recordedAt = recordedAt
-                    )
-                }
-            )
-            SetKind.WEIGHTED -> {
-                val loggedWeight = weight
-                val repCount = reps
-                if (loggedWeight == null || repCount == null || repCount <= 0) {
-                    emptyList()
-                } else {
-                    listOf(
-                        progressPoint(
-                            exerciseCatalogId = exerciseCatalogId,
-                            sourceWorkoutId = sourceWorkoutId,
-                            metric = ProgressMetric.BEST_SET,
-                            value = loggedWeight.value,
-                            recordedAt = recordedAt
-                        ),
-                        progressPoint(
-                            exerciseCatalogId = exerciseCatalogId,
-                            sourceWorkoutId = sourceWorkoutId,
-                            metric = ProgressMetric.ESTIMATED_ONE_REP_MAX,
-                            value = loggedWeight.value * (1.0 + repCount.toDouble() / 30.0),
-                            recordedAt = recordedAt
-                        ),
-                        progressPoint(
-                            exerciseCatalogId = exerciseCatalogId,
-                            sourceWorkoutId = sourceWorkoutId,
-                            metric = ProgressMetric.VOLUME,
-                            value = loggedWeight.value * repCount.toDouble(),
-                            recordedAt = recordedAt
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    private fun ExerciseSet.progressPoint(
-        exerciseCatalogId: FoundationId,
-        sourceWorkoutId: FoundationId,
-        metric: ProgressMetric,
-        value: Double,
-        recordedAt: Instant
     ): ProgressPoint =
         ProgressPoint(
             id = newFoundationId("progress"),
             exerciseCatalogId = exerciseCatalogId,
             sourceWorkoutId = sourceWorkoutId,
-            sourceSetId = id,
-            metric = metric,
+            sourceSetId = sourceSet.id,
+            metric = metric.legacyProgressMetric,
             value = value,
-            weight = weight,
-            reps = reps,
-            recordedAt = recordedAt
+            weight = sourceSet.weight,
+            reps = sourceSet.reps,
+            recordedAt = sourceSet.loggedAt ?: fallbackRecordedAt,
+            metricCode = metric.wireCode,
+            derivationVersion = ProgressDerivationVersions.CURRENT
         )
+}
 
-    private fun ProgressPoint.recordBucket(): RecordBucket {
-        val kind = when (metric) {
-            ProgressMetric.BEST_SET -> PersonalRecordKind.WEIGHT_FOR_REPS
-            ProgressMetric.BODYWEIGHT_REPS -> PersonalRecordKind.BODYWEIGHT_REPS
-            ProgressMetric.ESTIMATED_ONE_REP_MAX -> PersonalRecordKind.ESTIMATED_ONE_REP_MAX
-            ProgressMetric.VOLUME -> PersonalRecordKind.VOLUME
-            ProgressMetric.TIME -> PersonalRecordKind.TIME
+internal object SetProgressEvidenceDerivation {
+    fun derive(set: ExerciseSet, configuration: LoggingConfiguration): List<DerivedSetEvidence> {
+        require(set.captureConfigurationId == configuration.id) {
+            "Set capture configuration does not match derivation configuration"
         }
-        return RecordBucket(
-            exerciseId = exerciseCatalogId,
-            kind = kind,
-            reps = when (kind) {
-                PersonalRecordKind.WEIGHT_FOR_REPS,
-                PersonalRecordKind.BODYWEIGHT_REPS -> reps
-                PersonalRecordKind.ESTIMATED_ONE_REP_MAX,
-                PersonalRecordKind.VOLUME,
-                PersonalRecordKind.TIME -> null
-            }
-        )
-    }
 
-    private data class RecordBucket(
-        val exerciseId: FoundationId,
-        val kind: PersonalRecordKind,
-        val reps: Int?
-    )
+        val evidence = mutableListOf<DerivedSetEvidence>()
+        val repetitionsEnabled = configuration.measures.any { it.kind == MeasureKind.REPETITIONS }
+        val repetitions = set.reps?.takeIf { repetitionsEnabled && it > 0 }
+        val loadSpec = configuration.measures.firstOrNull { it.kind == MeasureKind.LOAD }
+        val load = set.weight
+        val derivesLoadedPerformance = repetitions != null && load != null && when (loadSpec?.loadRole) {
+            LoadRole.EXTERNAL_RESISTANCE -> true
+            LoadRole.ADDED_TO_BODYWEIGHT -> load.value > 0.0
+            LoadRole.ASSISTANCE,
+            LoadRole.LEGACY_UNSPECIFIED,
+            null -> false
+        }
+
+        if (derivesLoadedPerformance) {
+            val repCount = requireNotNull(repetitions)
+            val loadValue = requireNotNull(load).value
+            evidence += DerivedSetEvidence(ProgressEvidenceMetric.WEIGHT_FOR_REPS, loadValue, set)
+            evidence += DerivedSetEvidence(
+                ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX,
+                loadValue * (1.0 + repCount.toDouble() / 30.0),
+                set
+            )
+            evidence += DerivedSetEvidence(
+                ProgressEvidenceMetric.VOLUME,
+                loadValue * repCount.toDouble(),
+                set
+            )
+        } else if (repetitions != null) {
+            evidence += DerivedSetEvidence(ProgressEvidenceMetric.REPS, repetitions.toDouble(), set)
+        }
+
+        if (configuration.measures.any { it.kind == MeasureKind.DURATION }) {
+            set.durationMs?.takeIf { it > 0L }?.let { duration ->
+                evidence += DerivedSetEvidence(
+                    ProgressEvidenceMetric.LONGEST_DURATION,
+                    duration.toDouble(),
+                    set
+                )
+            }
+        }
+
+        if (configuration.measures.any { it.kind == MeasureKind.DISTANCE }) {
+            set.distanceMeters?.takeIf { it.isFinite() && it > 0.0 }?.let { distance ->
+                evidence += DerivedSetEvidence(ProgressEvidenceMetric.LONGEST_DISTANCE, distance, set)
+            }
+        }
+
+        return evidence
+    }
+}
+
+internal suspend fun <K, V> MutableMap<K, V>.getOrPutSuspending(
+    key: K,
+    defaultValue: suspend () -> V
+): V {
+    if (containsKey(key)) return getValue(key)
+    return defaultValue().also { put(key, it) }
 }

@@ -1,5 +1,11 @@
 package com.jjswigut.oopsallprs.data.repository
 
+import com.jjswigut.oopsallprs.data.export.EXPORT_FORMAT_VERSION
+import com.jjswigut.oopsallprs.data.export.durationExportLabel
+import com.jjswigut.oopsallprs.data.export.exportDurationMillis
+import com.jjswigut.oopsallprs.data.export.exportValueLabel
+import com.jjswigut.oopsallprs.data.export.loadRoleCode
+import com.jjswigut.oopsallprs.data.export.rpeExportValue
 import com.jjswigut.oopsallprs.domain.model.ActiveExercise
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
@@ -7,6 +13,8 @@ import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
 import com.jjswigut.oopsallprs.domain.model.CompletedExercise
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem
+import com.jjswigut.oopsallprs.domain.model.ExerciseDefinitionOrigin
+import com.jjswigut.oopsallprs.domain.model.ExerciseDefinitionRevision
 import com.jjswigut.oopsallprs.domain.model.ExerciseSeedImport
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.ExportFile
@@ -15,6 +23,9 @@ import com.jjswigut.oopsallprs.domain.model.ExportType
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
@@ -23,6 +34,7 @@ import com.jjswigut.oopsallprs.domain.model.RestConfiguration
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightStepPreference
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.domain.model.UserExerciseConfiguration
 import com.jjswigut.oopsallprs.domain.model.canonicalExerciseName
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
@@ -33,10 +45,12 @@ import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
+import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
 import com.jjswigut.oopsallprs.domain.repository.SessionRepository
 import com.jjswigut.oopsallprs.domain.repository.SetLedgerRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
+import com.jjswigut.oopsallprs.domain.repository.UserExerciseConfigurationRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.datetime.Clock
 
@@ -47,6 +61,8 @@ class InMemoryFoundationStore :
     SetLedgerRepository,
     RoutineRepository,
     ExerciseRepository,
+    LoggingConfigurationRepository,
+    UserExerciseConfigurationRepository,
     PreferencesRepository,
     FullAccessRepository,
     ProgressRepository,
@@ -56,6 +72,10 @@ class InMemoryFoundationStore :
     private val completedWorkouts = linkedMapOf<FoundationId, CompletedWorkout>()
     private val routines = linkedMapOf<FoundationId, ReusableRoutine>()
     private val exercises = linkedMapOf<String, ExerciseCatalogItem>()
+    private val loggingConfigurationById = linkedMapOf<LoggingConfigurationId, LoggingConfiguration>().apply {
+        LegacyLoggingConfigurations.all.forEach { put(it.id, it) }
+    }
+    private val userExerciseConfigurations = linkedMapOf<FoundationId, UserExerciseConfiguration>()
     private val seedImports = linkedMapOf<FoundationId, ExerciseSeedImport>()
     private val records = mutableListOf<PersonalRecord>()
     private val points = mutableListOf<ProgressPoint>()
@@ -160,7 +180,11 @@ class InMemoryFoundationStore :
     }
 
     override suspend fun confirmSet(workoutId: FoundationId, set: ExerciseSet): FoundationResult<ExerciseSet> {
-        set.validateForLogging()?.let { return foundationFailure(it) }
+        val captureConfiguration = loggingConfigurationById[set.captureConfigurationId]
+            ?: return foundationFailure(
+                FoundationError.Validation("Unknown logging configuration: ${set.captureConfigurationId}")
+            )
+        set.validateForLogging(captureConfiguration)?.let { return foundationFailure(it) }
         val workout = activeWorkouts[workoutId]
             ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $workoutId"))
         val updated = workout.copy(exercises = workout.exercises.replaceSet(set), updatedAt = set.updatedAt)
@@ -241,12 +265,32 @@ class InMemoryFoundationStore :
         import: ExerciseSeedImport
     ): FoundationResult<ExerciseSeedImport> {
         items.forEach { item ->
+            immutableConfigurationConflict(item.defaultLoggingConfiguration)?.let {
+                return foundationFailure(it)
+            }
+        }
+        items.forEach { item ->
+            loggingConfigurationById[item.defaultLoggingConfiguration.id] = item.defaultLoggingConfiguration
             val existing = exercises[item.canonicalName]
             if (existing == null || !existing.isUserCreated) {
                 exercises[item.canonicalName] = if (existing == null) {
-                    item
+                    item.copy(
+                        isUserCreated = false,
+                        origin = ExerciseDefinitionOrigin.SEED
+                    )
                 } else {
-                    item.copy(id = existing.id, createdAt = existing.createdAt)
+                    item.copy(
+                        id = existing.id,
+                        isUserCreated = false,
+                        createdAt = existing.createdAt,
+                        origin = ExerciseDefinitionOrigin.SEED,
+                        seedKey = existing.seedKey ?: item.seedKey,
+                        definitionRevision = if (existing.hasSameDefinitionContent(item)) {
+                            existing.definitionRevision
+                        } else {
+                            ExerciseDefinitionRevision(existing.definitionRevision.value + 1L)
+                        }
+                    )
                 }
             }
         }
@@ -259,7 +303,14 @@ class InMemoryFoundationStore :
         if (existing != null && existing.archivedAt == null && existing.id != item.id && existing.isUserCreated) {
             return foundationFailure(FoundationError.Validation("Exercise already exists"))
         }
-        exercises[item.canonicalName] = item.copy(isUserCreated = true, sourceSeedVersion = null)
+        immutableConfigurationConflict(item.defaultLoggingConfiguration)?.let { return foundationFailure(it) }
+        loggingConfigurationById[item.defaultLoggingConfiguration.id] = item.defaultLoggingConfiguration
+        exercises[item.canonicalName] = item.copy(
+            isUserCreated = true,
+            sourceSeedVersion = null,
+            origin = ExerciseDefinitionOrigin.USER,
+            seedKey = null
+        )
         return foundationSuccess(exercises.getValue(item.canonicalName))
     }
 
@@ -273,11 +324,20 @@ class InMemoryFoundationStore :
         if (canonicalOwner != null && canonicalOwner.archivedAt == null && canonicalOwner.id != item.id && canonicalOwner.isUserCreated) {
             return foundationFailure(FoundationError.Validation("Exercise already exists"))
         }
+        immutableConfigurationConflict(item.defaultLoggingConfiguration)?.let { return foundationFailure(it) }
+        loggingConfigurationById[item.defaultLoggingConfiguration.id] = item.defaultLoggingConfiguration
         exercises.entries.removeAll { it.value.id == item.id }
         exercises[item.canonicalName] = item.copy(
             isUserCreated = true,
             createdAt = existing.createdAt,
-            sourceSeedVersion = null
+            sourceSeedVersion = null,
+            origin = ExerciseDefinitionOrigin.USER,
+            seedKey = null,
+            definitionRevision = if (existing.hasSameDefinitionContent(item)) {
+                existing.definitionRevision
+            } else {
+                ExerciseDefinitionRevision(existing.definitionRevision.value + 1L)
+            }
         )
         return foundationSuccess(exercises.getValue(item.canonicalName))
     }
@@ -290,6 +350,47 @@ class InMemoryFoundationStore :
         }
         exercises.entries.removeAll { it.value.id == id }
         exercises[existing.canonicalName] = existing.copy(archivedAt = now, updatedAt = now)
+        return foundationSuccess(Unit)
+    }
+
+    override suspend fun loggingConfiguration(id: LoggingConfigurationId): LoggingConfiguration? =
+        loggingConfigurationById[id]
+
+    override suspend fun loggingConfigurations(): List<LoggingConfiguration> =
+        loggingConfigurationById.values.toList()
+
+    override suspend fun saveLoggingConfiguration(
+        configuration: LoggingConfiguration
+    ): FoundationResult<LoggingConfiguration> {
+        immutableConfigurationConflict(configuration)?.let { return foundationFailure(it) }
+        loggingConfigurationById[configuration.id] = configuration
+        return foundationSuccess(configuration)
+    }
+
+    override suspend fun userExerciseConfiguration(exerciseDefinitionId: FoundationId): UserExerciseConfiguration? =
+        userExerciseConfigurations[exerciseDefinitionId]
+
+    override suspend fun saveUserExerciseConfiguration(
+        configuration: UserExerciseConfiguration
+    ): FoundationResult<UserExerciseConfiguration> {
+        val definition = exercises.values.firstOrNull {
+            it.id == configuration.exerciseDefinitionId && it.archivedAt == null
+        } ?: return foundationFailure(
+            FoundationError.NotFound("Exercise not found: ${configuration.exerciseDefinitionId}")
+        )
+        if (configuration.basedOnDefinitionRevision != definition.definitionRevision) {
+            return foundationFailure(
+                FoundationError.Conflict("Exercise definition changed before its default could be saved")
+            )
+        }
+        immutableConfigurationConflict(configuration.configuration)?.let { return foundationFailure(it) }
+        loggingConfigurationById[configuration.configuration.id] = configuration.configuration
+        userExerciseConfigurations[configuration.exerciseDefinitionId] = configuration
+        return foundationSuccess(configuration)
+    }
+
+    override suspend fun clearUserExerciseConfiguration(exerciseDefinitionId: FoundationId): FoundationResult<Unit> {
+        userExerciseConfigurations.remove(exerciseDefinitionId)
         return foundationSuccess(Unit)
     }
 
@@ -368,7 +469,13 @@ class InMemoryFoundationStore :
                             set.durationMs?.toString().orEmpty(),
                             set.durationMs.durationExportLabel(),
                             set.setKind.name,
-                            set.loggedAt?.toString().orEmpty()
+                            set.loggedAt?.toString().orEmpty(),
+                            set.captureConfigurationId.value,
+                            set.distanceMeters?.toString().orEmpty(),
+                            set.observedEffort?.rpeTenths.rpeExportValue(),
+                            set.observedEffort?.rir?.toString().orEmpty(),
+                            set.observedEffort?.failureOutcome?.wireCode?.value.orEmpty(),
+                            loggingConfigurationById[set.captureConfigurationId]?.loadRoleCode().orEmpty()
                         )
                     }
                 }
@@ -379,30 +486,48 @@ class InMemoryFoundationStore :
                     record.recordKind.name,
                     record.reps?.toString().orEmpty(),
                     record.weight?.displayValue(unit)?.toString().orEmpty(),
-                    record.value.takeIf { record.recordKind.name == "TIME" }?.toLong()?.toString().orEmpty(),
+                    record.exportDurationMillis(),
                     record.value.toString(),
                     record.exportValueLabel(unit),
                     record.sourceWorkoutId.value,
-                    record.sourceSetId.value
+                    record.sourceSetId.value,
+                    record.metricCode.value,
+                    record.derivationVersion.toString()
                 )
             }
             ExportType.EXERCISES -> exercises.values.map { item ->
-                listOf(item.displayName, item.muscleGroup, item.equipment, item.exerciseType, item.loggingMode.name, item.isUserCreated.toString())
+                listOf(
+                    item.displayName, item.muscleGroup, item.equipment, item.exerciseType,
+                    item.loggingMode.name, item.isUserCreated.toString(),
+                    item.defaultLoggingConfiguration.id.value,
+                    item.defaultLoggingConfiguration.loadRoleCode()
+                )
             }
             ExportType.ROUTINES -> routines.values.map { routine ->
-                listOf(routine.id.value, routine.name, routine.exercises.size.toString())
+                listOf(
+                    routine.id.value,
+                    routine.name,
+                    routine.exercises.size.toString(),
+                    routine.exercises.map { it.resolvedLoggingConfiguration.configuration.id.value }.distinct().joinToString("|"),
+                    routine.exercises.flatMap { it.plannedSets }.mapNotNull { it.targetDistanceMeters }.joinToString("|"),
+                    routine.exercises.flatMap { it.plannedSets }.mapNotNull { (it.effortTarget as? com.jjswigut.oopsallprs.domain.model.EffortTarget.Rpe)?.rpeTenths }.joinToString("|") { it.rpeExportValue() },
+                    routine.exercises.flatMap { it.plannedSets }.mapNotNull { (it.effortTarget as? com.jjswigut.oopsallprs.domain.model.EffortTarget.Rir)?.rir }.joinToString("|"),
+                    "",
+                    routine.exercises.map { it.resolvedLoggingConfiguration.configuration.loadRoleCode() }.filter { it.isNotEmpty() }.distinct().joinToString("|"),
+                    routine.exercises.flatMap { it.plannedSets }.mapNotNull { it.effortTarget?.kind?.wireCode?.value }.joinToString("|")
+                )
             }
         }
         val header = when (type) {
-            ExportType.WORKOUTS -> listOf("workout_id", "exercise", "reps", "weight", "duration_ms", "duration_label", "kind", "logged_at")
-            ExportType.PERSONAL_RECORDS -> listOf("exercise_id", "kind", "reps", "weight", "duration_ms", "value", "value_label", "source_workout_id", "source_set_id")
-            ExportType.EXERCISES -> listOf("exercise", "muscle_group", "equipment", "type", "logging_mode", "user_created")
-            ExportType.ROUTINES -> listOf("routine_id", "name", "exercise_count")
+            ExportType.WORKOUTS -> listOf("workout_id", "exercise", "reps", "weight", "duration_ms", "duration_label", "kind", "logged_at", "config_id", "distance_m", "rpe", "rir", "failure_outcome", "load_role")
+            ExportType.PERSONAL_RECORDS -> listOf("exercise_id", "kind", "reps", "weight", "duration_ms", "value", "value_label", "source_workout_id", "source_set_id", "metric_code", "derivation_version")
+            ExportType.EXERCISES -> listOf("exercise", "muscle_group", "equipment", "type", "logging_mode", "user_created", "config_id", "load_role")
+            ExportType.ROUTINES -> listOf("routine_id", "name", "exercise_count", "config_id", "distance_m", "rpe", "rir", "failure_outcome", "load_role", "effort_target")
         }
         val csv = (listOf(header) + rows).joinToString("\n") { row -> row.joinToString(",") { it.csvEscaped() } }
         return foundationSuccess(
             ExportFile(
-                snapshot = ExportSnapshot(newFoundationId("export"), type, now, unit, rows.size),
+                snapshot = ExportSnapshot(newFoundationId("export"), type, now, unit, rows.size, EXPORT_FORMAT_VERSION),
                 fileName = "${type.name.lowercase()}-${now.toEpochMilliseconds()}.csv",
                 content = csv
             )
@@ -421,6 +546,29 @@ class InMemoryFoundationStore :
             }
         }
 
+    private fun immutableConfigurationConflict(configuration: LoggingConfiguration): FoundationError? {
+        val existing = loggingConfigurationById[configuration.id] ?: return null
+        return if (existing == configuration) {
+            null
+        } else {
+            FoundationError.Conflict("Logging configuration IDs are immutable: ${configuration.id}")
+        }
+    }
+
+    private fun ExerciseCatalogItem.hasSameDefinitionContent(other: ExerciseCatalogItem): Boolean =
+        canonicalName == other.canonicalName &&
+            displayName == other.displayName &&
+            muscleGroup == other.muscleGroup &&
+            equipment == other.equipment &&
+            movementPattern == other.movementPattern &&
+            exerciseType == other.exerciseType &&
+            experienceLevel == other.experienceLevel &&
+            bodyRegion == other.bodyRegion &&
+            isBodyweight == other.isBodyweight &&
+            loggingMode == other.loggingMode &&
+            seedKey == other.seedKey &&
+            defaultLoggingConfiguration == other.defaultLoggingConfiguration
+
     private fun String.csvEscaped(): String =
         if (contains(',') || contains('"') || contains('\n')) {
             "\"" + replace("\"", "\"\"") + "\""
@@ -428,30 +576,4 @@ class InMemoryFoundationStore :
             this
         }
 
-    private fun Long?.durationExportLabel(): String {
-        val totalSeconds = (((this ?: 0L).coerceAtLeast(0L)) / 1_000L)
-        val hours = totalSeconds / 3_600L
-        val minutes = (totalSeconds % 3_600L) / 60L
-        val seconds = totalSeconds % 60L
-        return if (this == null) {
-            ""
-        } else if (hours > 0) {
-            "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
-        } else {
-            "$minutes:${seconds.toString().padStart(2, '0')}"
-        }
-    }
-
-    private fun PersonalRecord.exportValueLabel(unit: WeightUnit): String =
-        when (recordKind) {
-            com.jjswigut.oopsallprs.domain.model.PersonalRecordKind.WEIGHT_FOR_REPS -> {
-                val weightLabel = weight?.displayValue(unit)?.toString() ?: value.toString()
-                val repsLabel = reps?.let { " x $it" }.orEmpty()
-                "$weightLabel ${unit.name.lowercase()}$repsLabel"
-            }
-            com.jjswigut.oopsallprs.domain.model.PersonalRecordKind.BODYWEIGHT_REPS -> "${reps ?: value.toInt()} reps"
-            com.jjswigut.oopsallprs.domain.model.PersonalRecordKind.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).displayValue(unit)} ${unit.name.lowercase()}"
-            com.jjswigut.oopsallprs.domain.model.PersonalRecordKind.VOLUME -> "${WeightKg(value).displayValue(unit)} ${unit.name.lowercase()} volume"
-            com.jjswigut.oopsallprs.domain.model.PersonalRecordKind.TIME -> value.toLong().durationExportLabel()
-        }
 }

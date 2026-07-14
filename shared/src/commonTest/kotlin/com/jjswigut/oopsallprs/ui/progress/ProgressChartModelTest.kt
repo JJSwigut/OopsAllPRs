@@ -2,6 +2,7 @@ package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressMetric
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import kotlin.test.Test
@@ -45,7 +46,7 @@ class ProgressChartModelTest {
             weightUnit = WeightUnit.POUNDS
         )
 
-        assertEquals(ProgressMetric.BEST_SET, state.selectedMetric)
+        assertEquals(ProgressEvidenceMetric.WEIGHT_FOR_REPS, state.selectedMetric)
         assertEquals(1, state.points.size)
         assertEquals(record.id, state.points.single().sourceRecordId)
         assertTrue(state.latestValueLabel.orEmpty().contains("lb"))
@@ -78,7 +79,7 @@ class ProgressChartModelTest {
             points = listOf(later, tiedB, tiedA),
             records = emptyList(),
             exerciseCatalogId = exerciseId,
-            selectedMetric = ProgressMetric.BEST_SET,
+            selectedMetric = ProgressEvidenceMetric.WEIGHT_FOR_REPS,
             weightUnit = WeightUnit.KILOGRAMS
         )
 
@@ -120,11 +121,11 @@ class ProgressChartModelTest {
             points = listOf(weighted, bodyweight),
             records = listOf(record),
             exerciseCatalogId = exerciseId,
-            selectedMetric = ProgressMetric.BODYWEIGHT_REPS,
+            selectedMetric = ProgressEvidenceMetric.REPS,
             weightUnit = WeightUnit.POUNDS
         )
 
-        assertEquals(ProgressMetric.BODYWEIGHT_REPS, state.selectedMetric)
+        assertEquals(ProgressEvidenceMetric.REPS, state.selectedMetric)
         assertEquals(listOf(FoundationId("point-reps")), state.points.map { it.pointId })
         assertEquals("12 reps", state.points.single().valueLabel)
         assertEquals(FoundationId("pr-reps"), assertNotNull(state.points.single().sourceRecordId))

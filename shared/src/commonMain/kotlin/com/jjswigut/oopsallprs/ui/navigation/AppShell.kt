@@ -236,8 +236,20 @@ fun AppShell(
                     onDraftWeightChange = { exerciseId, weight ->
                         scope.launch { appState.activeWorkout.updateDraftWeight(exerciseId, weight) }
                     },
+                    onDraftWeightInputChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftWeightInput(exerciseId, update) }
+                    },
                     onDraftDurationChange = { exerciseId, durationMs ->
                         scope.launch { appState.activeWorkout.updateDraftDuration(exerciseId, durationMs) }
+                    },
+                    onDraftDistanceChange = { exerciseId, distanceMeters ->
+                        scope.launch { appState.activeWorkout.updateDraftDistance(exerciseId, distanceMeters) }
+                    },
+                    onDraftDistanceInputChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftDistanceInput(exerciseId, update) }
+                    },
+                    onDraftEffortChange = { exerciseId, update ->
+                        scope.launch { appState.activeWorkout.updateDraftEffort(exerciseId, update) }
                     },
                     onDraftTimerToggle = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleDraftTimer(exerciseId) }
@@ -245,7 +257,11 @@ fun AppShell(
                     onBeginEditSet = { setId -> appState.activeWorkout.beginEditSet(setId) },
                     onEditRepsChange = { reps -> appState.activeWorkout.updateEditReps(reps) },
                     onEditWeightChange = { weight -> appState.activeWorkout.updateEditWeight(weight) },
+                    onEditWeightInputChange = { update -> appState.activeWorkout.updateEditWeightInput(update) },
                     onEditDurationChange = { durationMs -> appState.activeWorkout.updateEditDuration(durationMs) },
+                    onEditDistanceChange = { distanceMeters -> appState.activeWorkout.updateEditDistance(distanceMeters) },
+                    onEditDistanceInputChange = { update -> appState.activeWorkout.updateEditDistanceInput(update) },
+                    onEditEffortChange = { update -> appState.activeWorkout.updateEditEffort(update) },
                     onSaveEditedSet = {
                         scope.launch { appState.activeWorkout.confirmEditSet() }
                     },
@@ -317,6 +333,18 @@ fun AppShell(
                     },
                     onToggleExerciseRest = { exerciseId ->
                         scope.launch { appState.activeWorkout.toggleExerciseRest(exerciseId) }
+                    },
+                    onTrackAddedWeightChange = { exerciseId, enabled ->
+                        scope.launch { appState.activeWorkout.setBodyweightAddedLoad(exerciseId, enabled) }
+                    },
+                    onTrackEffortChange = { exerciseId, enabled ->
+                        scope.launch { appState.activeWorkout.setTrackEffort(exerciseId, enabled) }
+                    },
+                    onEffortKindChange = { exerciseId, effortKind ->
+                        scope.launch { appState.activeWorkout.setEffortKind(exerciseId, effortKind) }
+                    },
+                    onSaveConfigurationAsDefault = { exerciseId ->
+                        scope.launch { appState.activeWorkout.saveActiveConfigurationAsDefault(exerciseId) }
                     },
                     onGroupCircuit = { exerciseIds ->
                         scope.launch { appState.activeWorkout.groupExercisesAsCircuit(exerciseIds) }

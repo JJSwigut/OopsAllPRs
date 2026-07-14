@@ -5,6 +5,8 @@ import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.seedExerciseCatalog
 import com.jjswigut.oopsallprs.testing.successValue
 import com.jjswigut.oopsallprs.testing.workoutWithLoggedWeightedSet
+import com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem
+import com.jjswigut.oopsallprs.domain.model.FoundationId
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -52,14 +54,20 @@ class BackupPackageCodecTest {
 
         val decoded = BackupPackageCodec().decode(releasedV1).successValue()
 
-        assertEquals(BACKUP_FORMAT_VERSION, decoded.formatVersion)
+        assertEquals(BACKUP_FORMAT_VERSION_V1, decoded.formatVersion)
         assertEquals(8, decoded.appSchemaVersion)
     }
 
     @Test
     fun backupPackageRoundTripsAsPlainJson() = runTest {
         val harness = FoundationHarness()
-        harness.seedExerciseCatalog()
+        harness.store.saveUserExercise(
+            ExerciseCatalogItem(
+                FoundationId("exercise-bench"), "bench press", "Bench Press", "Chest", "Barbell", "Push",
+                "Strength", "Beginner", "Upper Body", false, isUserCreated = true,
+                createdAt = instant(100), updatedAt = instant(100)
+            )
+        ).successValue()
         val workoutId = harness.workoutWithLoggedWeightedSet()
         harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
         val reader = BackupSnapshotReader(
@@ -83,5 +91,13 @@ class BackupPackageCodecTest {
         assertEquals(pkg.lastLocalRevision, decoded.lastLocalRevision)
         assertEquals(pkg.summary.workoutCount, decoded.summary.workoutCount)
         assertEquals("test-device", decoded.deviceId)
+    }
+
+    @Test
+    fun rawFormatVersionIsInspectedBeforeTypedDecode() {
+        val result = BackupPackageCodec().decode("""{"formatVersion":99}""")
+
+        assertTrue(result is com.jjswigut.oopsallprs.domain.model.FoundationResult.Failure)
+        assertTrue((result as com.jjswigut.oopsallprs.domain.model.FoundationResult.Failure).error.message.contains("newer"))
     }
 }

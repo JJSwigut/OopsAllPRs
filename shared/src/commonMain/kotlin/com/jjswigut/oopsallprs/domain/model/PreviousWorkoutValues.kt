@@ -8,6 +8,7 @@ data class PreviousWorkoutValue(
     val weight: WeightKg?,
     val reps: Int?,
     val durationMs: Long? = null,
+    val distanceMeters: Double? = null,
     val sourceCompletedWorkoutId: FoundationId,
     val sourceSetId: FoundationId
 )

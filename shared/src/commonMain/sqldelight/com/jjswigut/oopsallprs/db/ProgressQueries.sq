@@ -2,8 +2,12 @@ deletePersonalRecords:
 DELETE FROM personal_records;
 
 insertPersonalRecord:
-INSERT OR REPLACE INTO personal_records(id, exercise_catalog_id, record_kind, reps, weight_kg, value, source_workout_id, source_set_id, achieved_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO personal_records(
+    id, exercise_catalog_id, record_kind, reps, weight_kg, value,
+    source_workout_id, source_set_id, achieved_at, created_at,
+    metric_code, derivation_version
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectPersonalRecords:
 SELECT * FROM personal_records
@@ -13,8 +17,11 @@ deleteProgressPoints:
 DELETE FROM progress_points;
 
 insertProgressPoint:
-INSERT OR REPLACE INTO progress_points(id, exercise_catalog_id, source_workout_id, source_set_id, metric, value, weight_kg, reps, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO progress_points(
+    id, exercise_catalog_id, source_workout_id, source_set_id, metric, value,
+    weight_kg, reps, recorded_at, metric_code, derivation_version
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectProgressPoints:
 SELECT * FROM progress_points

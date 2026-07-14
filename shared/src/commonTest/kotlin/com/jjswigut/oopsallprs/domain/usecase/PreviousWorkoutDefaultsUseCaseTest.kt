@@ -5,6 +5,13 @@ import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
+import com.jjswigut.oopsallprs.domain.model.LoggingSchemaVersion
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
+import com.jjswigut.oopsallprs.domain.model.MeasureRequirement
+import com.jjswigut.oopsallprs.domain.model.MeasureSpec
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
@@ -155,6 +162,84 @@ class PreviousWorkoutDefaultsUseCaseTest {
 
         assertNull(value)
     }
+
+    @Test
+    fun ambiguousLegacyBodyweightLoadIsNotPrefilledAsModernAddedLoad() = runTest {
+        val harness = FoundationHarness()
+        val defaults = PreviousWorkoutDefaultsUseCase(harness.store, harness.store)
+        harness.store.finishWorkout(
+            completedWorkout(
+                id = "legacy-bodyweight-load",
+                exerciseId = harness.bodyweightReference.exerciseCatalogId,
+                finishedAtMs = 2_000,
+                sets = listOf(
+                    loggedSet(
+                        "legacy-loaded-pullup",
+                        kind = SetKind.BODYWEIGHT,
+                        reps = 8,
+                        weight = WeightKg(20.0)
+                    )
+                )
+            )
+        ).successValue()
+        val modernAddedLoad = LoggingConfiguration(
+            id = LoggingConfigurationId("modern-added-bodyweight-v1"),
+            schemaVersion = LoggingSchemaVersion(1),
+            measures = listOf(
+                MeasureSpec(MeasureKind.REPETITIONS, MeasureRequirement.REQUIRED),
+                MeasureSpec(MeasureKind.LOAD, MeasureRequirement.OPTIONAL, LoadRole.ADDED_TO_BODYWEIGHT)
+            )
+        )
+
+        val value = defaults.valueFor(
+            exerciseCatalogId = harness.bodyweightReference.exerciseCatalogId,
+            isBodyweight = true,
+            setIndex = 0,
+            loggingConfiguration = modernAddedLoad
+        )
+
+        assertEquals(8, value?.reps)
+        assertNull(value?.weight)
+    }
+
+    @Test
+    fun exactDistanceCaptureRecoversDistanceWithoutReps() = runTest {
+        val harness = FoundationHarness()
+        val defaults = PreviousWorkoutDefaultsUseCase(harness.store, harness.store)
+        val distance = LoggingConfiguration(
+            id = LoggingConfigurationId("distance-default-v1"),
+            schemaVersion = LoggingSchemaVersion(1),
+            measures = listOf(MeasureSpec(MeasureKind.DISTANCE, MeasureRequirement.REQUIRED))
+        )
+        harness.store.saveLoggingConfiguration(distance).successValue()
+        harness.store.finishWorkout(
+            completedWorkout(
+                id = "distance-history",
+                exerciseId = harness.bodyweightReference.exerciseCatalogId,
+                finishedAtMs = 2_000,
+                sets = listOf(
+                    loggedSet(
+                        id = "distance-set",
+                        kind = SetKind.BODYWEIGHT,
+                        reps = null,
+                        weight = null,
+                        distanceMeters = 400.0,
+                        captureConfigurationId = distance.id
+                    )
+                )
+            )
+        ).successValue()
+
+        val value = defaults.valueFor(
+            exerciseCatalogId = harness.bodyweightReference.exerciseCatalogId,
+            isBodyweight = true,
+            setIndex = 0,
+            loggingConfiguration = distance
+        )
+
+        assertNull(value?.reps)
+        assertEquals(400.0, value?.distanceMeters)
+    }
 }
 
 private fun completedWorkout(
@@ -191,9 +276,11 @@ private fun loggedSet(
     kind: SetKind = SetKind.WEIGHTED,
     reps: Int?,
     weight: WeightKg?,
-    durationMs: Long? = null
-): ExerciseSet =
-    ExerciseSet(
+    durationMs: Long? = null,
+    distanceMeters: Double? = null,
+    captureConfigurationId: LoggingConfigurationId? = null
+): ExerciseSet {
+    val set = ExerciseSet(
         id = FoundationId(id),
         exerciseInstanceId = FoundationId("active-exercise"),
         position = OrderedPosition(position),
@@ -203,5 +290,8 @@ private fun loggedSet(
         loggedAt = instant(1_500L + position),
         createdAt = instant(1_400L + position),
         updatedAt = instant(1_500L + position),
-        durationMs = durationMs
+        durationMs = durationMs,
+        distanceMeters = distanceMeters
     )
+    return captureConfigurationId?.let { set.copy(captureConfigurationId = it) } ?: set
+}

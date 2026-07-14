@@ -155,6 +155,94 @@ class LoggingConfiguration(
             "observedEffort=$observedEffort)"
 }
 
+object LegacyLoggingConfigurations {
+    val weighted: LoggingConfiguration = LoggingConfiguration(
+        id = LoggingConfigurationId("legacy_weighted_v1"),
+        schemaVersion = LoggingSchemaVersion(1),
+        measures = listOf(
+            MeasureSpec(MeasureKind.REPETITIONS, MeasureRequirement.REQUIRED),
+            MeasureSpec(
+                kind = MeasureKind.LOAD,
+                requirement = MeasureRequirement.REQUIRED,
+                loadRole = LoadRole.EXTERNAL_RESISTANCE
+            )
+        )
+    )
+    val bodyweight: LoggingConfiguration = LoggingConfiguration(
+        id = LoggingConfigurationId("legacy_bodyweight_v1"),
+        schemaVersion = LoggingSchemaVersion(1),
+        measures = listOf(MeasureSpec(MeasureKind.REPETITIONS, MeasureRequirement.REQUIRED))
+    )
+    val timed: LoggingConfiguration = LoggingConfiguration(
+        id = LoggingConfigurationId("legacy_timed_v1"),
+        schemaVersion = LoggingSchemaVersion(1),
+        measures = listOf(MeasureSpec(MeasureKind.DURATION, MeasureRequirement.REQUIRED))
+    )
+
+    /** Preserves old bodyweight rows with load without assigning modern added-load semantics. */
+    val bodyweightWithUnspecifiedLoad: LoggingConfiguration = LoggingConfiguration(
+        id = LoggingConfigurationId("legacy_bodyweight_unspecified_load_v1"),
+        schemaVersion = LoggingSchemaVersion(1),
+        measures = listOf(
+            MeasureSpec(MeasureKind.REPETITIONS, MeasureRequirement.REQUIRED),
+            MeasureSpec(
+                kind = MeasureKind.LOAD,
+                requirement = MeasureRequirement.OPTIONAL,
+                loadRole = LoadRole.LEGACY_UNSPECIFIED
+            )
+        )
+    )
+
+    val all: List<LoggingConfiguration> = listOf(
+        weighted,
+        bodyweight,
+        timed,
+        bodyweightWithUnspecifiedLoad
+    )
+
+    fun from(mode: ExerciseLoggingMode): LoggingConfiguration =
+        when (mode) {
+            ExerciseLoggingMode.WEIGHTED -> weighted
+            ExerciseLoggingMode.BODYWEIGHT -> bodyweight
+            ExerciseLoggingMode.TIMED -> timed
+        }
+
+    fun from(setKind: SetKind, hasLegacyLoad: Boolean = false): LoggingConfiguration =
+        when (setKind) {
+            SetKind.WEIGHTED -> weighted
+            SetKind.BODYWEIGHT -> if (hasLegacyLoad) bodyweightWithUnspecifiedLoad else bodyweight
+            SetKind.TIMED -> timed
+        }
+
+    fun modeFor(configurationId: LoggingConfigurationId): ExerciseLoggingMode? =
+        when (configurationId) {
+            weighted.id -> ExerciseLoggingMode.WEIGHTED
+            bodyweight.id, bodyweightWithUnspecifiedLoad.id -> ExerciseLoggingMode.BODYWEIGHT
+            timed.id -> ExerciseLoggingMode.TIMED
+            else -> null
+        }
+
+    fun setKindFor(configurationId: LoggingConfigurationId): SetKind? =
+        when (configurationId) {
+            weighted.id -> SetKind.WEIGHTED
+            bodyweight.id, bodyweightWithUnspecifiedLoad.id -> SetKind.BODYWEIGHT
+            timed.id -> SetKind.TIMED
+            else -> null
+        }
+}
+
+fun ExerciseLoggingMode.toLegacyLoggingConfiguration(): LoggingConfiguration =
+    LegacyLoggingConfigurations.from(this)
+
+fun SetKind.toLegacyLoggingConfiguration(hasLegacyLoad: Boolean = false): LoggingConfiguration =
+    LegacyLoggingConfigurations.from(this, hasLegacyLoad)
+
+fun LoggingConfiguration.toLegacyExerciseLoggingModeOrNull(): ExerciseLoggingMode? =
+    LegacyLoggingConfigurations.modeFor(id)
+
+fun LoggingConfiguration.toLegacySetKindOrNull(): SetKind? =
+    LegacyLoggingConfigurations.setKindFor(id)
+
 enum class LoggingConfigurationSource(code: String) : WireCoded {
     DEFINITION_DEFAULT("definition_default"),
     USER_DEFAULT("user_default"),
@@ -175,6 +263,21 @@ data class ResolvedLoggingConfiguration(
 )
 
 object LoggingConfigurationResolver {
+    fun resolve(
+        definition: ExerciseCatalogItem,
+        userDefault: UserExerciseConfiguration? = null,
+        workoutOverride: LoggingConfiguration? = null
+    ): ResolvedLoggingConfiguration {
+        require(userDefault == null || userDefault.exerciseDefinitionId == definition.id) {
+            "User exercise configuration does not belong to definition ${definition.id}"
+        }
+        return resolve(
+            definitionDefault = definition.defaultLoggingConfiguration,
+            userDefault = userDefault?.configuration,
+            workoutOverride = workoutOverride
+        )
+    }
+
     fun resolve(
         definitionDefault: LoggingConfiguration,
         userDefault: LoggingConfiguration? = null,

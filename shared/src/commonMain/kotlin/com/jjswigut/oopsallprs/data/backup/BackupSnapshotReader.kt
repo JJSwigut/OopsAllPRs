@@ -10,11 +10,13 @@ import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
+import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
 import com.jjswigut.oopsallprs.domain.repository.SessionRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
+import com.jjswigut.oopsallprs.domain.repository.UserExerciseConfigurationRepository
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -26,6 +28,14 @@ class BackupSnapshotReader(
     private val exercises: ExerciseRepository,
     private val preferences: PreferencesRepository,
     private val progress: ProgressRepository,
+    private val loggingConfigurations: LoggingConfigurationRepository =
+        requireNotNull(exercises as? LoggingConfigurationRepository) {
+            "Backup snapshots require logging-configuration access"
+        },
+    private val userExerciseConfigurations: UserExerciseConfigurationRepository =
+        requireNotNull(exercises as? UserExerciseConfigurationRepository) {
+            "Backup snapshots require user exercise-configuration access"
+        },
     private val deviceId: String = "local-device",
     private val schemaVersion: Int = WorkoutDatabase.Schema.version.toInt(),
     private val revisionCalculator: LocalRevisionCalculator = LocalRevisionCalculator()
@@ -38,6 +48,10 @@ class BackupSnapshotReader(
         val completed = workouts.completedWorkouts()
         val routines = routines.routines()
         val exercises = exercises.all()
+        val configurations = loggingConfigurations.loggingConfigurations().sortedBy { it.id.value }
+        val userConfigurations = exercises.mapNotNull { exercise ->
+            userExerciseConfigurations.userExerciseConfiguration(exercise.id)
+        }.sortedBy { it.exerciseDefinitionId.value }
         val records = progress.personalRecords()
         val points = progress.progressPoints()
         val summary = summary(
@@ -64,6 +78,8 @@ class BackupSnapshotReader(
                     defaultRestSeconds = preferences.defaultRestSeconds(),
                     restSoundEnabled = preferences.restSoundEnabled()
                 ),
+                loggingConfigurations = configurations.map { it.toDto() },
+                userExerciseConfigurations = userConfigurations.map { it.toDto() },
                 exercises = exercises.map { it.toDto() },
                 routines = routines.map { it.toDto() },
                 activeWorkout = activeWorkout?.toDto(),

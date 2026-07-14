@@ -8,13 +8,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.jjswigut.oopsallprs.domain.model.FoundationId
-import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ds.component.FitCard
 import com.jjswigut.oopsallprs.ds.foundation.pressable
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
+import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
 
 @Composable
 fun ExerciseBlock(
@@ -135,10 +136,9 @@ private fun ExerciseBlockContent(
                 verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
             ) {
                 FoundationMutedText(block.loggedRows.size.setsLabel())
-                FoundationText(
-                    text = "Settings",
-                    style = FitTheme.type.caption.copy(color = FitTheme.colors.accent),
-                    modifier = Modifier.pressable(onClick = { onSettings(block.exerciseInstanceId) })
+                FoundationTextAction(
+                    label = "Settings",
+                    onClick = { onSettings(block.exerciseInstanceId) }
                 )
             }
         }
@@ -168,10 +168,13 @@ private fun ExerciseBlockGroupState.groupSummary(): String? {
 private fun ExerciseBlockState.subtitle(showGroupSummary: Boolean): String =
     listOfNotNull(
         groupSummary().takeIf { showGroupSummary },
-        when (loggingMode) {
-            ExerciseLoggingMode.TIMED -> "Timed"
-            ExerciseLoggingMode.BODYWEIGHT -> "Bodyweight"
-            ExerciseLoggingMode.WEIGHTED -> "Weighted"
+        loggingConfiguration.measures.joinToString(" + ") { measure ->
+            when (measure.kind) {
+                MeasureKind.REPETITIONS -> "Reps"
+                MeasureKind.LOAD -> "Load"
+                MeasureKind.DURATION -> "Time"
+                MeasureKind.DISTANCE -> "Distance"
+            }
         }
     ).joinToString(" • ")
 

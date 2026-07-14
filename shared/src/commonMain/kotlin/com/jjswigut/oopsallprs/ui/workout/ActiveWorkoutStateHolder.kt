@@ -3,11 +3,18 @@ package com.jjswigut.oopsallprs.ui.workout
 import com.jjswigut.oopsallprs.domain.model.ActivePrFeedback
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkoutUxSession
+import com.jjswigut.oopsallprs.domain.model.Effort
+import com.jjswigut.oopsallprs.domain.model.EffortKind
 import com.jjswigut.oopsallprs.domain.model.ExerciseReference
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationSource
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.RestConfiguration
@@ -17,6 +24,7 @@ import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
+import com.jjswigut.oopsallprs.domain.usecase.ExerciseLoggingConfigurationUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
 import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
 import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
@@ -44,10 +52,13 @@ class ActiveWorkoutStateHolder(
     private val lifecycle: WorkoutLifecycleUseCases,
     private val activeUx: ActiveWorkoutUxRepository? = null,
     private val activePrFeedback: ActivePrFeedbackUseCase? = null,
-    private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null
+    private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null,
+    private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null
 ) {
     private val drafts = linkedMapOf<FoundationId, SetRowDraft>()
     private val prFeedbackBySetId = linkedMapOf<FoundationId, ActivePrFeedback>()
+    private val configurations = linkedMapOf<LoggingConfigurationId, LoggingConfiguration>()
+    private val saveDefaultExerciseIds = linkedSetOf<FoundationId>()
     private var activeWorkoutId: FoundationId? = null
     private var focus: ActiveWorkoutFocus? = null
 
@@ -66,7 +77,9 @@ class ActiveWorkoutStateHolder(
             return
         }
 
+        hydrateConfigurations(workout)
         hydrateDrafts(workout)
+        hydrateConfigurationPreferences(workout)
         focus = restoredFocus ?: activeUx?.loadUxSession(workoutId)?.toFocus()
         val session = lifecycle.restoreActiveSession(now)?.takeIf { it.activeWorkoutId == workoutId }
         publish(workout, now, session)
@@ -92,16 +105,21 @@ class ActiveWorkoutStateHolder(
                     exerciseCatalogId = result.value.reference.exerciseCatalogId,
                     isBodyweight = result.value.reference.isBodyweight,
                     loggingMode = result.value.reference.loggingMode,
-                    setIndex = 0
+                    setIndex = 0,
+                    loggingConfiguration = result.value.resolvedLoggingConfiguration.configuration
                 )?.let { previous ->
                     drafts[result.value.id] = SetRowDraft(
                         draftId = draftId,
                         exerciseInstanceId = result.value.id,
                         position = OrderedPosition(0),
-                        setKind = result.value.reference.loggingMode.defaultSetKind(),
+                        setKind = result.value.resolvedLoggingConfiguration.configuration
+                            .legacySetKind(result.value.reference.isBodyweight),
+                        captureConfigurationId = result.value.resolvedLoggingConfiguration.configuration.id,
+                        loggingConfiguration = result.value.resolvedLoggingConfiguration.configuration,
                         reps = previous.reps,
                         weight = previous.weight,
-                        durationMs = previous.durationMs
+                        durationMs = previous.durationMs,
+                        distanceMeters = previous.distanceMeters
                     )
                 }
                 focus = ActiveWorkoutFocus(
@@ -191,9 +209,11 @@ class ActiveWorkoutStateHolder(
             activeWorkoutId = workoutId,
             exerciseInstanceId = exerciseInstanceId,
             setKind = draft.setKind,
-            reps = draft.reps ?: 0,
+            reps = draft.reps,
             weight = draft.weight,
-            durationMs = draft.effectiveDurationMs().takeIf { draft.setKind == SetKind.TIMED },
+            durationMs = draft.effectiveDurationMs(),
+            distanceMeters = draft.distanceMeters,
+            observedEffort = draft.observedEffort,
             position = draft.position.value,
             loggedAt = loggedAt
         )
@@ -237,12 +257,92 @@ class ActiveWorkoutStateHolder(
     }
 
     suspend fun updateDraftWeight(exerciseInstanceId: FoundationId, weight: WeightKg?) {
-        updateDraft(exerciseInstanceId) { it.copy(weight = weight, inlineError = null) }
+        updateDraft(exerciseInstanceId) {
+            it.copy(weight = weight, weightInput = null, inputError = null, inlineError = null)
+        }
+    }
+
+    suspend fun updateDraftWeightInput(exerciseInstanceId: FoundationId, update: MeasureInputUpdate<WeightKg>) {
+        updateDraft(exerciseInstanceId) {
+            it.copy(
+                weight = update.value,
+                weightInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
     }
 
     suspend fun updateDraftDuration(exerciseInstanceId: FoundationId, durationMs: Long?) {
         updateDraft(exerciseInstanceId) {
-            it.copy(durationMs = durationMs?.coerceAtLeast(0L), timerStartedAt = null, previewDurationMs = null, inlineError = null)
+            it.copy(
+                durationMs = durationMs?.coerceAtLeast(0L),
+                timerStartedAt = null,
+                previewDurationMs = null,
+                inlineError = null
+            )
+        }
+    }
+
+    suspend fun updateDraftDistance(exerciseInstanceId: FoundationId, distanceMeters: Double?) {
+        updateDraft(exerciseInstanceId) {
+            it.copy(distanceMeters = distanceMeters, distanceInput = null, inputError = null, inlineError = null)
+        }
+    }
+
+    suspend fun updateDraftDistanceInput(exerciseInstanceId: FoundationId, update: MeasureInputUpdate<Double>) {
+        updateDraft(exerciseInstanceId) {
+            it.copy(
+                distanceMeters = update.value,
+                distanceInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
+    }
+
+    suspend fun updateDraftEffort(exerciseInstanceId: FoundationId, update: MeasureInputUpdate<Effort>) {
+        updateDraft(exerciseInstanceId) {
+            it.copy(
+                observedEffort = update.value,
+                effortInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
+    }
+
+    suspend fun setBodyweightAddedLoad(exerciseInstanceId: FoundationId, enabled: Boolean): FoundationResult<Unit> =
+        updateLoggingConfiguration(exerciseInstanceId) { workoutId, management ->
+            management.setBodyweightAddedLoad(workoutId, exerciseInstanceId, enabled)
+        }
+
+    suspend fun setTrackEffort(exerciseInstanceId: FoundationId, enabled: Boolean): FoundationResult<Unit> {
+        val block = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }
+            ?: return foundationFailure(FoundationError.NotFound("Exercise not found: $exerciseInstanceId"))
+        val kinds = if (enabled) listOf(block.effortKind ?: EffortKind.RIR) else emptyList()
+        return setEffortKind(exerciseInstanceId, kinds.firstOrNull())
+    }
+
+    suspend fun setEffortKind(exerciseInstanceId: FoundationId, effortKind: EffortKind?): FoundationResult<Unit> =
+        updateLoggingConfiguration(exerciseInstanceId) { workoutId, management ->
+            management.setObservedEffort(workoutId, exerciseInstanceId, listOfNotNull(effortKind))
+        }
+
+    suspend fun saveActiveConfigurationAsDefault(exerciseInstanceId: FoundationId): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val management = configurationManagement
+            ?: return foundationFailure(FoundationError.Persistence("Exercise logging configuration is unavailable"))
+        return when (val result = management.saveActiveConfigurationAsDefault(workoutId, exerciseInstanceId)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                lifecycle.activeWorkout(workoutId)?.let { hydrate(workoutId, focus) }
+                foundationSuccess(Unit)
+            }
         }
     }
 
@@ -370,6 +470,13 @@ class ActiveWorkoutStateHolder(
             candidate.loggedRows.firstOrNull { it.setId == setId }?.let { row -> candidate to row }
         } ?: return
         val (exercise, row) = block
+        val configuration = row.loggingConfiguration
+        if (configuration == null) {
+            _state.value = _state.value.copy(
+                errorMessage = "This set's logging configuration is unavailable, so it cannot be edited"
+            )
+            return
+        }
         _state.value = _state.value.copy(
             editDraft = LoggedSetEditDraft(
                 setId = row.setId,
@@ -379,9 +486,13 @@ class ActiveWorkoutStateHolder(
                     exerciseInstanceId = exercise.exerciseInstanceId,
                     position = row.position,
                     setKind = row.setKind,
+                    captureConfigurationId = row.captureConfigurationId,
+                    loggingConfiguration = configuration,
                     reps = row.reps,
                     weight = row.weight,
-                    durationMs = row.durationMs
+                    durationMs = row.durationMs,
+                    distanceMeters = row.distanceMeters,
+                    observedEffort = row.observedEffort
                 )
             ),
             isDiscardConfirmationVisible = false,
@@ -399,11 +510,50 @@ class ActiveWorkoutStateHolder(
     }
 
     fun updateEditWeight(weight: WeightKg?) {
-        updateEditDraft { it.copy(weight = weight, inlineError = null) }
+        updateEditDraft { it.copy(weight = weight, weightInput = null, inputError = null, inlineError = null) }
+    }
+
+    fun updateEditWeightInput(update: MeasureInputUpdate<WeightKg>) {
+        updateEditDraft {
+            it.copy(
+                weight = update.value,
+                weightInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
     }
 
     fun updateEditDuration(durationMs: Long?) {
         updateEditDraft { it.copy(durationMs = durationMs?.coerceAtLeast(0L), inlineError = null) }
+    }
+
+    fun updateEditDistance(distanceMeters: Double?) {
+        updateEditDraft {
+            it.copy(distanceMeters = distanceMeters, distanceInput = null, inputError = null, inlineError = null)
+        }
+    }
+
+    fun updateEditDistanceInput(update: MeasureInputUpdate<Double>) {
+        updateEditDraft {
+            it.copy(
+                distanceMeters = update.value,
+                distanceInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
+    }
+
+    fun updateEditEffort(update: MeasureInputUpdate<Effort>) {
+        updateEditDraft {
+            it.copy(
+                observedEffort = update.value,
+                effortInput = update.rawValue,
+                inputError = update.errorMessage,
+                inlineError = null
+            )
+        }
     }
 
     suspend fun confirmEditSet(now: Instant = Clock.System.now()): FoundationResult<ExerciseSet> {
@@ -425,9 +575,11 @@ class ActiveWorkoutStateHolder(
             val result = setLogging.editLoggedSet(
                 activeWorkoutId = workoutId,
                 setId = edit.setId,
-                reps = edit.rowDraft.reps ?: 0,
+                reps = edit.rowDraft.reps,
                 weight = edit.rowDraft.weight,
-                durationMs = edit.rowDraft.effectiveDurationMs().takeIf { edit.rowDraft.setKind == SetKind.TIMED },
+                durationMs = edit.rowDraft.effectiveDurationMs(),
+                distanceMeters = edit.rowDraft.distanceMeters,
+                observedEffort = edit.rowDraft.observedEffort,
                 now = now
             )
         ) {
@@ -567,7 +719,14 @@ class ActiveWorkoutStateHolder(
         persisted
             .filter { it.exerciseInstanceId in validExerciseIds }
             .forEach { draft ->
-                drafts[draft.exerciseInstanceId] = draft.toRowDraft()
+                val configuration = configurationFor(draft.captureConfigurationId)
+                if (configuration == null) {
+                    _state.value = _state.value.copy(
+                        errorMessage = "Saved draft configuration is unavailable; the exercise was reset to its current logger"
+                    )
+                } else {
+                    drafts[draft.exerciseInstanceId] = draft.toRowDraft(configuration)
+                }
             }
         drafts.entries.removeAll { it.key !in validExerciseIds }
     }
@@ -604,18 +763,36 @@ class ActiveWorkoutStateHolder(
         _state.value = _state.value.copy(editDraft = edit.copy(rowDraft = transform(edit.rowDraft)))
     }
 
-    private fun validateDraft(draft: SetRowDraft): FoundationError? =
-        when {
-            draft.setKind == SetKind.TIMED && (draft.effectiveDurationMs() == null || draft.effectiveDurationMs()!! <= 0L) -> FoundationError.Validation("Timed sets require a positive duration")
-            draft.setKind != SetKind.TIMED && (draft.reps == null || draft.reps <= 0) -> FoundationError.Validation("Logged sets require positive reps")
-            draft.setKind == SetKind.WEIGHTED && draft.weight == null -> FoundationError.Validation("Weighted sets require a weight")
-            draft.setKind == SetKind.WEIGHTED && draft.weight != null && draft.weight.value < 0.0 -> FoundationError.Validation("Weighted sets cannot have negative weight")
-            draft.setKind == SetKind.BODYWEIGHT && draft.weight != null && draft.weight.value < 0.0 -> FoundationError.Validation("Bodyweight added load cannot be negative")
-            else -> null
-        }
+    private fun validateDraft(draft: SetRowDraft): FoundationError? {
+        draft.inputError?.let { return FoundationError.Validation(it) }
+        return ExerciseSet(
+            id = draft.draftId,
+            exerciseInstanceId = draft.exerciseInstanceId,
+            position = draft.position,
+            setKind = draft.setKind,
+            weight = draft.weight,
+            reps = draft.reps,
+            durationMs = draft.effectiveDurationMs(),
+            captureConfigurationId = draft.captureConfigurationId,
+            distanceMeters = draft.distanceMeters,
+            observedEffort = draft.observedEffort,
+            loggedAt = null,
+            createdAt = Clock.System.now(),
+            updatedAt = Clock.System.now()
+        ).validateForLogging(draft.loggingConfiguration)
+    }
 
     private fun publish(workout: ActiveWorkout, now: Instant, activeSession: com.jjswigut.oopsallprs.domain.model.ActiveSessionState? = null) {
-        val view = workout.toView(drafts, focus, prFeedbackBySetId, activeSession, now, _state.value.errorMessage)
+        val view = workout.toView(
+            drafts = drafts,
+            focus = focus,
+            prFeedbackBySetId = prFeedbackBySetId,
+            activeSession = activeSession,
+            configurations = configurations,
+            saveDefaultExerciseIds = saveDefaultExerciseIds,
+            now = now,
+            errorMessage = _state.value.errorMessage
+        )
         view.exerciseBlocks.forEach { block ->
             if (!drafts.containsKey(block.exerciseInstanceId)) {
                 drafts[block.exerciseInstanceId] = block.draft
@@ -650,6 +827,9 @@ class ActiveWorkoutStateHolder(
                 weight = draft.weight,
                 durationMs = draft.durationMs,
                 timerStartedAt = draft.timerStartedAt,
+                captureConfigurationId = draft.captureConfigurationId,
+                distanceMeters = draft.distanceMeters,
+                observedEffort = draft.observedEffort,
                 updatedAt = now
             )
         )
@@ -711,25 +891,77 @@ class ActiveWorkoutStateHolder(
         return ActiveWorkoutFocus(exerciseId, draftId, updatedAt)
     }
 
-    private fun PersistedSetDraft.toRowDraft(): SetRowDraft =
+    private fun PersistedSetDraft.toRowDraft(configuration: LoggingConfiguration): SetRowDraft =
         SetRowDraft(
             draftId = draftId,
             exerciseInstanceId = exerciseInstanceId,
             position = position,
             setKind = setKind,
+            captureConfigurationId = captureConfigurationId,
+            loggingConfiguration = configuration,
             reps = reps,
             weight = weight,
             durationMs = durationMs,
+            distanceMeters = distanceMeters,
+            observedEffort = observedEffort,
             timerStartedAt = timerStartedAt
         )
-}
 
-private fun ExerciseLoggingMode.defaultSetKind(): SetKind =
-    when (this) {
-        ExerciseLoggingMode.BODYWEIGHT -> SetKind.BODYWEIGHT
-        ExerciseLoggingMode.TIMED -> SetKind.TIMED
-        ExerciseLoggingMode.WEIGHTED -> SetKind.WEIGHTED
+    private suspend fun hydrateConfigurations(workout: ActiveWorkout) {
+        configurations.clear()
+        workout.exercises.forEach { exercise ->
+            val active = exercise.resolvedLoggingConfiguration.configuration
+            configurations[active.id] = active
+            exercise.sets.map { it.captureConfigurationId }.distinct().forEach { id ->
+                configurationFor(id)
+            }
+        }
     }
+
+    private suspend fun configurationFor(id: LoggingConfigurationId): LoggingConfiguration? {
+        configurations[id]?.let { return it }
+        val resolved = configurationManagement?.loggingConfiguration(id)
+            ?: LegacyLoggingConfigurations.all.firstOrNull { it.id == id }
+            ?: return null
+        configurations[id] = resolved
+        return resolved
+    }
+
+    private suspend fun hydrateConfigurationPreferences(workout: ActiveWorkout) {
+        saveDefaultExerciseIds.clear()
+        val management = configurationManagement ?: return
+        workout.exercises.forEach { exercise ->
+            val result = management.activeConfigurationPreferenceState(workout.id, exercise.id)
+            if (
+                result is FoundationResult.Success &&
+                exercise.resolvedLoggingConfiguration.source == LoggingConfigurationSource.WORKOUT_OVERRIDE &&
+                !result.value.matchesSavedDefault
+            ) {
+                saveDefaultExerciseIds += exercise.id
+            }
+        }
+    }
+
+    private suspend fun updateLoggingConfiguration(
+        exerciseInstanceId: FoundationId,
+        update: suspend (FoundationId, ExerciseLoggingConfigurationUseCases) -> FoundationResult<*>
+    ): FoundationResult<Unit> {
+        val workoutId = activeWorkoutId
+            ?: return foundationFailure(FoundationError.Validation("No active workout loaded"))
+        val management = configurationManagement
+            ?: return foundationFailure(FoundationError.Persistence("Exercise logging configuration is unavailable"))
+        return when (val result = update(workoutId, management)) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(errorMessage = result.error.message)
+                foundationFailure(result.error)
+            }
+            is FoundationResult.Success -> {
+                hydrate(workoutId, focus)
+                foundationSuccess(Unit)
+            }
+        }
+    }
+}
 
 private fun ActiveWorkout.nextCircuitFocusAfter(
     exerciseInstanceId: FoundationId,

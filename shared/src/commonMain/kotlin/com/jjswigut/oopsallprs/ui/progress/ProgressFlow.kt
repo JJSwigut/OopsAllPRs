@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.jjswigut.oopsallprs.domain.model.FoundationId
-import com.jjswigut.oopsallprs.domain.model.ProgressMetric
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.ds.component.FitCard
 import com.jjswigut.oopsallprs.ds.component.FitLineChart
 import com.jjswigut.oopsallprs.ds.component.FitLineChartPoint
@@ -26,7 +26,7 @@ import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
 fun ProgressFlow(
     state: ProgressState,
     onSelectExercise: (FoundationId) -> Unit = {},
-    onChartMetricSelected: (ProgressMetric) -> Unit = {},
+    onChartMetricSelected: (ProgressEvidenceMetric) -> Unit = {},
     onBackFromExercise: () -> Unit = {},
     onOpenEvidence: (FoundationId) -> Unit = {},
     onCloseEvidence: () -> Unit = {},
@@ -134,7 +134,7 @@ private fun ExerciseGroupsCard(
 @Composable
 private fun ExerciseDetail(
     group: ProgressExerciseGroup,
-    onChartMetricSelected: (ProgressMetric) -> Unit,
+    onChartMetricSelected: (ProgressEvidenceMetric) -> Unit,
     onBack: () -> Unit,
     onOpenEvidence: (FoundationId) -> Unit
 ) {
@@ -187,7 +187,7 @@ private fun ExerciseDetail(
 @Composable
 private fun ProgressChartCard(
     chart: ProgressChartState,
-    onMetricSelected: (ProgressMetric) -> Unit
+    onMetricSelected: (ProgressEvidenceMetric) -> Unit
 ) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {

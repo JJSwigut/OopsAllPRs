@@ -6,7 +6,16 @@ import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.model.ActiveWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
+import com.jjswigut.oopsallprs.domain.model.Effort
+import com.jjswigut.oopsallprs.domain.model.EffortKind
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
+import com.jjswigut.oopsallprs.domain.model.LoadRole
+import com.jjswigut.oopsallprs.domain.model.LoggingConfiguration
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationSource
+import com.jjswigut.oopsallprs.domain.model.MeasureKind
+import com.jjswigut.oopsallprs.domain.model.MeasureRequirement
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
 import com.jjswigut.oopsallprs.domain.model.RestConfiguration
 import com.jjswigut.oopsallprs.domain.model.SetKind
@@ -31,12 +40,21 @@ enum class ActiveWorkoutPrimaryAction {
     RESUME_DRAFT
 }
 
+data class MeasureInputUpdate<T>(
+    val rawValue: String,
+    val value: T?,
+    val errorMessage: String? = null
+)
+
 data class ExerciseBlockState(
     val exerciseInstanceId: FoundationId,
     val exerciseCatalogId: FoundationId,
     val displayName: String,
     val isBodyweight: Boolean,
     val loggingMode: ExerciseLoggingMode,
+    val loggingConfiguration: LoggingConfiguration,
+    val loggingConfigurationSource: LoggingConfigurationSource,
+    val canSaveConfigurationAsDefault: Boolean = false,
     val groupId: FoundationId? = null,
     val groupLabel: String? = null,
     val groupRounds: Int? = null,
@@ -47,7 +65,15 @@ data class ExerciseBlockState(
     val draft: SetRowDraft,
     val prFeedback: ActivePrFeedback? = null,
     val inlineError: String? = null
-)
+) {
+    val tracksAddedWeight: Boolean
+        get() = loggingConfiguration.measures.any {
+            it.kind == MeasureKind.LOAD && it.loadRole == LoadRole.ADDED_TO_BODYWEIGHT
+        }
+
+    val effortKind: EffortKind?
+        get() = loggingConfiguration.observedEffort?.kinds?.firstOrNull()
+}
 
 internal data class ExerciseBlockGroupState(
     val blocks: List<ExerciseBlockState>
@@ -64,12 +90,20 @@ data class SetRowDraft(
     val exerciseInstanceId: FoundationId,
     val position: OrderedPosition,
     val setKind: SetKind,
+    val captureConfigurationId: LoggingConfigurationId = setKind.toFallbackConfiguration().id,
+    val loggingConfiguration: LoggingConfiguration = setKind.toFallbackConfiguration(),
     val reps: Int?,
     val weight: WeightKg?,
     val durationMs: Long? = null,
+    val distanceMeters: Double? = null,
+    val observedEffort: Effort? = null,
+    val weightInput: String? = null,
+    val distanceInput: String? = null,
+    val effortInput: String? = null,
     val timerStartedAt: Instant? = null,
     val previewDurationMs: Long? = null,
     val isPending: Boolean = false,
+    val inputError: String? = null,
     val inlineError: String? = null
 ) {
     val isTimerRunning: Boolean = timerStartedAt != null
@@ -81,9 +115,13 @@ data class LoggedSetRow(
     val setId: FoundationId,
     val position: OrderedPosition,
     val setKind: SetKind,
+    val captureConfigurationId: LoggingConfigurationId = setKind.toFallbackConfiguration().id,
+    val loggingConfiguration: LoggingConfiguration? = setKind.toFallbackConfiguration(),
     val reps: Int?,
     val weight: WeightKg?,
     val durationMs: Long? = null,
+    val distanceMeters: Double? = null,
+    val observedEffort: Effort? = null,
     val loggedAt: Instant,
     val editedAt: Instant? = null,
     val prFeedback: ActivePrFeedback? = null
@@ -115,11 +153,18 @@ fun ActiveWorkout.toView(
     focus: ActiveWorkoutFocus?,
     prFeedbackBySetId: Map<FoundationId, ActivePrFeedback> = emptyMap(),
     activeSession: ActiveSessionState? = null,
+    configurations: Map<LoggingConfigurationId, LoggingConfiguration> = emptyMap(),
+    saveDefaultExerciseIds: Set<FoundationId> = emptySet(),
     now: Instant? = null,
     errorMessage: String? = null
 ): ActiveWorkoutView {
     val blocks = exercises.sortedBy { it.position.value }.map { exercise ->
-        exercise.toBlock(drafts[exercise.id]?.withPreview(now), prFeedbackBySetId)
+        exercise.toBlock(
+            existingDraft = drafts[exercise.id]?.withPreview(now),
+            prFeedbackBySetId = prFeedbackBySetId,
+            configurations = configurations,
+            canSaveConfigurationAsDefault = exercise.id in saveDefaultExerciseIds
+        )
     }
     val resolvedFocus = focus?.let { candidate ->
         blocks.firstOrNull { it.exerciseInstanceId == candidate.exerciseInstanceId }?.let {
@@ -182,14 +227,33 @@ internal fun List<ExerciseBlockState>.toExerciseBlockGroups(): List<ExerciseBloc
 
 private fun ActiveExercise.toBlock(
     existingDraft: SetRowDraft?,
-    prFeedbackBySetId: Map<FoundationId, ActivePrFeedback>
+    prFeedbackBySetId: Map<FoundationId, ActivePrFeedback>,
+    configurations: Map<LoggingConfigurationId, LoggingConfiguration>,
+    canSaveConfigurationAsDefault: Boolean
 ): ExerciseBlockState {
+    val activeConfiguration = resolvedLoggingConfiguration.configuration
     val loggedRows = sets
         .filter { it.isLogged }
         .sortedBy { it.position.value }
         .mapNotNull { set ->
             set.loggedAt?.let { loggedAt ->
-                LoggedSetRow(set.id, set.position, set.setKind, set.reps, set.weight, set.durationMs, loggedAt, set.editedAt, prFeedbackBySetId[set.id])
+                val configuration = configurations[set.captureConfigurationId]
+                    ?: activeConfiguration.takeIf { it.id == set.captureConfigurationId }
+                LoggedSetRow(
+                    setId = set.id,
+                    position = set.position,
+                    setKind = set.setKind,
+                    captureConfigurationId = set.captureConfigurationId,
+                    loggingConfiguration = configuration,
+                    reps = set.reps,
+                    weight = set.weight,
+                    durationMs = set.durationMs,
+                    distanceMeters = set.distanceMeters,
+                    observedEffort = set.observedEffort,
+                    loggedAt = loggedAt,
+                    editedAt = set.editedAt,
+                    prFeedback = prFeedbackBySetId[set.id]
+                )
             }
         }
     val draft = existingDraft ?: defaultDraft(loggedRows)
@@ -199,10 +263,13 @@ private fun ActiveExercise.toBlock(
         displayName = reference.displayNameSnapshot,
         isBodyweight = reference.isBodyweight,
         loggingMode = reference.loggingMode,
+        loggingConfiguration = activeConfiguration,
+        loggingConfigurationSource = resolvedLoggingConfiguration.source,
+        canSaveConfigurationAsDefault = canSaveConfigurationAsDefault,
         groupId = groupContext?.groupId,
         groupLabel = groupContext?.label,
         groupRounds = groupContext?.rounds,
-        loadCalculatorKind = loadCalculatorKind(reference.equipmentSnapshot, draft.setKind),
+        loadCalculatorKind = loadCalculatorKind(reference.equipmentSnapshot, activeConfiguration),
         position = position,
         rest = rest,
         loggedRows = loggedRows,
@@ -227,23 +294,26 @@ private fun ActiveSessionState.toRestTimerView(now: Instant?): ActiveRestTimerVi
 private fun ActiveExercise.defaultDraft(loggedRows: List<LoggedSetRow>): SetRowDraft {
     val planned = sets.firstOrNull { !it.isLogged }
     val last = loggedRows.lastOrNull()
-    val kind = planned?.setKind ?: when (reference.loggingMode) {
-        ExerciseLoggingMode.BODYWEIGHT -> SetKind.BODYWEIGHT
-        ExerciseLoggingMode.TIMED -> SetKind.TIMED
-        ExerciseLoggingMode.WEIGHTED -> SetKind.WEIGHTED
-    }
+    val configuration = resolvedLoggingConfiguration.configuration
+    val enabledMeasures = configuration.measures.map { it.kind }.toSet()
+    val kind = configuration.legacySetKind(reference.isBodyweight)
+    val loadSpec = configuration.measures.firstOrNull { it.kind == MeasureKind.LOAD }
     return SetRowDraft(
         draftId = FoundationId("draft-${id.value}-${sets.size}"),
         exerciseInstanceId = id,
         position = planned?.position ?: OrderedPosition(loggedRows.size),
         setKind = kind,
-        reps = (planned?.reps ?: last?.reps ?: 5).takeIf { kind != SetKind.TIMED },
-        weight = when (kind) {
-            SetKind.BODYWEIGHT -> planned?.weight ?: last?.weight?.takeIf { it.value > 0.0 }
-            SetKind.WEIGHTED -> planned?.weight ?: last?.weight ?: WeightKg(0.0)
-            SetKind.TIMED -> null
+        captureConfigurationId = configuration.id,
+        loggingConfiguration = configuration,
+        reps = (planned?.reps ?: last?.reps ?: 5).takeIf { MeasureKind.REPETITIONS in enabledMeasures },
+        weight = when {
+            loadSpec == null -> null
+            loadSpec.requirement == MeasureRequirement.REQUIRED -> planned?.weight ?: last?.weight ?: WeightKg(0.0)
+            else -> (planned?.weight ?: last?.weight)?.takeIf { it.value > 0.0 }
         },
-        durationMs = (planned?.durationMs ?: last?.durationMs).takeIf { kind == SetKind.TIMED }
+        durationMs = (planned?.durationMs ?: last?.durationMs).takeIf { MeasureKind.DURATION in enabledMeasures },
+        distanceMeters = (planned?.distanceMeters ?: last?.distanceMeters).takeIf { MeasureKind.DISTANCE in enabledMeasures },
+        observedEffort = null
     )
 }
 
@@ -252,3 +322,13 @@ private fun SetRowDraft.withPreview(now: Instant?): SetRowDraft {
     val elapsed = now?.toEpochMilliseconds()?.minus(started.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L
     return copy(previewDurationMs = (durationMs ?: 0L) + elapsed)
 }
+
+internal fun LoggingConfiguration.legacySetKind(isBodyweight: Boolean): SetKind =
+    when {
+        measures.size == 1 && measures.single().kind == MeasureKind.DURATION -> SetKind.TIMED
+        isBodyweight -> SetKind.BODYWEIGHT
+        else -> SetKind.WEIGHTED
+    }
+
+private fun SetKind.toFallbackConfiguration(): LoggingConfiguration =
+    LegacyLoggingConfigurations.from(this)

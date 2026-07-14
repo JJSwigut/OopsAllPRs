@@ -2,6 +2,15 @@ insertActiveExercise:
 INSERT OR REPLACE INTO active_exercises(id, active_workout_id, exercise_catalog_id, display_name_snapshot, equipment_snapshot, is_bodyweight, position, logging_mode, group_id, group_position, group_label, group_rounds, rest_seconds, rest_auto_start)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+insertActiveExerciseWithLoggingConfiguration:
+INSERT OR REPLACE INTO active_exercises(
+    id, active_workout_id, exercise_catalog_id, display_name_snapshot,
+    equipment_snapshot, is_bodyweight, position, logging_mode, group_id,
+    group_position, group_label, group_rounds, rest_seconds, rest_auto_start,
+    logging_configuration_id
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
 selectActiveExercises:
 SELECT * FROM active_exercises
 WHERE active_workout_id = ?
@@ -10,6 +19,14 @@ ORDER BY position ASC;
 upsertExerciseSet:
 INSERT OR REPLACE INTO exercise_sets(id, workout_id, exercise_instance_id, position, set_kind, weight_kg, reps, duration_ms, logged_at, created_at, updated_at, edited_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+upsertExerciseSetWithLoggingConfiguration:
+INSERT OR REPLACE INTO exercise_sets(
+    id, workout_id, exercise_instance_id, position, set_kind, weight_kg, reps,
+    duration_ms, logged_at, created_at, updated_at, edited_at,
+    capture_configuration_id, distance_m, rpe_tenths, rir, failure_outcome
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectSetsForWorkout:
 SELECT * FROM exercise_sets

@@ -27,7 +27,7 @@ class ActiveWorkoutErrorTest {
         val block = holder.state.value.workout?.exerciseBlocks?.single()
         assertEquals(7, block?.draft?.reps)
         assertNull(block?.draft?.weight)
-        assertEquals("Weighted sets require a weight", block?.draft?.inlineError)
+        assertEquals("External resistance is required", block?.draft?.inlineError)
         assertEquals(0, block?.loggedRows?.size)
     }
 
@@ -46,7 +46,7 @@ class ActiveWorkoutErrorTest {
         val block = holder.state.value.workout?.exerciseBlocks?.single()
         assertEquals(0, block?.draft?.reps)
         assertNull(block?.draft?.weight)
-        assertEquals("Logged sets require positive reps", block?.draft?.inlineError)
+        assertEquals("Repetitions must be positive", block?.draft?.inlineError)
         assertEquals(0, block?.loggedRows?.size)
     }
 }
