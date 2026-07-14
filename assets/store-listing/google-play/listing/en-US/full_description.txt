@@ -1,0 +1,16 @@
+Turn every workout into a clear shot at your next personal record.
+
+Oops All PRs is a fast, focused strength-training logger built around the numbers that matter while you train. See previous values, log sets with fewer taps, and know when you beat a record.
+
+• Log weighted, bodyweight, timed, and assisted exercises
+• Build reusable workout routines
+• See previous workout values while logging
+• Use rest timers with optional notifications and sound
+• Review workout history and recent personal records
+• Add and manage your own exercises
+• Back up your training to a file you choose
+• Export workouts, routines, exercises, and PRs
+
+No account is required. Your workout data stays on your device unless you choose to export or back it up.
+
+Complete up to 10 workouts free. A one-time Lifetime Unlock removes the workout limit. No subscription.

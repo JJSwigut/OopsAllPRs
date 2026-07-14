@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalUriHandler
 import com.jjswigut.oopsallprs.AppState
 import com.jjswigut.oopsallprs.dev.DeveloperSeedState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
@@ -44,6 +45,7 @@ import com.jjswigut.oopsallprs.ui.exercise.ExerciseManagementFlow
 import com.jjswigut.oopsallprs.ui.exercise.ExercisePickerFlow
 import com.jjswigut.oopsallprs.ui.history.HistoryFlow
 import com.jjswigut.oopsallprs.ui.profile.ProfileFlow
+import com.jjswigut.oopsallprs.ui.profile.openPrivacyPolicy
 import com.jjswigut.oopsallprs.ui.progress.ProgressFlow
 import com.jjswigut.oopsallprs.ui.routine.RoutineEditorFlow
 import com.jjswigut.oopsallprs.ui.workout.ActiveWorkoutFlow
@@ -491,6 +493,7 @@ private fun DestinationContent(
     developerSeedState: DeveloperSeedState?
 ) {
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
     when (destination) {
         TopLevelDestination.TRAIN -> WorkoutHomeFlow(
             state = workoutHomeState,
@@ -678,6 +681,7 @@ private fun DestinationContent(
             onManageExercises = {
                 scope.launch { appState.exerciseManagement.open() }
             },
+            onPrivacyPolicy = { openPrivacyPolicy(uriHandler::openUri) },
             developerSeedState = developerSeedState,
             onDeveloperSeedSelected = { scenario ->
                 scope.launch {
