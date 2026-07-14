@@ -70,13 +70,15 @@ ANDROID_PLAY_VALIDATE_ONLY=true tools/fastlane.sh android listing
 
 The lane assembles `fastlane/build/metadata/android` from the source-controlled English listing copy, Play icon, feature graphic, phone screenshots, seven-inch tablet screenshots, and ten-inch tablet screenshots. The generated directories follow Fastlane Supply conventions (`en-US/images/phoneScreenshots`, `sevenInchScreenshots`, and `tenInchScreenshots`). Validation is the lane default and asks Google Play to validate the edit without committing it.
 
+Fastlane 2.237.0 requires listing-only uploads to identify an existing release even when changelog upload is disabled. Before opening the listing edit, the lane reads version codes from the `internal` track, selects the highest existing version code, and passes that track and version code to Supply. Set `ANDROID_PLAY_LISTING_TRACK` to another populated track only when necessary. Both validation and upload fail before changing listing data if the selected track has no existing release.
+
 To commit only the listing edit, explicitly opt into upload mode:
 
 ```sh
 ANDROID_PLAY_VALIDATE_ONLY=false tools/fastlane.sh android listing
 ```
 
-The lane never builds or uploads an APK/AAB, never changes a release track, and sets `changes_not_sent_for_review` so the edit is not submitted for review. Upload mode is still a Google Play store mutation and requires explicit owner approval.
+The existing release lookup does not upload a binary, changelog, or release. The lane never builds or uploads an APK/AAB, never changes a release track, and sets `changes_not_sent_for_review` so the edit is not submitted for review. Upload mode is still a Google Play store mutation and requires explicit owner approval.
 
 The `Google Play Listing` GitHub Actions workflow is `workflow_dispatch` only. Its `mode` input defaults to `validate`; selecting `upload` commits the same listing-only edit. Both modes use the existing `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` secret, and neither mode submits an app or release for review. Do not dispatch `upload` unless the owner has approved the store mutation.
 

@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
+      ANDROID_PLAY_LISTING_TRACK: internal
       ANDROID_PLAY_VALIDATE_ONLY: ${{ inputs.mode != 'upload' }}
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     steps:
