@@ -57,9 +57,7 @@ jobs:
 
   github-release:
     name: GitHub release package
-    needs:
-      - tests
-      - ios-package
+    needs: tests
     if: always() && needs.tests.result == 'success' && (github.event_name == 'push' || inputs.release_tag != '')
     runs-on: ubuntu-latest
     steps:
@@ -92,36 +90,6 @@ jobs:
             release-artifacts/**/*.apk
             release-artifacts/**/*.aab
             release-artifacts/**/*.txt
-            release-artifacts/**/*.zip
-
-  ios-package:
-    name: iOS release simulator package
-    needs: tests
-    runs-on: macos-latest
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build iOS release simulator app
-        run: IOS_RELEASE_TIMEOUT_SECONDS=1080 tools/ios_release_package.sh
-
-      - name: Upload iOS release simulator artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-release-simulator-${{ github.run_number }}
-          if-no-files-found: error
-          path: build/release-artifacts/*.zip
 
   android:
     name: Android internal testing
