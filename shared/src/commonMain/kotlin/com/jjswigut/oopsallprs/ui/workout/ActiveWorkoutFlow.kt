@@ -75,6 +75,7 @@ fun ActiveWorkoutFlow(
     onUngroupCircuit: (FoundationId) -> Unit,
     onAdjustCircuitRounds: (FoundationId, Int) -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
+    onShowExerciseOverview: () -> Unit,
     onDismiss: () -> Unit,
     weightUnit: WeightUnit = WeightUnit.KILOGRAMS,
     weightStepAmount: Double = weightStep(weightUnit),
@@ -119,7 +120,14 @@ fun ActiveWorkoutFlow(
                     state.workout?.takeIf { it.exerciseBlocks.size >= 2 }?.let {
                         FoundationTextAction("Organize", onClick = { isOrganizerOpen = true })
                     }
-                    FoundationTextAction("Close", onDismiss)
+                    FoundationTextAction(
+                        "Close",
+                        if (state.isExerciseOverviewVisible || state.workout?.exerciseBlocks.isNullOrEmpty()) {
+                            onDismiss
+                        } else {
+                            onShowExerciseOverview
+                        }
+                    )
                 }
             }
             state.workout?.let { workout ->
@@ -134,7 +142,8 @@ fun ActiveWorkoutFlow(
                         ExerciseBlockGroupCard(
                             group = group,
                             modifier = Modifier.fillMaxWidth(),
-                            focusedExerciseId = workout.focus?.exerciseInstanceId,
+                            focusedExerciseId = workout.focus?.exerciseInstanceId
+                                ?.takeUnless { state.isExerciseOverviewVisible },
                             weightUnit = weightUnit,
                             onFocus = onFocusExercise,
                             onSettings = { settingsExerciseId = it },
@@ -146,7 +155,8 @@ fun ActiveWorkoutFlow(
                             ExerciseBlock(
                                 block = block,
                                 modifier = Modifier.fillMaxWidth(),
-                                isFocused = workout.focus?.exerciseInstanceId == block.exerciseInstanceId,
+                                isFocused = !state.isExerciseOverviewVisible &&
+                                    workout.focus?.exerciseInstanceId == block.exerciseInstanceId,
                                 weightUnit = weightUnit,
                                 onFocus = { onFocusExercise(block.exerciseInstanceId) },
                                 onSettings = { settingsExerciseId = it },
@@ -193,6 +203,7 @@ fun ActiveWorkoutFlow(
                 onAdjustActiveRest = onAdjustActiveRest,
                 onSkipActiveRest = onSkipActiveRest,
                 onFocusExercise = onFocusExercise,
+                showExerciseOverview = state.isExerciseOverviewVisible,
                 weightUnit = weightUnit,
                 weightStepAmount = displayWeightStep,
                 modifier = Modifier.fillMaxWidth()
@@ -520,6 +531,7 @@ private fun ActiveWorkoutBottomBar(
     onAdjustActiveRest: (Int) -> Unit,
     onSkipActiveRest: () -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
+    showExerciseOverview: Boolean,
     weightUnit: WeightUnit,
     weightStepAmount: Double,
     modifier: Modifier = Modifier
@@ -601,7 +613,7 @@ private fun ActiveWorkoutBottomBar(
                         style = FitButtonStyle.Secondary
                     )
                     FitButton(
-                        text = "Finish",
+                        text = "Finish workout",
                         onClick = { onConfirmFinish(workout.workoutId) },
                         modifier = Modifier.weight(1f),
                         style = FitButtonStyle.Primary
@@ -641,6 +653,39 @@ private fun ActiveWorkoutBottomBar(
                 return@Column
             }
 
+            if (showExerciseOverview && workout.exerciseBlocks.isNotEmpty()) {
+                FoundationText(
+                    text = "Exercises",
+                    style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                )
+                FoundationMutedText("Choose an exercise to keep logging.")
+                FitButton(
+                    text = "Add exercise",
+                    onClick = onAddExercise,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitButtonStyle.Primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FitButton(
+                        text = "Discard workout",
+                        onClick = onRequestDiscard,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                    FitButton(
+                        text = "Finish workout",
+                        onClick = onRequestFinish,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+                return@Column
+            }
+
             if (workout.exerciseBlocks.isEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -654,7 +699,7 @@ private fun ActiveWorkoutBottomBar(
                         style = FitButtonStyle.Primary
                     )
                     FitButton(
-                        text = "Finish",
+                        text = "Finish workout",
                         onClick = onRequestFinish,
                         modifier = Modifier.weight(1f),
                         style = FitButtonStyle.Secondary
@@ -735,13 +780,13 @@ private fun ActiveWorkoutBottomBar(
                     text = "Add exercise",
                     onClick = onAddExercise,
                     modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Secondary
+                    style = FitButtonStyle.Primary
                 )
                 FitButton(
-                    text = "Finish",
+                    text = "Finish workout",
                     onClick = onRequestFinish,
                     modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Primary
+                    style = FitButtonStyle.Secondary
                 )
             }
         }

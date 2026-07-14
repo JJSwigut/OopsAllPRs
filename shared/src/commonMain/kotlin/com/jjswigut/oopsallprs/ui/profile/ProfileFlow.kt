@@ -532,8 +532,10 @@ private fun UnitsCard(
                 horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    FoundationText("Weight step")
-                    FoundationMutedText("${formatWeightStep(state.weightStep)} ${state.weightUnit.abbreviation()}")
+                    FoundationText("Weight increment")
+                    FoundationMutedText(
+                        "The +/- buttons change by ${formatWeightStep(state.weightStep)} ${state.weightUnit.abbreviation()}."
+                    )
                 }
                 FitButton(
                     text = "Change",
@@ -556,8 +558,10 @@ private fun WeightStepDialog(
     val unitLabel = state.weightUnit.abbreviation()
     FitDialog(onDismissRequest = onCancel) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
-            SectionLabel("Weight step")
-            FoundationMutedText("${formatWeightStep(state.draftWeightStep)} $unitLabel")
+            SectionLabel("Weight increment")
+            FoundationMutedText("Choose how much the +/- buttons change weight.")
+            FoundationMutedText("Match the smallest change you make with plates or dumbbells.")
+            FoundationMutedText("${formatWeightStep(state.draftWeightStep)} $unitLabel per tap")
             FitRoller(
                 value = state.draftWeightStep.toFloat(),
                 onValueChange = { onDraftChange(it.toDouble()) },

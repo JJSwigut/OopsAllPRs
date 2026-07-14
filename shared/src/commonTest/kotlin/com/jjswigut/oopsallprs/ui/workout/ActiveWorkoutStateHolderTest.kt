@@ -12,7 +12,9 @@ import com.jjswigut.oopsallprs.testing.successValue
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class ActiveWorkoutStateHolderTest {
     @Test
@@ -28,6 +30,32 @@ class ActiveWorkoutStateHolderTest {
         assertEquals(exercise.id, block?.exerciseInstanceId)
         assertEquals(5, block?.draft?.reps)
         assertNotNull(block?.draft?.weight)
+    }
+
+    @Test
+    fun focusedCloseShowsExerciseOverviewWithoutChangingWorkoutOrDraft() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(1_100)
+        ).successValue()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle, harness.store)
+        holder.hydrate(workout.id, now = instant(1_200))
+        holder.updateDraftReps(exercise.id, 8)
+
+        holder.showExerciseOverview()
+
+        assertTrue(holder.state.value.isExerciseOverviewVisible)
+        assertEquals(workout.id, holder.state.value.workout?.workoutId)
+        assertEquals(8, holder.state.value.workout?.exerciseBlocks?.single()?.draft?.reps)
+        assertEquals(workout.id, harness.store.activeWorkout(workout.id)?.id)
+
+        holder.setFocus(exercise.id, instant(1_300))
+
+        assertFalse(holder.state.value.isExerciseOverviewVisible)
+        assertEquals(8, holder.state.value.workout?.exerciseBlocks?.single()?.draft?.reps)
     }
 
     @Test

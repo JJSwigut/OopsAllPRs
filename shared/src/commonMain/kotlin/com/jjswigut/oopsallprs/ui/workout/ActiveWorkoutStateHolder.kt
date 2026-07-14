@@ -33,6 +33,7 @@ data class ActiveWorkoutState(
     val workout: ActiveWorkoutView? = null,
     val focusSnapshot: ActiveWorkoutFocus? = null,
     val editDraft: LoggedSetEditDraft? = null,
+    val isExerciseOverviewVisible: Boolean = false,
     val isDiscardConfirmationVisible: Boolean = false,
     val isFinishConfirmationVisible: Boolean = false,
     val canUndoLastSet: Boolean = false
@@ -110,6 +111,7 @@ class ActiveWorkoutStateHolder(
                 )
                 persistFocus(now)
                 hydrate(workoutId, focus, now)
+                _state.value = _state.value.copy(isExerciseOverviewVisible = false)
                 foundationSuccess(result.value.id)
             }
         }
@@ -348,7 +350,17 @@ class ActiveWorkoutStateHolder(
         if (draft != null) {
             focus = ActiveWorkoutFocus(exerciseInstanceId, draft.draftId, now)
             persistFocus(now)
-            _state.value = _state.value.copy(focusSnapshot = focus, workout = _state.value.workout?.copy(focus = focus))
+            _state.value = _state.value.copy(
+                focusSnapshot = focus,
+                workout = _state.value.workout?.copy(focus = focus),
+                isExerciseOverviewVisible = false
+            )
+        }
+    }
+
+    fun showExerciseOverview() {
+        if (_state.value.workout?.exerciseBlocks?.isNotEmpty() == true) {
+            _state.value = _state.value.copy(isExerciseOverviewVisible = true)
         }
     }
 
