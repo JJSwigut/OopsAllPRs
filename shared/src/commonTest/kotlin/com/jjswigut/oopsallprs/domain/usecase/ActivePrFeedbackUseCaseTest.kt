@@ -13,6 +13,59 @@ import kotlin.test.assertNull
 
 class ActivePrFeedbackUseCaseTest {
     @Test
+    fun weightedFeedbackRejectsDominatedSetButAllowsHeavierLowerRepSet() = runTest {
+        val harness = FoundationHarness()
+        val useCase = ActivePrFeedbackUseCase(harness.store)
+        val previousWorkout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val previousExercise = harness.setLogging
+            .addExercise(previousWorkout.id, harness.weightedReference, instant(1_100))
+            .successValue()
+        harness.setLogging.confirmSet(
+            previousWorkout.id,
+            previousExercise.id,
+            SetKind.WEIGHTED,
+            reps = 16,
+            weight = WeightKg(25.0),
+            position = 0,
+            loggedAt = instant(1_200)
+        ).successValue()
+        harness.routines.finishWorkout(previousWorkout.id, instant(2_000)).successValue()
+
+        val workout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
+        val exercise = harness.setLogging
+            .addExercise(workout.id, harness.weightedReference, instant(3_100))
+            .successValue()
+        val dominated = harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 14,
+            weight = WeightKg(25.0),
+            position = 0,
+            loggedAt = instant(3_200)
+        ).successValue()
+        val afterDominated = harness.lifecycle.activeWorkout(workout.id)!!
+
+        assertNull(useCase.feedbackFor(afterDominated, afterDominated.exercises.single(), dominated))
+
+        val heavier = harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 10,
+            weight = WeightKg(30.0),
+            position = 1,
+            loggedAt = instant(3_300)
+        ).successValue()
+        val afterHeavier = harness.lifecycle.activeWorkout(workout.id)!!
+
+        assertEquals(
+            "New PR: 30 kg x 10",
+            useCase.feedbackFor(afterHeavier, afterHeavier.exercises.single(), heavier)?.label
+        )
+    }
+
+    @Test
     fun derivesWeightedFeedbackOnlyWhenSetImprovesPreviousBestForReps() = runTest {
         val harness = FoundationHarness()
         val useCase = ActivePrFeedbackUseCase(harness.store)

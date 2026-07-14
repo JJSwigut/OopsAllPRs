@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.instant
@@ -12,6 +13,23 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ProgressStateHolderTest {
+    @Test
+    fun dashboardShowsOnlyNondominatedWeightedSetRecords() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
+        harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 16, WeightKg(25.0), 0, instant(1_200))
+        harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 14, WeightKg(25.0), 1, instant(1_300))
+        harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 10, WeightKg(30.0), 2, instant(1_400))
+        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val holder = ProgressStateHolder(harness.store, harness.store, harness.store)
+
+        holder.refresh()
+
+        val weightedRows = holder.state.value.recentRows.filter { it.kind == PersonalRecordKind.WEIGHT_FOR_REPS }
+        assertEquals(setOf("55.1 lb x 16", "66.1 lb x 10"), weightedRows.map { it.valueLabel }.toSet())
+    }
+
     @Test
     fun refreshBuildsEmptyStateAndRecentRowsNewestFirst() = runTest {
         val harness = FoundationHarness()
