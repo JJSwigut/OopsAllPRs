@@ -1,4 +1,5 @@
 require "fileutils"
+require_relative "google_play_listing"
 
 opt_out_usage
 
@@ -136,12 +137,26 @@ platform :android do
   desc "Validate or upload Google Play listing metadata and artwork only"
   lane :listing do
     package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
+    listing_track = ENV.fetch("ANDROID_PLAY_LISTING_TRACK", "internal")
     require_env!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    json_key_data = ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    version_code = GooglePlayListing.latest_version_code(
+      google_play_track_version_codes(
+        package_name: package_name,
+        json_key_data: json_key_data,
+        track: listing_track
+      ),
+      track: listing_track
+    )
+
+    UI.message("Using existing version code #{version_code} from '#{listing_track}' for listing metadata")
 
     upload_to_play_store(
       package_name: package_name,
-      json_key_data: ENV.fetch("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+      json_key_data: json_key_data,
       metadata_path: prepare_android_listing_assets,
+      track: listing_track,
+      version_code: version_code,
       skip_upload_apk: true,
       skip_upload_aab: true,
       skip_upload_metadata: false,
