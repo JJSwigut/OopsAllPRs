@@ -667,6 +667,9 @@ private fun DestinationContent(
             onRestSoundChanged = { enabled ->
                 scope.launch { appState.profile.setRestSoundEnabled(enabled) }
             },
+            onStartWorkoutTimerWithFirstSetChanged = { enabled ->
+                scope.launch { appState.profile.setStartWorkoutTimerWithFirstSet(enabled) }
+            },
             onPaletteModeSelected = { mode ->
                 appState.profile.setPaletteMode(mode)
                 appState.navigation.setPreferences(

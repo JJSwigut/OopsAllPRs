@@ -23,6 +23,7 @@ import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseLoggingConfigurationUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
@@ -53,7 +54,8 @@ class ActiveWorkoutStateHolder(
     private val activeUx: ActiveWorkoutUxRepository? = null,
     private val activePrFeedback: ActivePrFeedbackUseCase? = null,
     private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null,
-    private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null
+    private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null,
+    private val preferences: PreferencesRepository? = null
 ) {
     private val drafts = linkedMapOf<FoundationId, SetRowDraft>()
     private val prFeedbackBySetId = linkedMapOf<FoundationId, ActivePrFeedback>()
@@ -61,6 +63,7 @@ class ActiveWorkoutStateHolder(
     private val saveDefaultExerciseIds = linkedSetOf<FoundationId>()
     private var activeWorkoutId: FoundationId? = null
     private var focus: ActiveWorkoutFocus? = null
+    private var startTimerWithFirstSet: Boolean = true
 
     private val _state = MutableStateFlow(ActiveWorkoutState())
     val state: StateFlow<ActiveWorkoutState> = _state
@@ -78,6 +81,7 @@ class ActiveWorkoutStateHolder(
         }
 
         hydrateConfigurations(workout)
+        startTimerWithFirstSet = preferences?.startWorkoutTimerWithFirstSet() ?: true
         hydrateDrafts(workout)
         hydrateConfigurationPreferences(workout)
         focus = restoredFocus ?: activeUx?.loadUxSession(workoutId)?.toFocus()
@@ -822,6 +826,7 @@ class ActiveWorkoutStateHolder(
             activeSession = activeSession,
             configurations = configurations,
             saveDefaultExerciseIds = saveDefaultExerciseIds,
+            startTimerWithFirstSet = startTimerWithFirstSet,
             now = now,
             errorMessage = _state.value.errorMessage
         )

@@ -16,6 +16,6 @@ class FinishWorkoutLedgerTest {
         val workoutId = harness.workoutWithLoggedWeightedSet()
         val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
         assertEquals(1, completed.exercises.single().loggedSets.size)
-        assertEquals(1_000, completed.durationMs)
+        assertEquals(800, completed.durationMs)
     }
 }

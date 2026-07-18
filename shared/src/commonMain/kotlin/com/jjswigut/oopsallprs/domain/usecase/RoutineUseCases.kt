@@ -48,12 +48,15 @@ class RoutineUseCases(
                 rest = exercise.rest
             )
         }
+        val effectiveStartedAt = active.effectiveStartedAt(
+            preferences?.startWorkoutTimerWithFirstSet() ?: true
+        )
         val completed = CompletedWorkout(
             id = completedId,
             sourceActiveWorkoutId = active.id,
-            startedAt = active.startedAt,
+            startedAt = effectiveStartedAt,
             finishedAt = finishedAt,
-            durationMs = finishedAt.toEpochMilliseconds() - active.startedAt.toEpochMilliseconds(),
+            durationMs = finishedAt.toEpochMilliseconds() - effectiveStartedAt.toEpochMilliseconds(),
             routineId = active.routineId,
             exercises = completedExercises,
             createdAt = finishedAt

@@ -40,6 +40,7 @@ class BackupSnapshotReaderTest {
     @Test
     fun snapshotIncludesCompletedLedgerExercisesPreferencesAndProgressContainers() = runTest {
         val harness = FoundationHarness()
+        harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
         harness.seedExerciseCatalog()
         val workoutId = harness.workoutWithLoggedWeightedSet()
         harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
@@ -60,6 +61,7 @@ class BackupSnapshotReaderTest {
         assertFalse(pkg.summary.hasActiveWorkout)
         assertTrue(pkg.exercises.isNotEmpty())
         assertEquals("POUNDS", pkg.preferences.weightUnit)
+        assertFalse(pkg.preferences.startWorkoutTimerWithFirstSet)
         assertEquals(pkg.personalRecords.size + pkg.progressPoints.size, pkg.summary.progressRecordCount)
     }
 

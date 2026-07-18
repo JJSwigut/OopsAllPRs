@@ -88,6 +88,7 @@ class InMemoryFoundationStore :
     private var weightStepPreference = WeightStepPreference()
     private var defaultRestSeconds = RestConfiguration.DEFAULT_SECONDS
     private var restSoundEnabled = true
+    private var startTimerWithFirstSetPreference = true
     private var fullAccessState = FullAccessState()
 
     override suspend fun createActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout> {
@@ -445,6 +446,13 @@ class InMemoryFoundationStore :
 
     override suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean> {
         restSoundEnabled = enabled
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun startWorkoutTimerWithFirstSet(): Boolean = startTimerWithFirstSetPreference
+
+    override suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
+        startTimerWithFirstSetPreference = enabled
         return foundationSuccess(enabled)
     }
 

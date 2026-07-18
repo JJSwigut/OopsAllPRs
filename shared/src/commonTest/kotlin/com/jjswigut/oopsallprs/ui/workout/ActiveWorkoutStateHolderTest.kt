@@ -24,6 +24,47 @@ import kotlin.test.assertTrue
 
 class ActiveWorkoutStateHolderTest {
     @Test
+    fun elapsedTimerUsesEffectiveStartForBothPreferenceModes() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(2_000)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = com.jjswigut.oopsallprs.domain.model.WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(3_000)
+        ).successValue()
+        val firstSetHolder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+
+        firstSetHolder.hydrate(workout.id, now = instant(5_000))
+
+        assertEquals(instant(3_000), firstSetHolder.state.value.workout?.startedAt)
+        assertEquals(2_000L, firstSetHolder.state.value.workout?.elapsedMillis)
+
+        harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+        val creationTimeHolder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+        creationTimeHolder.hydrate(workout.id, now = instant(5_000))
+
+        assertEquals(instant(1_000), creationTimeHolder.state.value.workout?.startedAt)
+        assertEquals(4_000L, creationTimeHolder.state.value.workout?.elapsedMillis)
+    }
+
+    @Test
     fun hydrateCreatesDefaultDraftForExercise() = runTest {
         val harness = FoundationHarness()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()

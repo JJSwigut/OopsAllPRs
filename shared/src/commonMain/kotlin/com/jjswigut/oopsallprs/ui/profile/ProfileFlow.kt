@@ -42,6 +42,7 @@ fun ProfileFlow(
     onDefaultRestSave: () -> Unit,
     onDefaultRestCancel: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit,
+    onStartWorkoutTimerWithFirstSetChanged: (Boolean) -> Unit,
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onReduceMotionChanged: (Boolean) -> Unit,
@@ -80,6 +81,7 @@ fun ProfileFlow(
             onWeightStepClick = onWeightStepClick
         )
         RestPreferencesCard(state, onDefaultRestClick, onRestSoundChanged)
+        WorkoutTimerCard(state, onStartWorkoutTimerWithFirstSetChanged)
         ExercisesCard(onManageExercises)
         BackupCard(
             state = state,
@@ -130,6 +132,31 @@ fun ProfileFlow(
             onDismiss = onBackupSetupDismiss,
             onChooseLocation = onLinkBackupFile
         )
+    }
+}
+
+@Composable
+private fun WorkoutTimerCard(
+    state: ProfileState,
+    onStartWorkoutTimerWithFirstSetChanged: (Boolean) -> Unit
+) {
+    FitCard(glow = FitTheme.glow.none) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Workout timer")
+            ToggleRow(
+                label = "Start timer with first set",
+                value = if (state.startWorkoutTimerWithFirstSet) "On" else "Off",
+                checked = state.startWorkoutTimerWithFirstSet,
+                onCheckedChange = onStartWorkoutTimerWithFirstSetChanged
+            )
+            FoundationMutedText(
+                if (state.startWorkoutTimerWithFirstSet) {
+                    "Setup time is excluded. The earliest logged set becomes the workout start."
+                } else {
+                    "The timer starts when the workout is created, including setup time."
+                }
+            )
+        }
     }
 }
 

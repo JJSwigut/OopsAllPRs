@@ -175,7 +175,8 @@ class AppState(
                 activeUx = workouts,
                 activePrFeedback = activePrFeedback,
                 previousDefaults = previousDefaults,
-                configurationManagement = exerciseLogging.management
+                configurationManagement = exerciseLogging.management,
+                preferences = store
             )
             val exerciseCatalog = ExerciseCatalogUseCases(exerciseRepo, workouts, exerciseLogging.configurations)
             val developerSeeds = if (developerToolsEnabled) {

@@ -710,6 +710,7 @@ class SqlFoundationStore(
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -740,6 +741,7 @@ class SqlFoundationStore(
             weight_step_lb = if (unit == WeightUnit.POUNDS) normalized else existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = if (unit == WeightUnit.KILOGRAMS) normalized else existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -764,6 +766,7 @@ class SqlFoundationStore(
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -784,6 +787,28 @@ class SqlFoundationStore(
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
+            created_at = existing?.created_at ?: now.toDbLong(),
+            updated_at = now.toDbLong()
+        )
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun startWorkoutTimerWithFirstSet(): Boolean =
+        workoutQueries.selectUserPreferences().executeAsOneOrNull()?.start_timer_on_first_set?.toBooleanFlag() ?: true
+
+    override suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
+        val existing = workoutQueries.selectUserPreferences().executeAsOneOrNull()
+        val now = Clock.System.now()
+        workoutQueries.upsertUserPreferences(
+            weight_unit = existing?.weight_unit ?: WeightUnit.POUNDS.name,
+            date_format = existing?.date_format,
+            default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
+            rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
+            weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
+            android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = enabled.toDbLong(),
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
