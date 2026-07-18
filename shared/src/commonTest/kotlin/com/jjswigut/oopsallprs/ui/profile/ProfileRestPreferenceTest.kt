@@ -10,6 +10,22 @@ import kotlin.test.assertTrue
 
 class ProfileRestPreferenceTest {
     @Test
+    fun firstSetTimerPreferenceDefaultsOnAndPersistsChanges() = runTest {
+        val store = InMemoryFoundationStore()
+        val holder = ProfileStateHolder(preferences = store, exports = store)
+        holder.hydrate()
+
+        assertTrue(holder.state.value.startWorkoutTimerWithFirstSet)
+
+        holder.setStartWorkoutTimerWithFirstSet(false).successValue()
+        val recreated = ProfileStateHolder(preferences = store, exports = store)
+        recreated.hydrate()
+
+        assertFalse(recreated.state.value.startWorkoutTimerWithFirstSet)
+        assertFalse(store.startWorkoutTimerWithFirstSet())
+    }
+
+    @Test
     fun hydrateLoadsRestPreferences() = runTest {
         val store = InMemoryFoundationStore()
         store.setDefaultRestSeconds(180).successValue()

@@ -75,8 +75,8 @@ SELECT * FROM user_preferences
 WHERE singleton_id = 1;
 
 upsertUserPreferences:
-INSERT OR REPLACE INTO user_preferences(singleton_id, weight_unit, date_format, default_rest_seconds, rest_sound_enabled, weight_step_lb, weight_step_kg, android_auto_backup_allowed, created_at, updated_at)
-VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO user_preferences(singleton_id, weight_unit, date_format, default_rest_seconds, rest_sound_enabled, weight_step_lb, weight_step_kg, android_auto_backup_allowed, start_timer_on_first_set, created_at, updated_at)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 selectFullAccessState:
 SELECT * FROM full_access_state

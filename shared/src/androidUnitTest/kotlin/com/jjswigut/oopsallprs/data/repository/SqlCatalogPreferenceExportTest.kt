@@ -8,6 +8,7 @@ import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SqlCatalogPreferenceExportTest {
@@ -53,6 +54,18 @@ class SqlCatalogPreferenceExportTest {
         val recovered = harness.repositories()
         assertEquals(2.5, recovered.store.weightStep(WeightUnit.POUNDS))
         assertEquals(1.25, recovered.store.weightStep(WeightUnit.KILOGRAMS))
+    }
+
+    @Test
+    fun firstSetTimerPreferenceDefaultsOnAndSurvivesRepositoryRecreation() = runTest {
+        val harness = SqlFoundationStoreTestHarness()
+        val repos = harness.repositories()
+
+        assertTrue(repos.store.startWorkoutTimerWithFirstSet())
+        repos.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+
+        val recovered = harness.repositories()
+        assertFalse(recovered.store.startWorkoutTimerWithFirstSet())
     }
 
     @Test

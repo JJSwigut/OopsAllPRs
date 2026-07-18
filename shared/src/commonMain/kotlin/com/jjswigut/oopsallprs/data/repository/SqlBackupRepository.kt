@@ -212,6 +212,7 @@ class SqlBackupRepository(
             weight_step_lb = pkg.preferences.weightStepPounds,
             weight_step_kg = pkg.preferences.weightStepKilograms,
             android_auto_backup_allowed = 1L,
+            start_timer_on_first_set = pkg.preferences.startWorkoutTimerWithFirstSet.flag(),
             created_at = now,
             updated_at = now
         )

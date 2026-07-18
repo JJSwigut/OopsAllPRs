@@ -140,15 +140,22 @@ class WorkoutLifecycleUseCases(
 
     suspend fun restoreActiveSession(now: Instant = Clock.System.now()): ActiveSessionState? {
         val state = sessions.load() ?: return null
-        val restEndsAt = state.restEndsAt
-        return if (restEndsAt != null && restEndsAt <= now) {
-            val cleared = state.withoutRest(now)
-            sessions.save(cleared)
+        val restAdjusted = if (state.restEndsAt != null && state.restEndsAt <= now) {
             notifications?.cancel()
-            cleared
+            state.withoutRest(now)
         } else {
             state
         }
+        val effectiveStartedAt = restAdjusted.activeWorkoutId
+            ?.let { workouts.activeWorkout(it) }
+            ?.effectiveStartedAt(preferences?.startWorkoutTimerWithFirstSet() ?: true)
+        val adjusted = if (effectiveStartedAt != null && effectiveStartedAt != restAdjusted.startedAt) {
+            restAdjusted.copy(startedAt = effectiveStartedAt, updatedAt = now)
+        } else {
+            restAdjusted
+        }
+        if (adjusted != state) sessions.save(adjusted)
+        return adjusted
     }
 
     suspend fun activeWorkout(activeWorkoutId: FoundationId): ActiveWorkout? =

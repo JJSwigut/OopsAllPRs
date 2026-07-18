@@ -56,6 +56,7 @@ class BackupPackageCodecTest {
 
         assertEquals(BACKUP_FORMAT_VERSION_V1, decoded.formatVersion)
         assertEquals(8, decoded.appSchemaVersion)
+        assertTrue(decoded.preferences.startWorkoutTimerWithFirstSet)
     }
 
     @Test

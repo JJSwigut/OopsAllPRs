@@ -408,7 +408,14 @@ internal fun BackupPackageV1Dto.normalizeToV2(): BackupPackage {
         lastLocalRevision = lastLocalRevision,
         appSchemaVersion = appSchemaVersion,
         summary = SnapshotSummaryDto(summary.workoutCount, summary.setCount, summary.routineCount, summary.customExerciseCount, summary.progressRecordCount, summary.hasActiveWorkout, summary.latestWorkoutTimestamp, summary.latestUpdatedTimestamp),
-        preferences = PreferencesSnapshotDto(preferences.weightUnit, preferences.weightStepPounds, preferences.weightStepKilograms, preferences.defaultRestSeconds, preferences.restSoundEnabled),
+        preferences = PreferencesSnapshotDto(
+            preferences.weightUnit,
+            preferences.weightStepPounds,
+            preferences.weightStepKilograms,
+            preferences.defaultRestSeconds,
+            preferences.restSoundEnabled,
+            startWorkoutTimerWithFirstSet = true
+        ),
         loggingConfigurations = configurations.values.map { it.toDto() },
         userExerciseConfigurations = emptyList(),
         exercises = exercises.map { item ->

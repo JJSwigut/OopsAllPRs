@@ -162,6 +162,7 @@ fun ActiveWorkout.toView(
     activeSession: ActiveSessionState? = null,
     configurations: Map<LoggingConfigurationId, LoggingConfiguration> = emptyMap(),
     saveDefaultExerciseIds: Set<FoundationId> = emptySet(),
+    startTimerWithFirstSet: Boolean = true,
     now: Instant? = null,
     errorMessage: String? = null
 ): ActiveWorkoutView {
@@ -207,10 +208,11 @@ fun ActiveWorkout.toView(
         ActiveWorkoutFocus(it.exerciseInstanceId, it.draft.draftId, updatedAt)
     }
     val focusedBlock = blocks.firstOrNull { it.exerciseInstanceId == resolvedFocus?.exerciseInstanceId }
+    val effectiveStartedAt = effectiveStartedAt(startTimerWithFirstSet)
     return ActiveWorkoutView(
         workoutId = id,
-        startedAt = startedAt,
-        elapsedMillis = now?.toEpochMilliseconds()?.minus(startedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L,
+        startedAt = effectiveStartedAt,
+        elapsedMillis = now?.toEpochMilliseconds()?.minus(effectiveStartedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L,
         exerciseBlocks = blocks,
         primaryAction = when {
             blocks.isEmpty() -> ActiveWorkoutPrimaryAction.ADD_EXERCISE

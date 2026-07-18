@@ -79,6 +79,7 @@ data class ProfileState(
     val draftDefaultRestSeconds: Int = RestConfiguration.DEFAULT_SECONDS,
     val defaultRestError: String? = null,
     val restSoundEnabled: Boolean = true,
+    val startWorkoutTimerWithFirstSet: Boolean = true,
     val paletteMode: PaletteMode = PaletteMode.DARK,
     val hapticsEnabled: Boolean = true,
     val reduceMotion: Boolean = false,
@@ -113,6 +114,8 @@ class ProfileStateHolder(
         val step = preferences?.weightStep(unit) ?: _state.value.weightStep
         val restSeconds = preferences?.defaultRestSeconds() ?: _state.value.defaultRestSeconds
         val soundEnabled = preferences?.restSoundEnabled() ?: _state.value.restSoundEnabled
+        val startTimerWithFirstSet = preferences?.startWorkoutTimerWithFirstSet()
+            ?: _state.value.startWorkoutTimerWithFirstSet
         val accessStatus = loadFullAccessStatus()
         _state.value = _state.value.copy(
             weightUnit = unit,
@@ -124,6 +127,7 @@ class ProfileStateHolder(
             draftDefaultRestSeconds = restSeconds,
             defaultRestError = null,
             restSoundEnabled = soundEnabled,
+            startWorkoutTimerWithFirstSet = startTimerWithFirstSet,
             isHydrated = true,
             exportError = null,
             backupStatus = backupSync?.loadState()?.toProfileStatus() ?: ProfileBackupStatus(),
@@ -185,6 +189,23 @@ class ProfileStateHolder(
             }
             is FoundationResult.Success -> {
                 _state.value = _state.value.copy(restSoundEnabled = result.value, exportError = null)
+                result
+            }
+        }
+    }
+
+    suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
+        val result = preferences?.setStartWorkoutTimerWithFirstSet(enabled) ?: foundationSuccess(enabled)
+        return when (result) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(exportError = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                _state.value = _state.value.copy(
+                    startWorkoutTimerWithFirstSet = result.value,
+                    exportError = null
+                )
                 result
             }
         }
