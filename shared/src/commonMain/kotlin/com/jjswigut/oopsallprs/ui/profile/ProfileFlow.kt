@@ -43,6 +43,7 @@ fun ProfileFlow(
     onDefaultRestCancel: () -> Unit,
     onRestSoundChanged: (Boolean) -> Unit,
     onStartWorkoutTimerWithFirstSetChanged: (Boolean) -> Unit,
+    onRestTimerSurfaceChanged: (Boolean) -> Unit,
     onPaletteModeSelected: (PaletteMode) -> Unit,
     onHapticsChanged: (Boolean) -> Unit,
     onReduceMotionChanged: (Boolean) -> Unit,
@@ -80,7 +81,12 @@ fun ProfileFlow(
             onWeightUnitSelected = onWeightUnitSelected,
             onWeightStepClick = onWeightStepClick
         )
-        RestPreferencesCard(state, onDefaultRestClick, onRestSoundChanged)
+        RestPreferencesCard(
+            state,
+            onDefaultRestClick,
+            onRestSoundChanged,
+            onRestTimerSurfaceChanged
+        )
         WorkoutTimerCard(state, onStartWorkoutTimerWithFirstSetChanged)
         ExercisesCard(onManageExercises)
         BackupCard(
@@ -465,7 +471,8 @@ private fun DeveloperSeedCard(
 private fun RestPreferencesCard(
     state: ProfileState,
     onDefaultRestClick: () -> Unit,
-    onRestSoundChanged: (Boolean) -> Unit
+    onRestSoundChanged: (Boolean) -> Unit,
+    onRestTimerSurfaceChanged: (Boolean) -> Unit
 ) {
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
@@ -490,7 +497,14 @@ private fun RestPreferencesCard(
                 checked = state.restSoundEnabled,
                 onCheckedChange = onRestSoundChanged
             )
+            ToggleRow(
+                label = "Show active timer outside app",
+                value = if (state.restTimerSurfaceEnabled) "On" else "Off",
+                checked = state.restTimerSurfaceEnabled,
+                onCheckedChange = onRestTimerSurfaceChanged
+            )
             FoundationMutedText("New exercises use ${formatRestDurationSeconds(state.defaultRestSeconds)} rest.")
+            FoundationMutedText("Completion behavior and the in-app timer stay active when this is off.")
         }
     }
 }

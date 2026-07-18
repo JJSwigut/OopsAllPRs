@@ -12,6 +12,7 @@ class SqlBackupRestoreRepositoryTest {
         val sourceRepos = sourceHarness.repositories()
         seedBackupExercises(sourceRepos)
         sourceRepos.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+        sourceRepos.store.setRestTimerSurfaceEnabled(false).successValue()
         createCompletedMixedWorkout(sourceRepos)
         val sourceBackup = SqlBackupRepository(sourceHarness.database, sourceRepos.store)
         val pkg = sourceBackup.createPackage().successValue()
@@ -26,6 +27,7 @@ class SqlBackupRestoreRepositoryTest {
         assertEquals(1, destinationRepos.workouts.completedWorkouts().size)
         assertEquals(2, destinationRepos.workouts.completedWorkouts().single().exercises.size)
         assertFalse(destinationRepos.store.startWorkoutTimerWithFirstSet())
+        assertFalse(destinationRepos.store.restTimerSurfaceEnabled())
     }
 }
 

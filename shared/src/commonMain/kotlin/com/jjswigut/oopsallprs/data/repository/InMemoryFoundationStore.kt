@@ -89,6 +89,7 @@ class InMemoryFoundationStore :
     private var defaultRestSeconds = RestConfiguration.DEFAULT_SECONDS
     private var restSoundEnabled = true
     private var startTimerWithFirstSetPreference = true
+    private var restTimerSurfaceEnabled = true
     private var fullAccessState = FullAccessState()
 
     override suspend fun createActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout> {
@@ -453,6 +454,13 @@ class InMemoryFoundationStore :
 
     override suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
         startTimerWithFirstSetPreference = enabled
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun restTimerSurfaceEnabled(): Boolean = restTimerSurfaceEnabled
+
+    override suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean> {
+        restTimerSurfaceEnabled = enabled
         return foundationSuccess(enabled)
     }
 

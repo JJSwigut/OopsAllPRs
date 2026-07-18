@@ -218,7 +218,10 @@ class AppState(
                         { file -> handoff.share(file.fileName, file.content) }
                     },
                     backupSync = backupSync,
-                    fullAccess = fullAccess
+                    fullAccess = fullAccess,
+                    onRestTimerSurfacePreferenceChanged = {
+                        lifecycle.refreshRestAlertForPreference()
+                    }
                 ),
                 fullAccess = fullAccess,
                 exerciseLoggingConfiguration = exerciseLogging.management,

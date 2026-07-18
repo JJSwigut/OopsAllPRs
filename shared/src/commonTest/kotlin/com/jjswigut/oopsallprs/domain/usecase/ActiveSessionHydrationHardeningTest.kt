@@ -2,6 +2,7 @@ package com.jjswigut.oopsallprs.domain.usecase
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.platform.RestAlertScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduleResult
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.successValue
@@ -34,6 +35,7 @@ class ActiveSessionHydrationHardeningTest {
         assertEquals(32_000, restored?.restRemainingMillis(instant(30_000)))
         assertEquals("progress", restored?.lastOpenedRoute)
         assertEquals(0, scheduler.cancelCount)
+        assertEquals(1, scheduler.scheduleCount)
     }
 
     @Test
@@ -67,11 +69,20 @@ class ActiveSessionHydrationHardeningTest {
     private class FakeRestAlertScheduler : RestAlertScheduler {
         var scheduledEndsAt: Instant? = null
         var scheduledSoundEnabled: Boolean? = null
+        var scheduledPersistentSurfaceEnabled: Boolean? = null
+        var scheduleCount: Int = 0
         var cancelCount: Int = 0
 
-        override fun schedule(restEndsAt: Instant, soundEnabled: Boolean) {
+        override fun schedule(
+            restEndsAt: Instant,
+            soundEnabled: Boolean,
+            persistentSurfaceEnabled: Boolean
+        ): RestAlertScheduleResult {
             scheduledEndsAt = restEndsAt
             scheduledSoundEnabled = soundEnabled
+            scheduledPersistentSurfaceEnabled = persistentSurfaceEnabled
+            scheduleCount += 1
+            return RestAlertScheduleResult.SCHEDULED
         }
 
         override fun cancel() {

@@ -10,6 +10,7 @@ import com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
 import com.jjswigut.oopsallprs.platform.RestAlertScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduleResult
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.successValue
@@ -384,8 +385,13 @@ class ActiveWorkoutStateHolderTest {
     private class CountingRestAlerts : RestAlertScheduler {
         var scheduleCount: Int = 0
 
-        override fun schedule(restEndsAt: Instant, soundEnabled: Boolean) {
+        override fun schedule(
+            restEndsAt: Instant,
+            soundEnabled: Boolean,
+            persistentSurfaceEnabled: Boolean
+        ): RestAlertScheduleResult {
             scheduleCount += 1
+            return RestAlertScheduleResult.SCHEDULED
         }
 
         override fun cancel() = Unit

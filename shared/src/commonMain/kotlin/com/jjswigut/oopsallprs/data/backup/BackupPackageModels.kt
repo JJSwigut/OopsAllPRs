@@ -47,7 +47,8 @@ data class PreferencesSnapshotDto(
     val weightStepKilograms: Double,
     val defaultRestSeconds: Int,
     val restSoundEnabled: Boolean,
-    val startWorkoutTimerWithFirstSet: Boolean = true
+    val startWorkoutTimerWithFirstSet: Boolean = true,
+    val restTimerSurfaceEnabled: Boolean = true
 )
 
 @Serializable

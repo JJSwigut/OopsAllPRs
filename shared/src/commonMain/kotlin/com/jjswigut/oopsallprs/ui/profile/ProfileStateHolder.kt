@@ -80,6 +80,7 @@ data class ProfileState(
     val defaultRestError: String? = null,
     val restSoundEnabled: Boolean = true,
     val startWorkoutTimerWithFirstSet: Boolean = true,
+    val restTimerSurfaceEnabled: Boolean = true,
     val paletteMode: PaletteMode = PaletteMode.DARK,
     val hapticsEnabled: Boolean = true,
     val reduceMotion: Boolean = false,
@@ -103,6 +104,7 @@ class ProfileStateHolder(
     private val exportHandoff: ((ExportFile) -> Unit)? = null,
     private val backupSync: BackupSyncCoordinator? = null,
     private val fullAccess: FullAccessUseCases? = null,
+    private val onRestTimerSurfacePreferenceChanged: (suspend () -> Unit)? = null,
     freeCompletedWorkoutLimit: Int = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
 ) {
     private val freeWorkoutLimit = freeCompletedWorkoutLimit.coerceAtLeast(0)
@@ -116,6 +118,7 @@ class ProfileStateHolder(
         val soundEnabled = preferences?.restSoundEnabled() ?: _state.value.restSoundEnabled
         val startTimerWithFirstSet = preferences?.startWorkoutTimerWithFirstSet()
             ?: _state.value.startWorkoutTimerWithFirstSet
+        val surfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: _state.value.restTimerSurfaceEnabled
         val accessStatus = loadFullAccessStatus()
         _state.value = _state.value.copy(
             weightUnit = unit,
@@ -128,6 +131,7 @@ class ProfileStateHolder(
             defaultRestError = null,
             restSoundEnabled = soundEnabled,
             startWorkoutTimerWithFirstSet = startTimerWithFirstSet,
+            restTimerSurfaceEnabled = surfaceEnabled,
             isHydrated = true,
             exportError = null,
             backupStatus = backupSync?.loadState()?.toProfileStatus() ?: ProfileBackupStatus(),
@@ -206,6 +210,24 @@ class ProfileStateHolder(
                     startWorkoutTimerWithFirstSet = result.value,
                     exportError = null
                 )
+                result
+            }
+        }
+    }
+
+    suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean> {
+        val result = preferences?.setRestTimerSurfaceEnabled(enabled) ?: foundationSuccess(enabled)
+        return when (result) {
+            is FoundationResult.Failure -> {
+                _state.value = _state.value.copy(exportError = result.error.message)
+                result
+            }
+            is FoundationResult.Success -> {
+                _state.value = _state.value.copy(
+                    restTimerSurfaceEnabled = result.value,
+                    exportError = null
+                )
+                onRestTimerSurfacePreferenceChanged?.invoke()
                 result
             }
         }

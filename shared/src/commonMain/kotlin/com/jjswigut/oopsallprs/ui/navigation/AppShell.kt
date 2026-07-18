@@ -670,6 +670,9 @@ private fun DestinationContent(
             onStartWorkoutTimerWithFirstSetChanged = { enabled ->
                 scope.launch { appState.profile.setStartWorkoutTimerWithFirstSet(enabled) }
             },
+            onRestTimerSurfaceChanged = { enabled ->
+                scope.launch { appState.profile.setRestTimerSurfaceEnabled(enabled) }
+            },
             onPaletteModeSelected = { mode ->
                 appState.profile.setPaletteMode(mode)
                 appState.navigation.setPreferences(

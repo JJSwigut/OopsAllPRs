@@ -39,6 +39,7 @@ class ProfileRestPreferenceTest {
         assertEquals(180, holder.state.value.draftDefaultRestSeconds)
         assertFalse(holder.state.value.isDefaultRestPickerVisible)
         assertFalse(holder.state.value.restSoundEnabled)
+        assertTrue(holder.state.value.restTimerSurfaceEnabled)
     }
 
     @Test
@@ -108,5 +109,27 @@ class ProfileRestPreferenceTest {
         assertEquals(180, holder.state.value.draftDefaultRestSeconds)
         assertEquals(180, store.defaultRestSeconds())
         assertFalse(holder.state.value.isDefaultRestPickerVisible)
+    }
+
+    @Test
+    fun activeTimerSurfaceDefaultsOnAndCanBePersistentlyDisabled() = runTest {
+        val store = InMemoryFoundationStore()
+        var refreshCount = 0
+        val holder = ProfileStateHolder(
+            preferences = store,
+            exports = store,
+            onRestTimerSurfacePreferenceChanged = { refreshCount += 1 }
+        )
+        holder.hydrate()
+
+        assertTrue(holder.state.value.restTimerSurfaceEnabled)
+
+        holder.setRestTimerSurfaceEnabled(false).successValue()
+        val recreated = ProfileStateHolder(preferences = store, exports = store)
+        recreated.hydrate()
+
+        assertFalse(recreated.state.value.restTimerSurfaceEnabled)
+        assertFalse(store.restTimerSurfaceEnabled())
+        assertEquals(1, refreshCount)
     }
 }
