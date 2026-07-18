@@ -77,7 +77,8 @@ class BackupSnapshotReader(
                     weightStepKilograms = preferences.weightStep(WeightUnit.KILOGRAMS),
                     defaultRestSeconds = preferences.defaultRestSeconds(),
                     restSoundEnabled = preferences.restSoundEnabled(),
-                    startWorkoutTimerWithFirstSet = preferences.startWorkoutTimerWithFirstSet()
+                    startWorkoutTimerWithFirstSet = preferences.startWorkoutTimerWithFirstSet(),
+                    restTimerSurfaceEnabled = preferences.restTimerSurfaceEnabled()
                 ),
                 loggingConfigurations = configurations.map { it.toDto() },
                 userExerciseConfigurations = userConfigurations.map { it.toDto() },

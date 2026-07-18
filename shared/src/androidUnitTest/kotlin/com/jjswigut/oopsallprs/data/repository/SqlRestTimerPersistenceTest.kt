@@ -16,6 +16,7 @@ class SqlRestTimerPersistenceTest {
         val repos = harness.repositories()
         repos.store.setDefaultRestSeconds(180).successValue()
         repos.store.setRestSoundEnabled(false).successValue()
+        repos.store.setRestTimerSurfaceEnabled(false).successValue()
         val workout = repos.lifecycle.startEmpty(instant(1_000)).successValue()
         val exercise = repos.setLogging.addExercise(
             workout.id,
@@ -38,5 +39,6 @@ class SqlRestTimerPersistenceTest {
         assertEquals(instant(91_300), session.restEndsAt)
         assertEquals(180, recovered.store.defaultRestSeconds())
         assertFalse(recovered.store.restSoundEnabled())
+        assertFalse(recovered.store.restTimerSurfaceEnabled())
     }
 }

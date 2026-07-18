@@ -1,5 +1,6 @@
 package com.jjswigut.oopsallprs.platform
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.Activity
 import android.app.NotificationChannel
@@ -8,6 +9,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.media.AudioAttributes
@@ -189,8 +191,28 @@ actual class LocalSettingsStore actual constructor(private val context: Any?) {
 }
 
 actual class RestNotificationScheduler actual constructor(private val context: Any?) : RestAlertScheduler {
-    actual override fun schedule(restEndsAt: Instant, soundEnabled: Boolean) {
-        val androidContext = context as? Context ?: return
+    private val permissionLauncher: ActivityResultLauncher<String>? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            (context as? ComponentActivity)?.registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                val pending = pendingActiveRest
+                pendingActiveRest = null
+                if (granted && pending != null && pending.restEndsAt.toEpochMilliseconds() > System.currentTimeMillis()) {
+                    showOngoingNotification(pending)
+                }
+            }
+        } else {
+            null
+        }
+    private var pendingActiveRest: ActiveRestNotification? = null
+
+    actual override fun schedule(
+        restEndsAt: Instant,
+        soundEnabled: Boolean,
+        persistentSurfaceEnabled: Boolean
+    ): RestAlertScheduleResult {
+        val androidContext = context as? Context ?: return RestAlertScheduleResult.UNSUPPORTED
+        cancelScheduledAlarm(androidContext)
+        notificationManager(androidContext).cancel(ACTIVE_REST_NOTIFICATION_ID)
         val intent = restTimerIntent(androidContext).putExtra(RestTimerReceiver.EXTRA_SOUND_ENABLED, soundEnabled)
         val pendingIntent = PendingIntent.getBroadcast(
             androidContext,
@@ -200,10 +222,29 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         )
         val alarmManager = androidContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, restEndsAt.toEpochMilliseconds(), pendingIntent)
+
+        val activeRest = ActiveRestNotification(restEndsAt)
+        pendingActiveRest = activeRest.takeIf { persistentSurfaceEnabled }
+        if (!canPostNotifications(androidContext)) {
+            requestNotificationPermission()
+            return RestAlertScheduleResult.PERMISSION_DENIED
+        }
+        pendingActiveRest = null
+        return if (!persistentSurfaceEnabled || showOngoingNotification(activeRest)) {
+            RestAlertScheduleResult.SCHEDULED
+        } else {
+            RestAlertScheduleResult.PERMISSION_DENIED
+        }
     }
 
     actual override fun cancel() {
         val androidContext = context as? Context ?: return
+        pendingActiveRest = null
+        cancelScheduledAlarm(androidContext)
+        notificationManager(androidContext).cancel(ACTIVE_REST_NOTIFICATION_ID)
+    }
+
+    private fun cancelScheduledAlarm(androidContext: Context) {
         val pendingIntent = PendingIntent.getBroadcast(
             androidContext,
             REST_REQUEST_CODE,
@@ -214,8 +255,54 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         alarmManager.cancel(pendingIntent)
     }
 
+    private fun showOngoingNotification(activeRest: ActiveRestNotification): Boolean {
+        val androidContext = context as? Context ?: return false
+        val manager = notificationManager(androidContext)
+        manager.ensureActiveRestChannel()
+        val openApp = androidContext.packageManager.getLaunchIntentForPackage(androidContext.packageName)
+            ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val contentIntent = openApp?.let { intent ->
+            PendingIntent.getActivity(
+                androidContext,
+                REST_OPEN_APP_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        val notification = android.app.Notification.Builder(androidContext, CHANNEL_ACTIVE)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Rest timer")
+            .setContentText("Rest in progress")
+            .setCategory(android.app.Notification.CATEGORY_STOPWATCH)
+            .setWhen(activeRest.restEndsAt.toEpochMilliseconds())
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
+            .setShowWhen(true)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            .build()
+        return try {
+            manager.notify(ACTIVE_REST_NOTIFICATION_ID, notification)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        runCatching { permissionLauncher?.launch(Manifest.permission.POST_NOTIFICATIONS) }
+    }
+
+    private fun canPostNotifications(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     private fun restTimerIntent(context: Context): Intent =
         Intent(context, RestTimerReceiver::class.java).setAction(RestTimerReceiver.ACTION_REST_DONE)
+
+    private data class ActiveRestNotification(val restEndsAt: Instant)
 }
 
 class RestTimerReceiver : BroadcastReceiver() {
@@ -223,6 +310,7 @@ class RestTimerReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_REST_DONE) return
         val soundEnabled = intent.getBooleanExtra(EXTRA_SOUND_ENABLED, true)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(ACTIVE_REST_NOTIFICATION_ID)
         val channelId = if (soundEnabled) CHANNEL_SOUND else CHANNEL_SILENT
         notificationManager.ensureRestChannel(channelId, soundEnabled)
         val notification = android.app.Notification.Builder(context, channelId)
@@ -262,6 +350,20 @@ class RestTimerReceiver : BroadcastReceiver() {
         const val ACTION_REST_DONE = "com.jjswigut.oopsallprs.REST_DONE"
         const val EXTRA_SOUND_ENABLED = "sound_enabled"
     }
+}
+
+private fun notificationManager(context: Context): NotificationManager =
+    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+private fun NotificationManager.ensureActiveRestChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || getNotificationChannel(CHANNEL_ACTIVE) != null) return
+    createNotificationChannel(
+        NotificationChannel(CHANNEL_ACTIVE, "Active rest timer", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Shows the current rest countdown while a timer is active."
+            setSound(null, null)
+            enableVibration(false)
+        }
+    )
 }
 
 actual class FileExportHandoff actual constructor(private val context: Any?) {
@@ -819,5 +921,8 @@ actual class PlatformClock actual constructor() {
 
 private const val REST_REQUEST_CODE = 9217
 private const val REST_NOTIFICATION_ID = 9218
+private const val ACTIVE_REST_NOTIFICATION_ID = 9219
+private const val REST_OPEN_APP_REQUEST_CODE = 9220
 private const val CHANNEL_SOUND = "rest_timer_sound"
 private const val CHANNEL_SILENT = "rest_timer_silent"
+private const val CHANNEL_ACTIVE = "active_rest_timer"

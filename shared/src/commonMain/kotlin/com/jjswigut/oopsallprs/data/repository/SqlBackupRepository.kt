@@ -209,6 +209,7 @@ class SqlBackupRepository(
             date_format = null,
             default_rest_seconds = pkg.preferences.defaultRestSeconds.toLong(),
             rest_sound_enabled = pkg.preferences.restSoundEnabled.flag(),
+            rest_timer_surface_enabled = pkg.preferences.restTimerSurfaceEnabled.flag(),
             weight_step_lb = pkg.preferences.weightStepPounds,
             weight_step_kg = pkg.preferences.weightStepKilograms,
             android_auto_backup_allowed = 1L,

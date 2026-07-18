@@ -112,6 +112,8 @@ interface PreferencesRepository {
     suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean>
     suspend fun startWorkoutTimerWithFirstSet(): Boolean
     suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean>
+    suspend fun restTimerSurfaceEnabled(): Boolean
+    suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean>
 }
 
 interface FullAccessRepository {

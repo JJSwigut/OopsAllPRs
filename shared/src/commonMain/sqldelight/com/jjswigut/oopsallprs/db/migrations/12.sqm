@@ -1,0 +1,1 @@
+ALTER TABLE user_preferences ADD COLUMN rest_timer_surface_enabled INTEGER NOT NULL DEFAULT 1;
