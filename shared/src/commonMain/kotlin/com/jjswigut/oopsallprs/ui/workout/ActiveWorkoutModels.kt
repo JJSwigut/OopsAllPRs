@@ -58,6 +58,7 @@ data class ExerciseBlockState(
     val groupId: FoundationId? = null,
     val groupLabel: String? = null,
     val groupRounds: Int? = null,
+    val circuitProgress: CircuitProgressView? = null,
     val loadCalculatorKind: LoadCalculatorKind?,
     val position: OrderedPosition,
     val rest: RestConfiguration,
@@ -74,6 +75,12 @@ data class ExerciseBlockState(
     val effortKind: EffortKind?
         get() = loggingConfiguration.observedEffort?.kinds?.firstOrNull()
 }
+
+data class CircuitProgressView(
+    val round: Int,
+    val rounds: Int,
+    val isComplete: Boolean
+)
 
 internal data class ExerciseBlockGroupState(
     val blocks: List<ExerciseBlockState>
@@ -158,13 +165,39 @@ fun ActiveWorkout.toView(
     now: Instant? = null,
     errorMessage: String? = null
 ): ActiveWorkoutView {
-    val blocks = exercises.sortedBy { it.position.value }.map { exercise ->
+    val rawBlocks = exercises.sortedBy { it.position.value }.map { exercise ->
         exercise.toBlock(
             existingDraft = drafts[exercise.id]?.withPreview(now),
             prFeedbackBySetId = prFeedbackBySetId,
             configurations = configurations,
             canSaveConfigurationAsDefault = exercise.id in saveDefaultExerciseIds
         )
+    }
+    val completedCircuitIds = rawBlocks
+        .filter { it.groupId != null }
+        .groupBy { it.groupId }
+        .filterValues { grouped ->
+            val rounds = grouped.firstNotNullOfOrNull { it.groupRounds } ?: return@filterValues false
+            grouped.all { block ->
+                (0 until rounds).all { round ->
+                    block.loggedRows.any { it.position.value == round }
+                }
+            }
+        }
+        .keys
+    val blocks = rawBlocks.map { block ->
+        val rounds = block.groupRounds
+        if (block.groupId == null || rounds == null) {
+            block
+        } else {
+            block.copy(
+                circuitProgress = CircuitProgressView(
+                    round = (block.draft.position.value + 1).coerceIn(1, rounds),
+                    rounds = rounds,
+                    isComplete = block.groupId in completedCircuitIds
+                )
+            )
+        }
     }
     val resolvedFocus = focus?.let { candidate ->
         blocks.firstOrNull { it.exerciseInstanceId == candidate.exerciseInstanceId }?.let {

@@ -981,8 +981,9 @@ private fun LoggingContextHeader(
         return
     }
 
-    val round = block.draft.position.value + 1
-    val rounds = block.groupRounds ?: 1
+    val progress = block.circuitProgress
+    val round = progress?.round ?: 1
+    val rounds = progress?.rounds ?: (block.groupRounds ?: 1)
     val next = workout.nextCircuitBlockAfter(block)
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -994,7 +995,7 @@ private fun LoggingContextHeader(
         )
         FoundationMutedText(
             listOfNotNull(
-                "Round $round of $rounds",
+                if (progress?.isComplete == true) "Complete" else "Round $round of $rounds",
                 next?.let { "Next: ${it.displayName}" }
             ).joinToString(" • ")
         )
@@ -1006,6 +1007,7 @@ private fun LoggingContextHeader(
 }
 
 private fun ActiveWorkoutView.nextCircuitBlockAfter(block: ExerciseBlockState): ExerciseBlockState? {
+    if (block.circuitProgress?.isComplete == true) return null
     val groupId = block.groupId ?: return null
     val grouped = exerciseBlocks.filter { it.groupId == groupId }.sortedBy { it.position.value }
     val index = grouped.indexOfFirst { it.exerciseInstanceId == block.exerciseInstanceId }
@@ -1019,6 +1021,10 @@ private fun ActiveWorkoutView.nextCircuitBlockAfter(block: ExerciseBlockState): 
 
 private fun ExerciseBlockState.loggingContextLabel(): String {
     val label = groupLabel ?: return "Logging"
-    val rounds = groupRounds ?: return label
-    return "$label · round ${draft.position.value + 1} of $rounds"
+    val progress = circuitProgress ?: return label
+    return if (progress.isComplete) {
+        "$label · complete"
+    } else {
+        "$label · round ${progress.round} of ${progress.rounds}"
+    }
 }
