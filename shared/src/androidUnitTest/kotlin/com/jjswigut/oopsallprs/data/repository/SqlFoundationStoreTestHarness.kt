@@ -4,6 +4,7 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.CompletedWorkoutCorrectionUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
 import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
@@ -27,6 +28,7 @@ internal class SqlFoundationStoreTestHarness {
         val exercises = SqlExerciseRepository(store)
         val progress = SqlProgressRepository(store)
         val derivation = PersonalRecordDerivationUseCase(progress)
+        val corrections = CompletedWorkoutCorrectionUseCase(workouts, workouts, store, derivation)
         return SqlRepositoryBundle(
             store = store,
             workouts = workouts,
@@ -38,7 +40,8 @@ internal class SqlFoundationStoreTestHarness {
             setLogging = SetLoggingUseCases(workouts, sets, store),
             routineUseCases = RoutineUseCases(workouts, routines, workouts, derivation, preferences = store),
             exerciseCatalog = ExerciseCatalogUseCases(exercises, workouts),
-            personalRecords = derivation
+            personalRecords = derivation,
+            corrections = corrections
         )
     }
 }
@@ -54,7 +57,8 @@ internal data class SqlRepositoryBundle(
     val setLogging: SetLoggingUseCases,
     val routineUseCases: RoutineUseCases,
     val exerciseCatalog: ExerciseCatalogUseCases,
-    val personalRecords: PersonalRecordDerivationUseCase
+    val personalRecords: PersonalRecordDerivationUseCase,
+    val corrections: CompletedWorkoutCorrectionUseCase
 )
 
 internal fun instant(ms: Long): Instant = Instant.fromEpochMilliseconds(ms)

@@ -25,6 +25,11 @@ class PersonalRecordDerivationUseCase(
         progressRepository as? LoggingConfigurationRepository
 ) {
     suspend fun rebuildFrom(workouts: List<CompletedWorkout>) {
+        val snapshot = snapshotFrom(workouts)
+        progressRepository.replaceRecords(snapshot.records, snapshot.points)
+    }
+
+    suspend fun snapshotFrom(workouts: List<CompletedWorkout>): DerivedProgressSnapshot {
         val configurationCache = mutableMapOf<LoggingConfigurationId, LoggingConfiguration?>()
         val points = mutableListOf<ProgressPoint>()
         for (workout in workouts) {
@@ -63,7 +68,7 @@ class PersonalRecordDerivationUseCase(
             .groupBy { it.recordBucket() }
             .mapNotNull { (_, values) -> values.maxByOrNull(ProgressPoint::value)?.toPersonalRecord() }
 
-        progressRepository.replaceRecords(weightedRecords + scalarRecords, points)
+        return DerivedProgressSnapshot(weightedRecords + scalarRecords, points)
     }
 
     private suspend fun resolveConfiguration(id: LoggingConfigurationId): LoggingConfiguration? =
@@ -97,6 +102,11 @@ class PersonalRecordDerivationUseCase(
         val metricCode: WireCode
     )
 }
+
+data class DerivedProgressSnapshot(
+    val records: List<PersonalRecord>,
+    val points: List<ProgressPoint>
+)
 
 internal data class DerivedSetEvidence(
     val metric: ProgressEvidenceMetric,

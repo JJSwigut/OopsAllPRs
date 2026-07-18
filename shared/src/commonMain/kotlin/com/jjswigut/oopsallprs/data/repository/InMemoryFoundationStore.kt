@@ -42,6 +42,7 @@ import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.CompletedWorkoutCorrectionRepository
 import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
@@ -56,6 +57,7 @@ import kotlinx.datetime.Clock
 
 class InMemoryFoundationStore :
     WorkoutRepository,
+    CompletedWorkoutCorrectionRepository,
     SessionRepository,
     ActiveWorkoutUxRepository,
     SetLedgerRepository,
@@ -132,6 +134,22 @@ class InMemoryFoundationStore :
     override suspend fun completedWorkout(id: FoundationId): CompletedWorkout? = completedWorkouts[id]
 
     override suspend fun completedWorkouts(): List<CompletedWorkout> = completedWorkouts.values.toList()
+
+    override suspend fun saveCompletedWorkoutCorrection(
+        workout: CompletedWorkout,
+        records: List<PersonalRecord>,
+        points: List<ProgressPoint>
+    ): FoundationResult<CompletedWorkout> {
+        if (completedWorkouts[workout.id] == null) {
+            return foundationFailure(FoundationError.NotFound("Completed workout not found: ${workout.id}"))
+        }
+        completedWorkouts[workout.id] = workout
+        this.records.clear()
+        this.records.addAll(records)
+        this.points.clear()
+        this.points.addAll(points)
+        return foundationSuccess(workout)
+    }
 
     override suspend fun load(): ActiveSessionState? = activeSessionState
 

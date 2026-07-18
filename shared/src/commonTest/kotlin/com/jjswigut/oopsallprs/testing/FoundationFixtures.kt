@@ -10,6 +10,7 @@ import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.CompletedWorkoutCorrectionUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
@@ -39,6 +40,12 @@ class FoundationHarness {
     val setLogging = SetLoggingUseCases(store, store, store)
     val exerciseCatalog = ExerciseCatalogUseCases(store, store)
     val routines = RoutineUseCases(store, store, store, PersonalRecordDerivationUseCase(store), preferences = store)
+    val corrections = CompletedWorkoutCorrectionUseCase(
+        store,
+        store,
+        store,
+        PersonalRecordDerivationUseCase(store)
+    )
 
     val weightedReference = ExerciseReference(FoundationId("exercise-bench"), "Bench Press", isBodyweight = false)
     val bodyweightReference = ExerciseReference(FoundationId("exercise-pullup"), "Pull-Up", isBodyweight = true)

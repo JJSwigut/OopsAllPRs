@@ -607,7 +607,31 @@ private fun DestinationContent(
                         }
                     }
                 }
-            }
+            },
+            onEditWorkout = { scope.launch { appState.history.beginEditing() } },
+            onCancelEditWorkout = { appState.history.cancelEditing() },
+            onSaveEditWorkout = {
+                scope.launch {
+                    when (appState.history.saveEditing()) {
+                        is FoundationResult.Failure -> Unit
+                        is FoundationResult.Success -> appState.progress.refresh()
+                    }
+                }
+            },
+            onEditSet = { exerciseId, setId -> scope.launch { appState.history.editSet(exerciseId, setId) } },
+            onAddSet = { exerciseId -> scope.launch { appState.history.addSet(exerciseId) } },
+            onCancelSetEdit = { appState.history.cancelSetEdit() },
+            onApplySetEdit = { appState.history.applySetEdit() },
+            onRepsChange = { appState.history.updateReps(it) },
+            onWeightChange = { appState.history.updateWeight(it) },
+            onWeightInputChange = { appState.history.updateWeightInput(it) },
+            onDurationChange = { appState.history.updateDuration(it) },
+            onDistanceChange = { appState.history.updateDistance(it) },
+            onDistanceInputChange = { appState.history.updateDistanceInput(it) },
+            onEffortChange = { appState.history.updateEffort(it) },
+            onRequestDeleteSet = { appState.history.requestDeleteSet(it) },
+            onCancelDeleteSet = { appState.history.cancelDeleteSet() },
+            onConfirmDeleteSet = { appState.history.confirmDeleteSet() }
         )
         TopLevelDestination.PROGRESS -> ProgressFlow(
             state = progressState,

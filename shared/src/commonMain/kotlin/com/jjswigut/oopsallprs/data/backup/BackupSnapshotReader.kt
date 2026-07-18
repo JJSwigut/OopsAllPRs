@@ -136,6 +136,9 @@ class BackupSnapshotReader(
         val latestUpdated = buildList {
             activeWorkout?.updatedAt?.let { add(it) }
             addAll(completed.map { it.finishedAt })
+            addAll(completed.flatMap { workout ->
+                workout.exercises.flatMap { exercise -> exercise.loggedSets.map { it.updatedAt } }
+            })
             addAll(routines.map { it.updatedAt })
             addAll(exercises.map { it.updatedAt })
             addAll(records.map { it.createdAt })
