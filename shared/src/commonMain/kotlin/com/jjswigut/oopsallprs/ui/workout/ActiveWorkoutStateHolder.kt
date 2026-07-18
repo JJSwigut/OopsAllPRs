@@ -81,8 +81,25 @@ class ActiveWorkoutStateHolder(
         hydrateDrafts(workout)
         hydrateConfigurationPreferences(workout)
         focus = restoredFocus ?: activeUx?.loadUxSession(workoutId)?.toFocus()
+        val focusedExerciseId = focus?.exerciseInstanceId
+            ?: workout.exercises.minByOrNull { it.position.value }?.id
+        focusedExerciseId?.let {
+            workout.nextExerciseAfterCompletedCircuit(it)?.let { next ->
+                focus = ActiveWorkoutFocus(
+                    exerciseInstanceId = next.id,
+                    draftId = FoundationId("draft-${next.id.value}-${next.sets.size}"),
+                    updatedAt = now
+                )
+            }
+        }
         val session = lifecycle.restoreActiveSession(now)?.takeIf { it.activeWorkoutId == workoutId }
         publish(workout, now, session)
+        val focusedBlock = _state.value.workout?.exerciseBlocks?.firstOrNull {
+            it.exerciseInstanceId == focus?.exerciseInstanceId
+        }
+        if (focusedBlock?.circuitProgress?.isComplete == true) {
+            _state.value = _state.value.copy(isExerciseOverviewVisible = true)
+        }
         persistVisibleDraftsAndFocus(now)
         recomputeVisiblePrFeedback(workout, now)
     }
@@ -231,22 +248,32 @@ class ActiveWorkoutStateHolder(
                 if (savedWorkout != null) {
                     derivePrFeedback(savedWorkout, exerciseInstanceId, result.value)
                 }
-                if (block.rest.isEnabled) {
-                    lifecycle.startRestTimer(
+                val transition = savedWorkout?.loggingTransitionAfter(
+                    exerciseInstanceId = exerciseInstanceId,
+                    loggedPosition = result.value.position
+                ) ?: LoggingTransition(exerciseInstanceId, RestAfterLogging.KEEP)
+                val transitionAt = result.value.loggedAt ?: loggedAt
+                when (transition.restAfterLogging) {
+                    RestAfterLogging.KEEP -> Unit
+                    RestAfterLogging.CLEAR -> lifecycle.clearRestTimer(workoutId, transitionAt)
+                    RestAfterLogging.START_CONFIGURED -> lifecycle.startRestTimer(
                         activeWorkoutId = workoutId,
                         originSetId = result.value.id,
                         durationSeconds = block.rest.durationSeconds,
-                        now = result.value.loggedAt ?: loggedAt
+                        now = transitionAt
                     )
                 }
                 _state.value = _state.value.copy(isSaving = false, lastLoggedSet = result.value, errorMessage = null)
-                val nextFocus = savedWorkout?.nextCircuitFocusAfter(
-                    exerciseInstanceId = exerciseInstanceId,
-                    loggedPosition = result.value.position,
-                    now = result.value.loggedAt ?: loggedAt
-                )
-                focus = nextFocus ?: focus
+                val nextExercise = savedWorkout?.exercises?.firstOrNull { it.id == transition.nextExerciseId }
+                focus = nextExercise?.let {
+                    ActiveWorkoutFocus(
+                        exerciseInstanceId = it.id,
+                        draftId = FoundationId("draft-${it.id.value}-${it.sets.size}"),
+                        updatedAt = transitionAt
+                    )
+                } ?: focus
                 hydrate(workoutId, focus)
+                _state.value = _state.value.copy(isExerciseOverviewVisible = transition.showExerciseOverview)
                 result
             }
         }
@@ -446,7 +473,12 @@ class ActiveWorkoutStateHolder(
     }
 
     suspend fun setFocus(exerciseInstanceId: FoundationId, now: Instant = Clock.System.now()) {
-        val draft = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }?.draft
+        val block = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }
+        if (block?.circuitProgress?.isComplete == true) {
+            _state.value = _state.value.copy(isExerciseOverviewVisible = true)
+            return
+        }
+        val draft = block?.draft
         if (draft != null) {
             focus = ActiveWorkoutFocus(exerciseInstanceId, draft.draftId, now)
             persistFocus(now)
@@ -961,28 +993,4 @@ class ActiveWorkoutStateHolder(
             }
         }
     }
-}
-
-private fun ActiveWorkout.nextCircuitFocusAfter(
-    exerciseInstanceId: FoundationId,
-    loggedPosition: OrderedPosition,
-    now: Instant
-): ActiveWorkoutFocus? {
-    val current = exercises.firstOrNull { it.id == exerciseInstanceId } ?: return null
-    val group = current.groupContext ?: return null
-    val grouped = exercises
-        .filter { it.groupContext?.groupId == group.groupId }
-        .sortedBy { it.position.value }
-    val currentIndex = grouped.indexOfFirst { it.id == exerciseInstanceId }
-    if (currentIndex == -1) return null
-    val nextExercise = when {
-        currentIndex < grouped.lastIndex -> grouped[currentIndex + 1]
-        loggedPosition.value + 1 < group.rounds -> grouped.first()
-        else -> null
-    } ?: return null
-    return ActiveWorkoutFocus(
-        exerciseInstanceId = nextExercise.id,
-        draftId = FoundationId("draft-${nextExercise.id.value}-${nextExercise.sets.size}"),
-        updatedAt = now
-    )
 }
