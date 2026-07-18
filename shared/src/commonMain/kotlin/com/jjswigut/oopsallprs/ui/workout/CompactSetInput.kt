@@ -170,6 +170,7 @@ fun CompactSetInput(
     onOpenLoadCalculator: (() -> Unit)? = null,
     actionLabel: String = "Log set",
     pendingLabel: String = "Logging...",
+    showTimerControl: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
@@ -227,6 +228,7 @@ fun CompactSetInput(
                         draft = draft,
                         onDurationChange = onDurationChange,
                         onTimerToggle = onTimerToggle,
+                        showTimerControl = showTimerControl,
                         modifier = Modifier.fillMaxWidth()
                     )
                     MeasureKind.DISTANCE -> NumericStepper(
@@ -244,7 +246,9 @@ fun CompactSetInput(
                     )
                 }
             }
-            draft.loggingConfiguration.observedEffort?.kinds?.firstOrNull()?.let { effortKind ->
+            draft.loggingConfiguration.observedEffort?.kinds?.let { supportedKinds ->
+                draft.observedEffort?.kinds?.firstOrNull { it in supportedKinds } ?: supportedKinds.firstOrNull()
+            }?.let { effortKind ->
                 EffortInput(
                     kind = effortKind,
                     draft = draft,
@@ -351,6 +355,7 @@ private fun TimedDurationInput(
     draft: SetRowDraft,
     onDurationChange: (Long?) -> Unit,
     onTimerToggle: () -> Unit,
+    showTimerControl: Boolean,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
@@ -363,12 +368,14 @@ private fun TimedDurationInput(
             onTextChange = { raw -> parseDurationInput(raw)?.let(onDurationChange) },
             modifier = Modifier.fillMaxWidth()
         )
-        FitButton(
-            text = if (draft.isTimerRunning) "Stop timer" else "Start timer",
-            onClick = onTimerToggle,
-            modifier = Modifier.fillMaxWidth(),
-            style = FitButtonStyle.Secondary
-        )
+        if (showTimerControl) {
+            FitButton(
+                text = if (draft.isTimerRunning) "Stop timer" else "Start timer",
+                onClick = onTimerToggle,
+                modifier = Modifier.fillMaxWidth(),
+                style = FitButtonStyle.Secondary
+            )
+        }
     }
 }
 

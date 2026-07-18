@@ -12,6 +12,7 @@ import com.jjswigut.oopsallprs.data.repository.SqlSetLedgerRepository
 import com.jjswigut.oopsallprs.data.repository.SqlWorkoutRepository
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
+import com.jjswigut.oopsallprs.domain.usecase.CompletedWorkoutCorrectionUseCase
 import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
@@ -72,6 +73,14 @@ val foundationModule = module {
         PersonalRecordDerivationUseCase(
             progressRepository = get<SqlProgressRepository>(),
             loggingConfigurationRepository = get<SqlFoundationStore>()
+        )
+    }
+    single {
+        CompletedWorkoutCorrectionUseCase(
+            workouts = get<SqlWorkoutRepository>(),
+            corrections = get<SqlWorkoutRepository>(),
+            configurations = get<SqlFoundationStore>(),
+            personalRecords = get<PersonalRecordDerivationUseCase>()
         )
     }
     single {

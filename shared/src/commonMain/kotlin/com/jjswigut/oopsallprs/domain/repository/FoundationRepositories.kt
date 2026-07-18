@@ -41,6 +41,15 @@ interface WorkoutRepository {
     suspend fun completedWorkouts(): List<CompletedWorkout>
 }
 
+/** Atomically replaces one completed workout's set ledger and all derived progress. */
+interface CompletedWorkoutCorrectionRepository {
+    suspend fun saveCompletedWorkoutCorrection(
+        workout: CompletedWorkout,
+        records: List<PersonalRecord>,
+        points: List<ProgressPoint>
+    ): FoundationResult<CompletedWorkout>
+}
+
 interface SessionRepository {
     suspend fun load(): ActiveSessionState?
     suspend fun save(state: ActiveSessionState): FoundationResult<ActiveSessionState>

@@ -86,6 +86,7 @@ import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.model.toLegacyLoggingConfiguration
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.CompletedWorkoutCorrectionRepository
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
 import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
@@ -102,8 +103,10 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class SqlFoundationStore(
-    private val database: WorkoutDatabase
+    private val database: WorkoutDatabase,
+    private val correctionFaultInjector: (() -> Unit)? = null
 ) : WorkoutRepository,
+    CompletedWorkoutCorrectionRepository,
     SessionRepository,
     ActiveWorkoutUxRepository,
     SetLedgerRepository,
@@ -378,6 +381,36 @@ class SqlFoundationStore(
 
     override suspend fun completedWorkouts(): List<CompletedWorkout> =
         routineQueries.selectCompletedWorkouts().executeAsList().mapNotNull { it.toCompletedWorkoutOrNull() }
+
+    override suspend fun saveCompletedWorkoutCorrection(
+        workout: CompletedWorkout,
+        records: List<PersonalRecord>,
+        points: List<ProgressPoint>
+    ): FoundationResult<CompletedWorkout> {
+        val existing = completedWorkout(workout.id)
+            ?: return foundationFailure(FoundationError.NotFound("Completed workout not found: ${workout.id}"))
+        if (existing.sourceActiveWorkoutId != workout.sourceActiveWorkoutId) {
+            return foundationFailure(FoundationError.Validation("Completed workout source cannot be changed"))
+        }
+        return try {
+            database.transaction {
+                setQueries.deleteSetsForWorkout(workout.sourceActiveWorkoutId.value)
+                correctionFaultInjector?.invoke()
+                workout.exercises.flatMap(CompletedExercise::loggedSets).forEach { set ->
+                    setQueries.upsertSet(workout.sourceActiveWorkoutId, set)
+                }
+                progressQueries.deletePersonalRecords()
+                progressQueries.deleteProgressPoints()
+                records.forEach { progressQueries.insertPersonalRecord(it) }
+                points.forEach { progressQueries.insertProgressPoint(it) }
+            }
+            foundationSuccess(workout)
+        } catch (error: Throwable) {
+            foundationFailure(
+                FoundationError.Persistence("Workout correction failed: ${error.message ?: "unknown error"}")
+            )
+        }
+    }
 
     override suspend fun load(): ActiveSessionState? =
         workoutQueries.selectSessionState().executeAsOneOrNull()?.toActiveSessionState()
