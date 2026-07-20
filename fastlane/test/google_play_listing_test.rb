@@ -5,6 +5,10 @@ require_relative "../google_play_listing"
 
 FASTLANE_LANES = {}
 
+module SharedValues
+  IPA_OUTPUT_PATH = :ipa_output_path
+end
+
 module UI
   def self.message(_message); end
 
@@ -85,6 +89,37 @@ class GooglePlayListingTest < Minitest::Test
     refute upload_options.key?(:track_promote_to)
     refute upload_options.key?(:rollout)
     refute upload_options.key?(:release_status)
+  end
+
+  def test_ios_beta_lane_resolves_build_paths_from_repository_root
+    commands = []
+    build_options = nil
+    upload_options = nil
+    root = File.expand_path("../..", __dir__)
+
+    define_singleton_method(:app_store_connect_api_key) { |**_options| :api_key }
+    define_singleton_method(:sh) { |command| commands << command }
+    define_singleton_method(:build_app) { |**options| build_options = options }
+    define_singleton_method(:lane_context) { { SharedValues::IPA_OUTPUT_PATH => "/tmp/OopsAllPRs.ipa" } }
+    define_singleton_method(:upload_to_testflight) { |**options| upload_options = options }
+
+    with_environment(
+      "APP_STORE_CONNECT_API_KEY_ID" => "key-id",
+      "APP_STORE_CONNECT_ISSUER_ID" => "issuer-id",
+      "APP_STORE_CONNECT_API_KEY_BASE64" => "key-content",
+      "APPLE_TEAM_ID" => "team-id",
+      "IOS_BUILD_NUMBER" => "1010",
+      "IOS_PROVISIONING_PROFILE_NAME" => "Oops All PRs App Store"
+    ) do
+      Dir.chdir(File.join(root, "fastlane")) do
+        instance_exec(&FASTLANE_LANES.fetch([:ios, :beta]))
+      end
+    end
+
+    assert_equal ["cd #{Shellwords.escape(root)} && ./gradlew :shared:linkReleaseFrameworkIosArm64"], commands
+    assert_equal File.join(root, "iosApp", "OopsAllPRs.xcodeproj"), build_options.fetch(:project)
+    assert_equal File.join(root, "iosApp", "build", "fastlane"), build_options.fetch(:output_directory)
+    assert_equal "/tmp/OopsAllPRs.ipa", upload_options.fetch(:ipa)
   end
 
   private
