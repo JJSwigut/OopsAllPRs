@@ -25,6 +25,43 @@ import kotlin.test.assertTrue
 
 class ActiveWorkoutStateHolderTest {
     @Test
+    fun firstSetTimerStaysPendingDuringSetupThenAdvancesAfterLogging() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(2_000)
+        ).successValue()
+        val holder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+
+        holder.hydrate(workout.id, now = instant(5_000))
+        holder.refreshTimers(now = instant(7_000))
+
+        assertFalse(holder.state.value.workout?.isTimerStarted ?: true)
+        assertEquals(0L, holder.state.value.workout?.elapsedMillis)
+
+        harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = com.jjswigut.oopsallprs.domain.model.WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(8_000)
+        ).successValue()
+        holder.hydrate(workout.id, now = instant(10_000))
+        holder.refreshTimers(now = instant(12_000))
+
+        assertTrue(holder.state.value.workout?.isTimerStarted == true)
+        assertEquals(4_000L, holder.state.value.workout?.elapsedMillis)
+    }
+
+    @Test
     fun elapsedTimerUsesEffectiveStartForBothPreferenceModes() = runTest {
         val harness = FoundationHarness()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
