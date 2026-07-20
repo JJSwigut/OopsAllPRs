@@ -77,8 +77,7 @@ fun ActiveWorkoutFlow(
     onRequestFinish: () -> Unit,
     onCancelFinish: () -> Unit,
     onConfirmFinish: (FoundationId) -> Unit,
-    onRestTick: () -> Unit,
-    onTimedTick: () -> Unit,
+    onTimerTick: () -> Unit,
     onAdjustActiveRest: (Int) -> Unit,
     onSkipActiveRest: () -> Unit,
     onAdjustExerciseRest: (FoundationId, Int) -> Unit,
@@ -97,19 +96,15 @@ fun ActiveWorkoutFlow(
     weightStepAmount: Double = weightStep(weightUnit),
     modifier: Modifier = Modifier
 ) {
-    LaunchedEffect(state.workout?.workoutId, state.workout?.activeRest?.endsAt) {
-        if (state.workout?.activeRest == null) return@LaunchedEffect
-        while (true) {
-            delay(1_000)
-            onRestTick()
-        }
-    }
     val hasRunningTimedDraft = state.workout?.exerciseBlocks.orEmpty().any { it.draft.isTimerRunning }
-    LaunchedEffect(state.workout?.workoutId, hasRunningTimedDraft) {
-        if (!hasRunningTimedDraft) return@LaunchedEffect
+    val shouldTick = state.workout?.isTimerStarted == true ||
+        state.workout?.activeRest != null ||
+        hasRunningTimedDraft
+    LaunchedEffect(state.workout?.workoutId, shouldTick) {
+        if (!shouldTick) return@LaunchedEffect
         while (true) {
             delay(1_000)
-            onTimedTick()
+            onTimerTick()
         }
     }
     val displayWeightStep = weightStepAmount
@@ -131,7 +126,11 @@ fun ActiveWorkoutFlow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FoundationMutedText(state.workout?.elapsedMillis?.let(::formatElapsed).orEmpty())
+                FoundationMutedText(
+                    state.workout?.let { workout ->
+                        if (workout.isTimerStarted) formatElapsed(workout.elapsedMillis) else "Not started"
+                    }.orEmpty()
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
                     state.workout?.takeIf { it.exerciseBlocks.size >= 2 }?.let {
                         FoundationTextAction("Organize", onClick = { isOrganizerOpen = true })
@@ -947,11 +946,16 @@ private fun RestTimerPanel(
     }
 }
 
-private fun formatElapsed(elapsedMillis: Long): String {
-    val totalMinutes = elapsedMillis / 60_000L
-    val hours = totalMinutes / 60L
-    val minutes = totalMinutes % 60L
-    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+internal fun formatElapsed(elapsedMillis: Long): String {
+    val totalSeconds = (elapsedMillis / 1_000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
+    }
 }
 
 private fun formatRest(milliseconds: Long): String {

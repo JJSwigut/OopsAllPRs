@@ -307,14 +307,11 @@ fun AppShell(
                             }
                         }
                     },
-                    onRestTick = {
+                    onTimerTick = {
                         scope.launch {
                             appState.activeWorkout.refreshTimers()
                             appState.refreshActiveSession()
                         }
-                    },
-                    onTimedTick = {
-                        scope.launch { appState.activeWorkout.refreshTimers() }
                     },
                     onAdjustActiveRest = { deltaSeconds ->
                         scope.launch {

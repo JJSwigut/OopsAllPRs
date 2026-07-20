@@ -25,6 +25,7 @@ import kotlinx.datetime.Instant
 data class ActiveWorkoutView(
     val workoutId: FoundationId,
     val startedAt: Instant,
+    val isTimerStarted: Boolean,
     val elapsedMillis: Long = 0L,
     val exerciseBlocks: List<ExerciseBlockState>,
     val primaryAction: ActiveWorkoutPrimaryAction,
@@ -209,10 +210,16 @@ fun ActiveWorkout.toView(
     }
     val focusedBlock = blocks.firstOrNull { it.exerciseInstanceId == resolvedFocus?.exerciseInstanceId }
     val effectiveStartedAt = effectiveStartedAt(startTimerWithFirstSet)
+    val isTimerStarted = !startTimerWithFirstSet || loggedSets().isNotEmpty()
     return ActiveWorkoutView(
         workoutId = id,
         startedAt = effectiveStartedAt,
-        elapsedMillis = now?.toEpochMilliseconds()?.minus(effectiveStartedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L,
+        isTimerStarted = isTimerStarted,
+        elapsedMillis = if (isTimerStarted) {
+            now?.toEpochMilliseconds()?.minus(effectiveStartedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L
+        } else {
+            0L
+        },
         exerciseBlocks = blocks,
         primaryAction = when {
             blocks.isEmpty() -> ActiveWorkoutPrimaryAction.ADD_EXERCISE

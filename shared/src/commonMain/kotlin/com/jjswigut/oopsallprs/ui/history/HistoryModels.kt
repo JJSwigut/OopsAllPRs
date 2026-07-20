@@ -240,7 +240,9 @@ private fun WeightUnit.abbreviation(): String =
     }
 
 private fun formatDuration(durationMs: Long): String {
-    val totalMinutes = (durationMs.coerceAtLeast(0L) / 60_000L).coerceAtLeast(0L)
+    val normalizedDuration = durationMs.coerceAtLeast(0L)
+    if (normalizedDuration in 1L..<60_000L) return "<1m"
+    val totalMinutes = normalizedDuration / 60_000L
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
     return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
