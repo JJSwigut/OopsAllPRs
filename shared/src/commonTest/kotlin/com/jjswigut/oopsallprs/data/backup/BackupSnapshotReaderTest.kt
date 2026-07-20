@@ -103,6 +103,54 @@ class BackupSnapshotReaderTest {
         assertEquals(listOf(3, 3), activeExercises.map { it.groupRounds })
     }
 
+    @Test
+    fun snapshotIncludesCircuitMetadataForCompletedWorkout() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val bench = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
+        val pullUp = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_200)).successValue()
+        harness.setLogging.groupExercisesAsCircuit(
+            workout.id,
+            listOf(bench.id, pullUp.id),
+            instant(1_300)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            bench.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(1_400)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            pullUp.id,
+            SetKind.BODYWEIGHT,
+            reps = 8,
+            weight = null,
+            position = 0,
+            loggedAt = instant(1_500)
+        ).successValue()
+        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val reader = BackupSnapshotReader(
+            workouts = harness.store,
+            sessions = harness.store,
+            activeUx = harness.store,
+            routines = harness.store,
+            exercises = harness.store,
+            preferences = harness.store,
+            progress = harness.store
+        )
+
+        val pkg = reader.createPackage(instant(3_000)).successValue()
+        val completedExercises = pkg.completedWorkouts.single().exercises
+
+        assertEquals(1, completedExercises.mapNotNull { it.groupId }.distinct().size)
+        assertEquals(listOf("Circuit", "Circuit"), completedExercises.map { it.groupLabel })
+        assertEquals(listOf(3, 3), completedExercises.map { it.groupRounds })
+    }
+
     private fun groupedExercise(id: String, name: String, groupId: FoundationId, position: Int): RoutineExercise =
         RoutineExercise(
             id = FoundationId(id),

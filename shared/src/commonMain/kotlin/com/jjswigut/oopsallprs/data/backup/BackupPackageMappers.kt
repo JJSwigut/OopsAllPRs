@@ -345,12 +345,23 @@ internal fun CompletedExercise.toDto(): CompletedExerciseDto {
     }
     return CompletedExerciseDto(
         ledgerExerciseId, completedWorkoutId.value, exerciseCatalogId.value, displayNameSnapshot, position.value,
-        loggedSets.map { it.toDto() }, rest.toDto()
+        loggedSets.map { it.toDto() }, rest.toDto(), groupContext?.groupId?.value,
+        groupContext?.groupPosition?.value, groupContext?.label, groupContext?.rounds
     )
 }
 internal fun CompletedExerciseDto.toDomain() = CompletedExercise(
     FoundationId(id), FoundationId(completedWorkoutId), FoundationId(exerciseCatalogId), displayNameSnapshot,
-    OrderedPosition(position), loggedSets.map { it.toDomain() }, rest.toDomain()
+    OrderedPosition(position), loggedSets.map { it.toDomain() }, rest.toDomain(),
+    if (groupId != null && groupPosition != null && groupLabel != null && groupRounds != null) {
+        ActiveExerciseGroupContext(
+            FoundationId(groupId),
+            OrderedPosition(groupPosition),
+            groupLabel,
+            groupRounds
+        )
+    } else {
+        null
+    }
 )
 internal fun CompletedWorkout.toDto() = CompletedWorkoutDto(
     id.value, sourceActiveWorkoutId.value, startedAt.toBackupMillis(), finishedAt.toBackupMillis(), durationMs,
