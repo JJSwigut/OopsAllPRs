@@ -1,4 +1,5 @@
 require "fileutils"
+require "shellwords"
 require_relative "google_play_listing"
 
 opt_out_usage
@@ -181,14 +182,14 @@ platform :ios do
 
     api_key = app_store_connect_key
 
-    sh("./gradlew :shared:linkReleaseFrameworkIosArm64")
+    sh("cd #{Shellwords.escape(repo_root)} && ./gradlew :shared:linkReleaseFrameworkIosArm64")
 
     build_app(
-      project: "iosApp/OopsAllPRs.xcodeproj",
+      project: File.join(repo_root, "iosApp", "OopsAllPRs.xcodeproj"),
       scheme: "OopsAllPRs",
       configuration: "Release",
       export_method: "app-store",
-      output_directory: "iosApp/build/fastlane",
+      output_directory: File.join(repo_root, "iosApp", "build", "fastlane"),
       xcargs: [
         "DEVELOPMENT_TEAM=#{ENV.fetch('APPLE_TEAM_ID')}",
         "CODE_SIGN_STYLE=Manual",
