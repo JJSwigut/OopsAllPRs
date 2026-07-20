@@ -333,10 +333,10 @@ class SqlFoundationStore(
                     is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
-                    group_id = null,
-                    group_position = null,
-                    group_label = null,
-                    group_rounds = null,
+                    group_id = exercise.groupContext?.groupId?.value,
+                    group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
+                    group_label = exercise.groupContext?.label,
+                    group_rounds = exercise.groupContext?.rounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong(),
                     logging_configuration_id = exercise.loggedSets.firstOrNull()?.captureConfigurationId?.value
@@ -1096,7 +1096,8 @@ class SqlFoundationStore(
                         rest = RestConfiguration(
                             durationSeconds = exercise.rest_seconds.toInt(),
                             autoStart = exercise.rest_auto_start.toBooleanFlag()
-                        )
+                        ),
+                        groupContext = exercise.groupContext()
                     )
                 }
             }

@@ -17,6 +17,61 @@ import kotlin.test.assertTrue
 
 class TemplateLaunchSeparationTest {
     @Test
+    fun completedCircuitSavesAndLaunchesAsCircuitTemplate() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val bench = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(1_100)
+        ).successValue()
+        val pullUp = harness.setLogging.addExercise(
+            workout.id,
+            harness.bodyweightReference,
+            instant(1_200)
+        ).successValue()
+        harness.setLogging.groupExercisesAsCircuit(
+            workout.id,
+            listOf(bench.id, pullUp.id),
+            instant(1_300)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            bench.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(1_400)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            pullUp.id,
+            SetKind.BODYWEIGHT,
+            reps = 8,
+            weight = null,
+            position = 0,
+            loggedAt = instant(1_500)
+        ).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val template = harness.routines.saveCompletedWorkoutAsRoutine(
+            completed.id,
+            "Upper circuit",
+            instant(3_000)
+        ).successValue()
+
+        val templateGroupIds = template.exercises.map { it.groupId }
+        assertEquals(1, templateGroupIds.filterNotNull().distinct().size)
+        assertEquals(listOf(0, 0), template.exercises.map { it.groupPosition?.value })
+        assertEquals(listOf(3, 3), template.exercises.map { it.groupRounds })
+
+        val launched = harness.lifecycle.startFromRoutine(template.id, instant(4_000)).successValue()
+
+        assertEquals(listOf("Circuit", "Circuit"), launched.exercises.map { it.groupContext?.label })
+        assertEquals(listOf(3, 3), launched.exercises.map { it.groupContext?.rounds })
+    }
+
+    @Test
     fun launchedTemplateCreatesPlannedSetsWithoutLoggedTimestamps() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()

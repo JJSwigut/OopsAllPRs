@@ -72,7 +72,8 @@ data class CompletedExercise(
     val displayNameSnapshot: String,
     val position: OrderedPosition,
     val loggedSets: List<ExerciseSet>,
-    val rest: RestConfiguration = RestConfiguration.default()
+    val rest: RestConfiguration = RestConfiguration.default(),
+    val groupContext: ActiveExerciseGroupContext? = null
 )
 
 data class CompletedWorkout(

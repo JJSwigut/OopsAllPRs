@@ -45,7 +45,8 @@ class RoutineUseCases(
                 displayNameSnapshot = exercise.reference.displayNameSnapshot,
                 position = exercise.position,
                 loggedSets = logged,
-                rest = exercise.rest
+                rest = exercise.rest,
+                groupContext = exercise.groupContext
             )
         }
         val effectiveStartedAt = active.effectiveStartedAt(
@@ -87,6 +88,9 @@ class RoutineUseCases(
                 exerciseCatalogId = completedExercise.exerciseCatalogId,
                 displayNameSnapshot = completedExercise.displayNameSnapshot,
                 position = completedExercise.position,
+                groupId = completedExercise.groupContext?.groupId,
+                groupPosition = completedExercise.groupContext?.groupPosition,
+                groupRounds = completedExercise.groupContext?.rounds,
                 rest = completedExercise.rest.takeIf { it.durationSeconds > 0 }
                     ?: RestConfiguration(
                         durationSeconds = preferences?.defaultRestSeconds() ?: RestConfiguration.DEFAULT_SECONDS

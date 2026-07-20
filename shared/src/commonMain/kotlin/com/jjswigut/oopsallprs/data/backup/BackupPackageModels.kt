@@ -266,7 +266,11 @@ data class CompletedExerciseDto(
     val displayNameSnapshot: String,
     val position: Int,
     val loggedSets: List<ExerciseSetDto>,
-    val rest: RestConfigurationDto
+    val rest: RestConfigurationDto,
+    val groupId: String? = null,
+    val groupPosition: Int? = null,
+    val groupLabel: String? = null,
+    val groupRounds: Int? = null
 )
 
 @Serializable

@@ -43,9 +43,34 @@ class SqlCompletedLedgerPersistenceTest {
         assertEquals(2, active.exercises.size)
         assertEquals(completedId, restored.sourceCompletedWorkoutId)
     }
+
+    @Test
+    fun circuitTemplateSurvivesCompletedWorkoutReload() = runTest {
+        val harness = SqlFoundationStoreTestHarness()
+        val repos = harness.repositories()
+        val completedId = createCompletedMixedWorkout(repos, asCircuit = true)
+
+        val recovered = harness.repositories()
+        val completed = assertNotNull(recovered.workouts.completedWorkout(completedId))
+        assertEquals(1, completed.exercises.mapNotNull { it.groupContext?.groupId }.distinct().size)
+        assertEquals(listOf(3, 3), completed.exercises.map { it.groupContext?.rounds })
+
+        val template = recovered.routineUseCases.saveCompletedWorkoutAsRoutine(
+            completedId,
+            "Full Body Circuit",
+            instant(3_000)
+        ).successValue()
+        val launched = recovered.lifecycle.startFromRoutine(template.id, instant(4_000)).successValue()
+
+        assertEquals(listOf("Circuit", "Circuit"), launched.exercises.map { it.groupContext?.label })
+        assertEquals(listOf(3, 3), launched.exercises.map { it.groupContext?.rounds })
+    }
 }
 
-internal suspend fun createCompletedMixedWorkout(repos: SqlRepositoryBundle): FoundationId {
+internal suspend fun createCompletedMixedWorkout(
+    repos: SqlRepositoryBundle,
+    asCircuit: Boolean = false
+): FoundationId {
     val workout = repos.lifecycle.startEmpty(instant(1_000)).successValue()
     val weighted = repos.setLogging.addExercise(
         workout.id,
@@ -57,6 +82,13 @@ internal suspend fun createCompletedMixedWorkout(repos: SqlRepositoryBundle): Fo
         ExerciseReference(FoundationId("exercise-pullup"), "Pull-Up", isBodyweight = true),
         instant(1_150)
     ).successValue()
+    if (asCircuit) {
+        repos.setLogging.groupExercisesAsCircuit(
+            workout.id,
+            listOf(weighted.id, bodyweight.id),
+            instant(1_175)
+        ).successValue()
+    }
     repos.setLogging.confirmSet(workout.id, weighted.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
     repos.setLogging.confirmSet(workout.id, bodyweight.id, SetKind.BODYWEIGHT, 12, null, 0, instant(1_250)).successValue()
     val completed = repos.routineUseCases.finishWorkout(workout.id, instant(2_000)).successValue()
