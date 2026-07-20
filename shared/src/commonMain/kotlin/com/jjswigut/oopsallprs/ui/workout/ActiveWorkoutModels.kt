@@ -25,6 +25,7 @@ import kotlinx.datetime.Instant
 data class ActiveWorkoutView(
     val workoutId: FoundationId,
     val startedAt: Instant,
+    val isTimerStarted: Boolean,
     val elapsedMillis: Long = 0L,
     val exerciseBlocks: List<ExerciseBlockState>,
     val primaryAction: ActiveWorkoutPrimaryAction,
@@ -58,6 +59,7 @@ data class ExerciseBlockState(
     val groupId: FoundationId? = null,
     val groupLabel: String? = null,
     val groupRounds: Int? = null,
+    val circuitProgress: CircuitProgressView? = null,
     val loadCalculatorKind: LoadCalculatorKind?,
     val position: OrderedPosition,
     val rest: RestConfiguration,
@@ -74,6 +76,12 @@ data class ExerciseBlockState(
     val effortKind: EffortKind?
         get() = loggingConfiguration.observedEffort?.kinds?.firstOrNull()
 }
+
+data class CircuitProgressView(
+    val round: Int,
+    val rounds: Int,
+    val isComplete: Boolean
+)
 
 internal data class ExerciseBlockGroupState(
     val blocks: List<ExerciseBlockState>
@@ -155,16 +163,43 @@ fun ActiveWorkout.toView(
     activeSession: ActiveSessionState? = null,
     configurations: Map<LoggingConfigurationId, LoggingConfiguration> = emptyMap(),
     saveDefaultExerciseIds: Set<FoundationId> = emptySet(),
+    startTimerWithFirstSet: Boolean = true,
     now: Instant? = null,
     errorMessage: String? = null
 ): ActiveWorkoutView {
-    val blocks = exercises.sortedBy { it.position.value }.map { exercise ->
+    val rawBlocks = exercises.sortedBy { it.position.value }.map { exercise ->
         exercise.toBlock(
             existingDraft = drafts[exercise.id]?.withPreview(now),
             prFeedbackBySetId = prFeedbackBySetId,
             configurations = configurations,
             canSaveConfigurationAsDefault = exercise.id in saveDefaultExerciseIds
         )
+    }
+    val completedCircuitIds = rawBlocks
+        .filter { it.groupId != null }
+        .groupBy { it.groupId }
+        .filterValues { grouped ->
+            val rounds = grouped.firstNotNullOfOrNull { it.groupRounds } ?: return@filterValues false
+            grouped.all { block ->
+                (0 until rounds).all { round ->
+                    block.loggedRows.any { it.position.value == round }
+                }
+            }
+        }
+        .keys
+    val blocks = rawBlocks.map { block ->
+        val rounds = block.groupRounds
+        if (block.groupId == null || rounds == null) {
+            block
+        } else {
+            block.copy(
+                circuitProgress = CircuitProgressView(
+                    round = (block.draft.position.value + 1).coerceIn(1, rounds),
+                    rounds = rounds,
+                    isComplete = block.groupId in completedCircuitIds
+                )
+            )
+        }
     }
     val resolvedFocus = focus?.let { candidate ->
         blocks.firstOrNull { it.exerciseInstanceId == candidate.exerciseInstanceId }?.let {
@@ -174,10 +209,17 @@ fun ActiveWorkout.toView(
         ActiveWorkoutFocus(it.exerciseInstanceId, it.draft.draftId, updatedAt)
     }
     val focusedBlock = blocks.firstOrNull { it.exerciseInstanceId == resolvedFocus?.exerciseInstanceId }
+    val effectiveStartedAt = effectiveStartedAt(startTimerWithFirstSet)
+    val isTimerStarted = !startTimerWithFirstSet || loggedSets().isNotEmpty()
     return ActiveWorkoutView(
         workoutId = id,
-        startedAt = startedAt,
-        elapsedMillis = now?.toEpochMilliseconds()?.minus(startedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L,
+        startedAt = effectiveStartedAt,
+        isTimerStarted = isTimerStarted,
+        elapsedMillis = if (isTimerStarted) {
+            now?.toEpochMilliseconds()?.minus(effectiveStartedAt.toEpochMilliseconds())?.coerceAtLeast(0L) ?: 0L
+        } else {
+            0L
+        },
         exerciseBlocks = blocks,
         primaryAction = when {
             blocks.isEmpty() -> ActiveWorkoutPrimaryAction.ADD_EXERCISE

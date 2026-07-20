@@ -3,6 +3,7 @@ package com.jjswigut.oopsallprs.ui.history
 import com.jjswigut.oopsallprs.domain.model.CompletedExercise
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
+import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
@@ -49,6 +50,7 @@ data class CompletedSetSummary(
     val weight: WeightKg?,
     val durationMs: Long?,
     val distanceMeters: Double? = null,
+    val observedEffort: Effort? = null,
     val loggedAt: Instant,
     val prMarkers: List<CompletedPrMarker> = emptyList()
 )
@@ -161,6 +163,7 @@ private fun ExerciseSet.toSummary(records: List<PersonalRecord>): CompletedSetSu
         weight = weight,
         durationMs = durationMs,
         distanceMeters = distanceMeters,
+        observedEffort = observedEffort,
         loggedAt = requireNotNull(loggedAt),
         prMarkers = records.map { it.toMarker() }
     )
@@ -198,8 +201,15 @@ internal fun CompletedSetSummary.historyDisplayLabel(weightUnit: WeightUnit): St
         weight?.historyWeightLabel(weightUnit),
         durationMs?.formatDurationMs(),
         distanceMeters?.let { "${it.formatCompact()} m" }
-    ).joinToString(" • ").ifEmpty { "Performance unavailable" }
+    ).plus(listOfNotNull(observedEffort?.historyEffortLabel())).joinToString(" • ").ifEmpty { "Performance unavailable" }
     return "Set ${position + 1}: $valueLabel$prs"
+}
+
+private fun Effort.historyEffortLabel(): String = when {
+    rir != null -> "RIR $rir"
+    rpeTenths != null -> "RPE ${(rpeTenths / 10.0).formatCompact()}"
+    failureOutcome != null -> if (failureOutcome.name == "REACHED") "Failure reached" else "Failure not reached"
+    else -> ""
 }
 
 internal fun CompletedPrMarker.historyLabel(weightUnit: WeightUnit): String =
@@ -230,7 +240,9 @@ private fun WeightUnit.abbreviation(): String =
     }
 
 private fun formatDuration(durationMs: Long): String {
-    val totalMinutes = (durationMs.coerceAtLeast(0L) / 60_000L).coerceAtLeast(0L)
+    val normalizedDuration = durationMs.coerceAtLeast(0L)
+    if (normalizedDuration in 1L..<60_000L) return "<1m"
+    val totalMinutes = normalizedDuration / 60_000L
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
     return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"

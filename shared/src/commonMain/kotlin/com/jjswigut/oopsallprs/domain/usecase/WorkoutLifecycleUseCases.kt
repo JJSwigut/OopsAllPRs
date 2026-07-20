@@ -33,6 +33,8 @@ class WorkoutLifecycleUseCases(
     private val notifications: RestAlertScheduler? = null,
     private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null
 ) {
+    private var lastRestAlertRequest: RestAlertRequest? = null
+
     suspend fun startEmpty(now: Instant = Clock.System.now()): FoundationResult<ActiveWorkout> {
         currentActiveWorkout()?.let {
             return foundationFailure(FoundationError.Conflict("An active workout is already in progress"))
@@ -141,14 +143,25 @@ class WorkoutLifecycleUseCases(
     suspend fun restoreActiveSession(now: Instant = Clock.System.now()): ActiveSessionState? {
         val state = sessions.load() ?: return null
         val restEndsAt = state.restEndsAt
-        return if (restEndsAt != null && restEndsAt <= now) {
-            val cleared = state.withoutRest(now)
-            sessions.save(cleared)
-            notifications?.cancel()
-            cleared
+        val restAdjusted = if (restEndsAt != null && restEndsAt <= now) {
+            cancelRestAlert()
+            state.withoutRest(now)
         } else {
+            if (restEndsAt != null) {
+                reconcileRestAlert(restEndsAt)
+            }
             state
         }
+        val effectiveStartedAt = restAdjusted.activeWorkoutId
+            ?.let { workouts.activeWorkout(it) }
+            ?.effectiveStartedAt(preferences?.startWorkoutTimerWithFirstSet() ?: true)
+        val adjusted = if (effectiveStartedAt != null && effectiveStartedAt != restAdjusted.startedAt) {
+            restAdjusted.copy(startedAt = effectiveStartedAt, updatedAt = now)
+        } else {
+            restAdjusted
+        }
+        if (adjusted != state) sessions.save(adjusted)
+        return adjusted
     }
 
     suspend fun activeWorkout(activeWorkoutId: FoundationId): ActiveWorkout? =
@@ -175,8 +188,13 @@ class WorkoutLifecycleUseCases(
             lastOpenedRoute = current?.lastOpenedRoute,
             updatedAt = now
         )
-        notifications?.schedule(restEndsAt, preferences?.restSoundEnabled() ?: true)
-        return sessions.save(state)
+        return when (val saved = sessions.save(state)) {
+            is FoundationResult.Failure -> saved
+            is FoundationResult.Success -> {
+                reconcileRestAlert(restEndsAt)
+                saved
+            }
+        }
     }
 
     suspend fun startRestTimer(
@@ -218,7 +236,7 @@ class WorkoutLifecycleUseCases(
         if (current.activeWorkoutId != activeWorkoutId) {
             return foundationFailure(FoundationError.NotFound("Active session not found for workout: $activeWorkoutId"))
         }
-        notifications?.cancel()
+        cancelRestAlert()
         return sessions.save(current.withoutRest(now))
     }
 
@@ -231,11 +249,21 @@ class WorkoutLifecycleUseCases(
         if (current.activeWorkoutId != activeWorkoutId || current.restOriginSetId != originSetId) {
             return foundationSuccess(current)
         }
-        notifications?.cancel()
+        cancelRestAlert()
         return when (val saved = sessions.save(current.withoutRest(now))) {
             is FoundationResult.Failure -> saved
             is FoundationResult.Success -> foundationSuccess(saved.value)
         }
+    }
+
+    suspend fun refreshRestAlertForPreference(now: Instant = Clock.System.now()) {
+        val current = sessions.load()
+        val restEndsAt = current?.restEndsAt
+        if (restEndsAt == null || restEndsAt <= now) {
+            cancelRestAlert()
+            return
+        }
+        reconcileRestAlert(restEndsAt)
     }
 
     suspend fun saveLastOpenedRoute(
@@ -254,11 +282,38 @@ class WorkoutLifecycleUseCases(
     }
 
     suspend fun discard(activeWorkoutId: FoundationId, now: Instant = Clock.System.now()): FoundationResult<Unit> {
-        notifications?.cancel()
+        cancelRestAlert()
         sessions.clear(now)
         activeUx?.clearWorkoutUx(activeWorkoutId, now)
         return workouts.discardActiveWorkout(activeWorkoutId, now)
     }
+
+    private suspend fun reconcileRestAlert(restEndsAt: Instant) {
+        val scheduler = notifications ?: return
+        val request = RestAlertRequest(
+            restEndsAt = restEndsAt,
+            soundEnabled = preferences?.restSoundEnabled() ?: true,
+            persistentSurfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: true
+        )
+        if (request == lastRestAlertRequest) return
+        scheduler.schedule(
+            restEndsAt = request.restEndsAt,
+            soundEnabled = request.soundEnabled,
+            persistentSurfaceEnabled = request.persistentSurfaceEnabled
+        )
+        lastRestAlertRequest = request
+    }
+
+    private fun cancelRestAlert() {
+        lastRestAlertRequest = null
+        notifications?.cancel()
+    }
+
+    private data class RestAlertRequest(
+        val restEndsAt: Instant,
+        val soundEnabled: Boolean,
+        val persistentSurfaceEnabled: Boolean
+    )
 
     private companion object {
         const val ACTIVE_WORKOUT_ROUTE = "active-workout"

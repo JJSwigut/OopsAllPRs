@@ -46,7 +46,9 @@ data class PreferencesSnapshotDto(
     val weightStepPounds: Double,
     val weightStepKilograms: Double,
     val defaultRestSeconds: Int,
-    val restSoundEnabled: Boolean
+    val restSoundEnabled: Boolean,
+    val startWorkoutTimerWithFirstSet: Boolean = true,
+    val restTimerSurfaceEnabled: Boolean = true
 )
 
 @Serializable
@@ -264,7 +266,11 @@ data class CompletedExerciseDto(
     val displayNameSnapshot: String,
     val position: Int,
     val loggedSets: List<ExerciseSetDto>,
-    val rest: RestConfigurationDto
+    val rest: RestConfigurationDto,
+    val groupId: String? = null,
+    val groupPosition: Int? = null,
+    val groupLabel: String? = null,
+    val groupRounds: Int? = null
 )
 
 @Serializable

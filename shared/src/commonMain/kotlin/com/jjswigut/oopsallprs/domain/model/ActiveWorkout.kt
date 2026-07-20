@@ -19,4 +19,11 @@ data class ActiveWorkout(
     val status: WorkoutStatus = WorkoutStatus.ACTIVE
 ) {
     fun loggedSets(): List<ExerciseSet> = exercises.flatMap { it.sets }.filter { it.isLogged }
+
+    fun effectiveStartedAt(startTimerWithFirstSet: Boolean): Instant =
+        if (startTimerWithFirstSet) {
+            loggedSets().mapNotNull(ExerciseSet::loggedAt).minOrNull() ?: startedAt
+        } else {
+            startedAt
+        }
 }

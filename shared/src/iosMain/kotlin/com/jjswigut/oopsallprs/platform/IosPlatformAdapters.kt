@@ -51,7 +51,11 @@ actual class LocalSettingsStore actual constructor(context: Any?) {
 }
 
 actual class RestNotificationScheduler actual constructor(context: Any?) : RestAlertScheduler {
-    actual override fun schedule(restEndsAt: Instant, soundEnabled: Boolean) = Unit
+    actual override fun schedule(
+        restEndsAt: Instant,
+        soundEnabled: Boolean,
+        persistentSurfaceEnabled: Boolean
+    ): RestAlertScheduleResult = RestAlertScheduleResult.UNSUPPORTED
     actual override fun cancel() = Unit
 }
 

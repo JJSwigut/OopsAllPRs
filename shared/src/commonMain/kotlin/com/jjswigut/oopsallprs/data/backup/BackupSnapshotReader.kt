@@ -76,7 +76,9 @@ class BackupSnapshotReader(
                     weightStepPounds = preferences.weightStep(WeightUnit.POUNDS),
                     weightStepKilograms = preferences.weightStep(WeightUnit.KILOGRAMS),
                     defaultRestSeconds = preferences.defaultRestSeconds(),
-                    restSoundEnabled = preferences.restSoundEnabled()
+                    restSoundEnabled = preferences.restSoundEnabled(),
+                    startWorkoutTimerWithFirstSet = preferences.startWorkoutTimerWithFirstSet(),
+                    restTimerSurfaceEnabled = preferences.restTimerSurfaceEnabled()
                 ),
                 loggingConfigurations = configurations.map { it.toDto() },
                 userExerciseConfigurations = userConfigurations.map { it.toDto() },
@@ -136,6 +138,9 @@ class BackupSnapshotReader(
         val latestUpdated = buildList {
             activeWorkout?.updatedAt?.let { add(it) }
             addAll(completed.map { it.finishedAt })
+            addAll(completed.flatMap { workout ->
+                workout.exercises.flatMap { exercise -> exercise.loggedSets.map { it.updatedAt } }
+            })
             addAll(routines.map { it.updatedAt })
             addAll(exercises.map { it.updatedAt })
             addAll(records.map { it.createdAt })

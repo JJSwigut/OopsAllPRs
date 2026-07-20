@@ -42,6 +42,7 @@ import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.CompletedWorkoutCorrectionRepository
 import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
@@ -56,6 +57,7 @@ import kotlinx.datetime.Clock
 
 class InMemoryFoundationStore :
     WorkoutRepository,
+    CompletedWorkoutCorrectionRepository,
     SessionRepository,
     ActiveWorkoutUxRepository,
     SetLedgerRepository,
@@ -86,6 +88,8 @@ class InMemoryFoundationStore :
     private var weightStepPreference = WeightStepPreference()
     private var defaultRestSeconds = RestConfiguration.DEFAULT_SECONDS
     private var restSoundEnabled = true
+    private var startTimerWithFirstSetPreference = true
+    private var restTimerSurfaceEnabled = true
     private var fullAccessState = FullAccessState()
 
     override suspend fun createActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout> {
@@ -132,6 +136,22 @@ class InMemoryFoundationStore :
     override suspend fun completedWorkout(id: FoundationId): CompletedWorkout? = completedWorkouts[id]
 
     override suspend fun completedWorkouts(): List<CompletedWorkout> = completedWorkouts.values.toList()
+
+    override suspend fun saveCompletedWorkoutCorrection(
+        workout: CompletedWorkout,
+        records: List<PersonalRecord>,
+        points: List<ProgressPoint>
+    ): FoundationResult<CompletedWorkout> {
+        if (completedWorkouts[workout.id] == null) {
+            return foundationFailure(FoundationError.NotFound("Completed workout not found: ${workout.id}"))
+        }
+        completedWorkouts[workout.id] = workout
+        this.records.clear()
+        this.records.addAll(records)
+        this.points.clear()
+        this.points.addAll(points)
+        return foundationSuccess(workout)
+    }
 
     override suspend fun load(): ActiveSessionState? = activeSessionState
 
@@ -427,6 +447,20 @@ class InMemoryFoundationStore :
 
     override suspend fun setRestSoundEnabled(enabled: Boolean): FoundationResult<Boolean> {
         restSoundEnabled = enabled
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun startWorkoutTimerWithFirstSet(): Boolean = startTimerWithFirstSetPreference
+
+    override suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
+        startTimerWithFirstSetPreference = enabled
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun restTimerSurfaceEnabled(): Boolean = restTimerSurfaceEnabled
+
+    override suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean> {
+        restTimerSurfaceEnabled = enabled
         return foundationSuccess(enabled)
     }
 

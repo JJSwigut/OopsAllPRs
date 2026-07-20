@@ -10,6 +10,7 @@ import com.jjswigut.oopsallprs.domain.model.FoundationId
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BackupPackageCodecTest {
@@ -56,6 +57,8 @@ class BackupPackageCodecTest {
 
         assertEquals(BACKUP_FORMAT_VERSION_V1, decoded.formatVersion)
         assertEquals(8, decoded.appSchemaVersion)
+        assertTrue(decoded.preferences.startWorkoutTimerWithFirstSet)
+        assertTrue(decoded.preferences.restTimerSurfaceEnabled)
     }
 
     @Test
@@ -68,6 +71,8 @@ class BackupPackageCodecTest {
                 createdAt = instant(100), updatedAt = instant(100)
             )
         ).successValue()
+        harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+        harness.store.setRestTimerSurfaceEnabled(false).successValue()
         val workoutId = harness.workoutWithLoggedWeightedSet()
         harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
         val reader = BackupSnapshotReader(
@@ -91,6 +96,8 @@ class BackupPackageCodecTest {
         assertEquals(pkg.lastLocalRevision, decoded.lastLocalRevision)
         assertEquals(pkg.summary.workoutCount, decoded.summary.workoutCount)
         assertEquals("test-device", decoded.deviceId)
+        assertFalse(decoded.preferences.startWorkoutTimerWithFirstSet)
+        assertFalse(decoded.preferences.restTimerSurfaceEnabled)
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.jjswigut.oopsallprs.dev.DeveloperSeedStateHolder
 import com.jjswigut.oopsallprs.dev.DeveloperSeedUseCase
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
+import com.jjswigut.oopsallprs.domain.usecase.CompletedWorkoutCorrectionUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseLoggingConfigurationUseCases
 import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
@@ -152,6 +153,12 @@ class AppState(
             )
             val activePrFeedback = ActivePrFeedbackUseCase(progress, store)
             val personalRecordDerivation = PersonalRecordDerivationUseCase(progress, store)
+            val completedWorkoutCorrections = CompletedWorkoutCorrectionUseCase(
+                workouts = workouts,
+                corrections = workouts,
+                configurations = store,
+                personalRecords = personalRecordDerivation
+            )
             val routineUseCases = RoutineUseCases(
                 workouts,
                 routineRepo,
@@ -168,7 +175,8 @@ class AppState(
                 activeUx = workouts,
                 activePrFeedback = activePrFeedback,
                 previousDefaults = previousDefaults,
-                configurationManagement = exerciseLogging.management
+                configurationManagement = exerciseLogging.management,
+                preferences = store
             )
             val exerciseCatalog = ExerciseCatalogUseCases(exerciseRepo, workouts, exerciseLogging.configurations)
             val developerSeeds = if (developerToolsEnabled) {
@@ -196,7 +204,13 @@ class AppState(
                 exerciseCatalog = exerciseCatalog,
                 routines = RoutineStateHolder(routineUseCases, exerciseCatalog),
                 progress = ProgressStateHolder(progress, workouts, store),
-                history = HistoryStateHolder(workouts, progress, routineUseCases),
+                history = HistoryStateHolder(
+                    workouts,
+                    progress,
+                    routineUseCases,
+                    completedWorkoutCorrections,
+                    store
+                ),
                 profile = ProfileStateHolder(
                     preferences = store,
                     exports = store,
@@ -204,7 +218,10 @@ class AppState(
                         { file -> handoff.share(file.fileName, file.content) }
                     },
                     backupSync = backupSync,
-                    fullAccess = fullAccess
+                    fullAccess = fullAccess,
+                    onRestTimerSurfacePreferenceChanged = {
+                        lifecycle.refreshRestAlertForPreference()
+                    }
                 ),
                 fullAccess = fullAccess,
                 exerciseLoggingConfiguration = exerciseLogging.management,

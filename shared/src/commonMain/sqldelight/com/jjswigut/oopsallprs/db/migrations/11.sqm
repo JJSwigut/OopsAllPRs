@@ -1,0 +1,1 @@
+ALTER TABLE user_preferences ADD COLUMN start_timer_on_first_set INTEGER NOT NULL DEFAULT 1;

@@ -40,6 +40,8 @@ class BackupSnapshotReaderTest {
     @Test
     fun snapshotIncludesCompletedLedgerExercisesPreferencesAndProgressContainers() = runTest {
         val harness = FoundationHarness()
+        harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+        harness.store.setRestTimerSurfaceEnabled(false).successValue()
         harness.seedExerciseCatalog()
         val workoutId = harness.workoutWithLoggedWeightedSet()
         harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
@@ -60,6 +62,8 @@ class BackupSnapshotReaderTest {
         assertFalse(pkg.summary.hasActiveWorkout)
         assertTrue(pkg.exercises.isNotEmpty())
         assertEquals("POUNDS", pkg.preferences.weightUnit)
+        assertFalse(pkg.preferences.startWorkoutTimerWithFirstSet)
+        assertFalse(pkg.preferences.restTimerSurfaceEnabled)
         assertEquals(pkg.personalRecords.size + pkg.progressPoints.size, pkg.summary.progressRecordCount)
     }
 
@@ -97,6 +101,54 @@ class BackupSnapshotReaderTest {
         assertEquals(listOf("routine-group-1", "routine-group-1"), activeExercises.map { it.groupId })
         assertEquals(listOf("Circuit", "Circuit"), activeExercises.map { it.groupLabel })
         assertEquals(listOf(3, 3), activeExercises.map { it.groupRounds })
+    }
+
+    @Test
+    fun snapshotIncludesCircuitMetadataForCompletedWorkout() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val bench = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
+        val pullUp = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_200)).successValue()
+        harness.setLogging.groupExercisesAsCircuit(
+            workout.id,
+            listOf(bench.id, pullUp.id),
+            instant(1_300)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            bench.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(1_400)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            pullUp.id,
+            SetKind.BODYWEIGHT,
+            reps = 8,
+            weight = null,
+            position = 0,
+            loggedAt = instant(1_500)
+        ).successValue()
+        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val reader = BackupSnapshotReader(
+            workouts = harness.store,
+            sessions = harness.store,
+            activeUx = harness.store,
+            routines = harness.store,
+            exercises = harness.store,
+            preferences = harness.store,
+            progress = harness.store
+        )
+
+        val pkg = reader.createPackage(instant(3_000)).successValue()
+        val completedExercises = pkg.completedWorkouts.single().exercises
+
+        assertEquals(1, completedExercises.mapNotNull { it.groupId }.distinct().size)
+        assertEquals(listOf("Circuit", "Circuit"), completedExercises.map { it.groupLabel })
+        assertEquals(listOf(3, 3), completedExercises.map { it.groupRounds })
     }
 
     private fun groupedExercise(id: String, name: String, groupId: FoundationId, position: Int): RoutineExercise =

@@ -18,12 +18,26 @@ expect class LocalSettingsStore(context: Any? = null) {
 }
 
 interface RestAlertScheduler {
-    fun schedule(restEndsAt: Instant, soundEnabled: Boolean = true)
+    fun schedule(
+        restEndsAt: Instant,
+        soundEnabled: Boolean = true,
+        persistentSurfaceEnabled: Boolean = true
+    ): RestAlertScheduleResult
     fun cancel()
 }
 
+enum class RestAlertScheduleResult {
+    SCHEDULED,
+    PERMISSION_DENIED,
+    UNSUPPORTED
+}
+
 expect class RestNotificationScheduler(context: Any? = null) : RestAlertScheduler {
-    override fun schedule(restEndsAt: Instant, soundEnabled: Boolean)
+    override fun schedule(
+        restEndsAt: Instant,
+        soundEnabled: Boolean,
+        persistentSurfaceEnabled: Boolean
+    ): RestAlertScheduleResult
     override fun cancel()
 }
 

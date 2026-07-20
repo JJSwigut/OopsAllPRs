@@ -16,6 +16,13 @@ import kotlin.test.assertTrue
 
 class CompletedWorkoutSummaryModelTest {
     @Test
+    fun subMinuteWorkoutDoesNotLookLikeZeroDuration() {
+        val summary = mixedCompletedWorkout().copy(durationMs = 42_000).toSummary()
+
+        assertEquals("<1m", summary.durationLabel)
+    }
+
+    @Test
     fun mapsDurationMixedRowsAndCounts() {
         val summary = mixedCompletedWorkout().toSummary()
 

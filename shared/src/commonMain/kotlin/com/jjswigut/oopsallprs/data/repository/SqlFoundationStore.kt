@@ -86,6 +86,7 @@ import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.model.toLegacyLoggingConfiguration
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
+import com.jjswigut.oopsallprs.domain.repository.CompletedWorkoutCorrectionRepository
 import com.jjswigut.oopsallprs.domain.repository.ExerciseRepository
 import com.jjswigut.oopsallprs.domain.repository.ExportRepository
 import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
@@ -102,8 +103,10 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class SqlFoundationStore(
-    private val database: WorkoutDatabase
+    private val database: WorkoutDatabase,
+    private val correctionFaultInjector: (() -> Unit)? = null
 ) : WorkoutRepository,
+    CompletedWorkoutCorrectionRepository,
     SessionRepository,
     ActiveWorkoutUxRepository,
     SetLedgerRepository,
@@ -330,10 +333,10 @@ class SqlFoundationStore(
                     is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
                     position = exercise.position.value.toLong(),
                     logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
-                    group_id = null,
-                    group_position = null,
-                    group_label = null,
-                    group_rounds = null,
+                    group_id = exercise.groupContext?.groupId?.value,
+                    group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
+                    group_label = exercise.groupContext?.label,
+                    group_rounds = exercise.groupContext?.rounds?.toLong(),
                     rest_seconds = exercise.rest.durationSeconds.toLong(),
                     rest_auto_start = exercise.rest.autoStart.toDbLong(),
                     logging_configuration_id = exercise.loggedSets.firstOrNull()?.captureConfigurationId?.value
@@ -378,6 +381,36 @@ class SqlFoundationStore(
 
     override suspend fun completedWorkouts(): List<CompletedWorkout> =
         routineQueries.selectCompletedWorkouts().executeAsList().mapNotNull { it.toCompletedWorkoutOrNull() }
+
+    override suspend fun saveCompletedWorkoutCorrection(
+        workout: CompletedWorkout,
+        records: List<PersonalRecord>,
+        points: List<ProgressPoint>
+    ): FoundationResult<CompletedWorkout> {
+        val existing = completedWorkout(workout.id)
+            ?: return foundationFailure(FoundationError.NotFound("Completed workout not found: ${workout.id}"))
+        if (existing.sourceActiveWorkoutId != workout.sourceActiveWorkoutId) {
+            return foundationFailure(FoundationError.Validation("Completed workout source cannot be changed"))
+        }
+        return try {
+            database.transaction {
+                setQueries.deleteSetsForWorkout(workout.sourceActiveWorkoutId.value)
+                correctionFaultInjector?.invoke()
+                workout.exercises.flatMap(CompletedExercise::loggedSets).forEach { set ->
+                    setQueries.upsertSet(workout.sourceActiveWorkoutId, set)
+                }
+                progressQueries.deletePersonalRecords()
+                progressQueries.deleteProgressPoints()
+                records.forEach { progressQueries.insertPersonalRecord(it) }
+                points.forEach { progressQueries.insertProgressPoint(it) }
+            }
+            foundationSuccess(workout)
+        } catch (error: Throwable) {
+            foundationFailure(
+                FoundationError.Persistence("Workout correction failed: ${error.message ?: "unknown error"}")
+            )
+        }
+    }
 
     override suspend fun load(): ActiveSessionState? =
         workoutQueries.selectSessionState().executeAsOneOrNull()?.toActiveSessionState()
@@ -674,9 +707,11 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -704,9 +739,11 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
             weight_step_lb = if (unit == WeightUnit.POUNDS) normalized else existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = if (unit == WeightUnit.KILOGRAMS) normalized else existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -728,9 +765,11 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = seconds.toLong(),
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -748,9 +787,55 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = enabled.toDbLong(),
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
+            created_at = existing?.created_at ?: now.toDbLong(),
+            updated_at = now.toDbLong()
+        )
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun restTimerSurfaceEnabled(): Boolean =
+        workoutQueries.selectUserPreferences().executeAsOneOrNull()?.rest_timer_surface_enabled?.toBooleanFlag() ?: true
+
+    override suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean> {
+        val existing = workoutQueries.selectUserPreferences().executeAsOneOrNull()
+        val now = Clock.System.now()
+        workoutQueries.upsertUserPreferences(
+            weight_unit = existing?.weight_unit ?: WeightUnit.POUNDS.name,
+            date_format = existing?.date_format,
+            default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
+            rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            rest_timer_surface_enabled = enabled.toDbLong(),
+            weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
+            weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
+            android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = existing?.start_timer_on_first_set ?: 1L,
+            created_at = existing?.created_at ?: now.toDbLong(),
+            updated_at = now.toDbLong()
+        )
+        return foundationSuccess(enabled)
+    }
+
+    override suspend fun startWorkoutTimerWithFirstSet(): Boolean =
+        workoutQueries.selectUserPreferences().executeAsOneOrNull()?.start_timer_on_first_set?.toBooleanFlag() ?: true
+
+    override suspend fun setStartWorkoutTimerWithFirstSet(enabled: Boolean): FoundationResult<Boolean> {
+        val existing = workoutQueries.selectUserPreferences().executeAsOneOrNull()
+        val now = Clock.System.now()
+        workoutQueries.upsertUserPreferences(
+            weight_unit = existing?.weight_unit ?: WeightUnit.POUNDS.name,
+            date_format = existing?.date_format,
+            default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
+            rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
+            weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
+            android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
+            start_timer_on_first_set = enabled.toDbLong(),
             created_at = existing?.created_at ?: now.toDbLong(),
             updated_at = now.toDbLong()
         )
@@ -1011,7 +1096,8 @@ class SqlFoundationStore(
                         rest = RestConfiguration(
                             durationSeconds = exercise.rest_seconds.toInt(),
                             autoStart = exercise.rest_auto_start.toBooleanFlag()
-                        )
+                        ),
+                        groupContext = exercise.groupContext()
                     )
                 }
             }

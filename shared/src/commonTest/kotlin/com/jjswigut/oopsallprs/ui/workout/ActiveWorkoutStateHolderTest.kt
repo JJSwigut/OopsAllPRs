@@ -8,10 +8,14 @@ import com.jjswigut.oopsallprs.domain.model.RestConfiguration
 import com.jjswigut.oopsallprs.domain.model.RoutineExercise
 import com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate
 import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
+import com.jjswigut.oopsallprs.platform.RestAlertScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduleResult
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.successValue
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -20,6 +24,84 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ActiveWorkoutStateHolderTest {
+    @Test
+    fun firstSetTimerStaysPendingDuringSetupThenAdvancesAfterLogging() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(2_000)
+        ).successValue()
+        val holder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+
+        holder.hydrate(workout.id, now = instant(5_000))
+        holder.refreshTimers(now = instant(7_000))
+
+        assertFalse(holder.state.value.workout?.isTimerStarted ?: true)
+        assertEquals(0L, holder.state.value.workout?.elapsedMillis)
+
+        harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = com.jjswigut.oopsallprs.domain.model.WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(8_000)
+        ).successValue()
+        holder.hydrate(workout.id, now = instant(10_000))
+        holder.refreshTimers(now = instant(12_000))
+
+        assertTrue(holder.state.value.workout?.isTimerStarted == true)
+        assertEquals(4_000L, holder.state.value.workout?.elapsedMillis)
+    }
+
+    @Test
+    fun elapsedTimerUsesEffectiveStartForBothPreferenceModes() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = harness.setLogging.addExercise(
+            workout.id,
+            harness.weightedReference,
+            instant(2_000)
+        ).successValue()
+        harness.setLogging.confirmSet(
+            workout.id,
+            exercise.id,
+            SetKind.WEIGHTED,
+            reps = 5,
+            weight = com.jjswigut.oopsallprs.domain.model.WeightKg(100.0),
+            position = 0,
+            loggedAt = instant(3_000)
+        ).successValue()
+        val firstSetHolder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+
+        firstSetHolder.hydrate(workout.id, now = instant(5_000))
+
+        assertEquals(instant(3_000), firstSetHolder.state.value.workout?.startedAt)
+        assertEquals(2_000L, firstSetHolder.state.value.workout?.elapsedMillis)
+
+        harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
+        val creationTimeHolder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            preferences = harness.store
+        )
+        creationTimeHolder.hydrate(workout.id, now = instant(5_000))
+
+        assertEquals(instant(1_000), creationTimeHolder.state.value.workout?.startedAt)
+        assertEquals(4_000L, creationTimeHolder.state.value.workout?.elapsedMillis)
+    }
+
     @Test
     fun hydrateCreatesDefaultDraftForExercise() = runTest {
         val harness = FoundationHarness()
@@ -97,8 +179,18 @@ class ActiveWorkoutStateHolderTest {
     }
 
     @Test
-    fun confirmingCircuitSetAdvancesThroughExercisesAndRounds() = runTest {
+    fun circuitLoggingAdvancesInOrderAndOnlyRestsBetweenRounds() = runTest {
         val harness = FoundationHarness()
+        val restAlerts = CountingRestAlerts()
+        val lifecycle = WorkoutLifecycleUseCases(
+            workouts = harness.store,
+            sessions = harness.store,
+            routines = harness.store,
+            activeUx = harness.store,
+            preferences = harness.store,
+            notifications = restAlerts,
+            previousDefaults = harness.previousDefaults
+        )
         val groupId = FoundationId("routine-group-circuit")
         val routine = harness.routines.saveRoutine(
             routineId = null,
@@ -111,7 +203,7 @@ class ActiveWorkoutStateHolderTest {
             now = instant(1_000)
         ).successValue()
         val active = harness.lifecycle.startFromRoutine(routine.id, instant(2_000)).successValue()
-        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle)
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, lifecycle)
         holder.hydrate(active.id, now = instant(2_100))
 
         val blocks = holder.state.value.workout!!.exerciseBlocks
@@ -122,13 +214,104 @@ class ActiveWorkoutStateHolderTest {
         holder.confirmDraft(squat).successValue()
         assertEquals(pushup, holder.state.value.workout?.focus?.exerciseInstanceId)
         assertEquals(0, holder.state.value.workout?.exerciseBlocks?.first { it.exerciseInstanceId == pushup }?.draft?.position?.value)
+        assertNull(holder.state.value.workout?.activeRest)
+        assertEquals(0, restAlerts.scheduleCount)
 
         holder.confirmDraft(pushup).successValue()
         assertEquals(lunge, holder.state.value.workout?.focus?.exerciseInstanceId)
+        assertNull(holder.state.value.workout?.activeRest)
+        assertEquals(0, restAlerts.scheduleCount)
 
-        holder.confirmDraft(lunge).successValue()
+        val roundOneFinal = holder.confirmDraft(lunge).successValue()
         assertEquals(squat, holder.state.value.workout?.focus?.exerciseInstanceId)
         assertEquals(1, holder.state.value.workout?.exerciseBlocks?.first { it.exerciseInstanceId == squat }?.draft?.position?.value)
+        assertEquals(roundOneFinal.id, holder.state.value.workout?.activeRest?.originSetId)
+        assertEquals(1, restAlerts.scheduleCount)
+
+        holder.confirmDraft(squat).successValue()
+        assertEquals(pushup, holder.state.value.workout?.focus?.exerciseInstanceId)
+        assertNull(holder.state.value.workout?.activeRest)
+
+        holder.confirmDraft(pushup).successValue()
+        assertEquals(lunge, holder.state.value.workout?.focus?.exerciseInstanceId)
+        assertNull(holder.state.value.workout?.activeRest)
+
+        holder.confirmDraft(lunge).successValue()
+
+        val completed = assertNotNull(holder.state.value.workout)
+        assertNull(completed.activeRest)
+        assertTrue(holder.state.value.isExerciseOverviewVisible)
+        assertEquals(lunge, completed.focus?.exerciseInstanceId)
+        assertTrue(completed.exerciseBlocks.all { it.circuitProgress?.isComplete == true })
+        assertTrue(completed.exerciseBlocks.all { it.circuitProgress?.round == 2 })
+        assertEquals(1, restAlerts.scheduleCount)
+
+        val recovered = ActiveWorkoutStateHolder(harness.setLogging, lifecycle, harness.store)
+        recovered.hydrate(active.id, now = instant(3_000))
+
+        val recoveredView = assertNotNull(recovered.state.value.workout)
+        assertTrue(recovered.state.value.isExerciseOverviewVisible)
+        assertNull(recoveredView.activeRest)
+        assertTrue(recoveredView.exerciseBlocks.all { it.circuitProgress?.isComplete == true })
+        assertTrue(recoveredView.exerciseBlocks.all { it.circuitProgress?.round == 2 })
+    }
+
+    @Test
+    fun completedCircuitAdvancesToNextWorkoutBlock() = runTest {
+        val harness = FoundationHarness()
+        val groupId = FoundationId("routine-group-circuit-next-block")
+        val routine = harness.routines.saveRoutine(
+            routineId = null,
+            name = "Circuit then standalone",
+            exercises = listOf(
+                circuitExercise("routine-exercise-squat-next", "Squat", "exercise-squat", groupId, 0),
+                circuitExercise("routine-exercise-pushup-next", "Pushup", "exercise-pushup", groupId, 1),
+                RoutineExercise(
+                    id = FoundationId("routine-exercise-plank-next"),
+                    routineId = FoundationId("routine-draft"),
+                    exerciseCatalogId = FoundationId("exercise-plank"),
+                    displayNameSnapshot = "Plank",
+                    position = OrderedPosition(2),
+                    plannedSets = listOf(
+                        RoutineSetTemplate(
+                            id = FoundationId("set-routine-exercise-plank-next"),
+                            routineExerciseId = FoundationId("routine-exercise-plank-next"),
+                            position = OrderedPosition(0),
+                            targetWeight = null,
+                            targetReps = 10,
+                            setKind = SetKind.BODYWEIGHT
+                        )
+                    )
+                )
+            ),
+            now = instant(1_000)
+        ).successValue()
+        val active = harness.lifecycle.startFromRoutine(routine.id, instant(2_000)).successValue()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle)
+        holder.hydrate(active.id, now = instant(2_100))
+        val blocks = assertNotNull(holder.state.value.workout).exerciseBlocks
+        val first = blocks[0].exerciseInstanceId
+        val second = blocks[1].exerciseInstanceId
+        val standalone = blocks[2].exerciseInstanceId
+
+        holder.confirmDraft(first).successValue()
+        holder.confirmDraft(second).successValue()
+        holder.confirmDraft(first).successValue()
+        holder.confirmDraft(second).successValue()
+
+        val completed = assertNotNull(holder.state.value.workout)
+        assertEquals(standalone, completed.focus?.exerciseInstanceId)
+        assertFalse(holder.state.value.isExerciseOverviewVisible)
+        assertNull(completed.activeRest)
+        assertEquals(0, completed.exerciseBlocks.single { it.exerciseInstanceId == standalone }.draft.position.value)
+
+        val recovered = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle, harness.store)
+        recovered.hydrate(active.id, now = instant(3_000))
+
+        val recoveredView = assertNotNull(recovered.state.value.workout)
+        assertEquals(standalone, recoveredView.focus?.exerciseInstanceId)
+        assertFalse(recovered.state.value.isExerciseOverviewVisible)
+        assertNull(recoveredView.activeRest)
     }
 
     @Test
@@ -235,4 +418,19 @@ class ActiveWorkoutStateHolderTest {
                 )
             )
         )
+
+    private class CountingRestAlerts : RestAlertScheduler {
+        var scheduleCount: Int = 0
+
+        override fun schedule(
+            restEndsAt: Instant,
+            soundEnabled: Boolean,
+            persistentSurfaceEnabled: Boolean
+        ): RestAlertScheduleResult {
+            scheduleCount += 1
+            return RestAlertScheduleResult.SCHEDULED
+        }
+
+        override fun cancel() = Unit
+    }
 }

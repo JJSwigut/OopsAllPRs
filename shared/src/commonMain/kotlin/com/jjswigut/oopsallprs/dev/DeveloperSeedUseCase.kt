@@ -42,10 +42,10 @@ class DeveloperSeedUseCase(
         runScenario(DeveloperSeedScenario.PROGRESS) {
             val exercises = resolveExercises()
             val plans = progressWorkoutPlans()
-            val existingStartedAt = workouts.completedWorkouts()
-                .map { it.startedAt }
+            val existingFinishedAt = workouts.completedWorkouts()
+                .map { it.finishedAt }
                 .toSet()
-            val missingPlans = plans.filterNot { it.startedAt in existingStartedAt }
+            val missingPlans = plans.filterNot { it.finishedAt in existingFinishedAt }
             if (missingPlans.isEmpty()) {
                 return@runScenario skipped("Progress demo already loaded")
             }
