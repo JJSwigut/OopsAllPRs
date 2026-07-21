@@ -116,7 +116,13 @@ class GooglePlayListingTest < Minitest::Test
       end
     end
 
-    assert_equal ["cd #{Shellwords.escape(root)} && ./gradlew :shared:linkReleaseFrameworkIosArm64"], commands
+    assert_equal(
+      [
+        "cd #{Shellwords.escape(root)} && ./gradlew :shared:linkReleaseFrameworkIosArm64",
+        "#{Shellwords.escape(File.join(root, 'tools', 'verify_ios_app_bundle.sh'))} /tmp/OopsAllPRs.ipa",
+      ],
+      commands
+    )
     assert_equal File.join(root, "iosApp", "OopsAllPRs.xcodeproj"), build_options.fetch(:project)
     assert_equal File.join(root, "iosApp", "build", "fastlane"), build_options.fetch(:output_directory)
     assert_equal "/tmp/OopsAllPRs.ipa", upload_options.fetch(:ipa)

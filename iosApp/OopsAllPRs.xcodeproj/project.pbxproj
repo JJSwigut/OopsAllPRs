@@ -150,7 +150,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"$SRCROOT/..\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  KOTLIN_CONFIGURATION=Release\n  KOTLIN_FRAMEWORK_CONFIGURATION=release\nelse\n  KOTLIN_CONFIGURATION=Debug\n  KOTLIN_FRAMEWORK_CONFIGURATION=debug\nfi\nif [[ \"$SDK_NAME\" == iphoneos* ]]; then\n  KOTLIN_TARGET=IosArm64\n  KOTLIN_TARGET_DIR=iosArm64\nelse\n  KOTLIN_TARGET=IosSimulatorArm64\n  KOTLIN_TARGET_DIR=iosSimulatorArm64\nfi\n./gradlew \":shared:link${KOTLIN_CONFIGURATION}Framework${KOTLIN_TARGET}\"\nRESOURCES_SOURCE=\"$SRCROOT/../shared/build/processedResources/${KOTLIN_TARGET_DIR}/main/composeResources\"\nRESOURCES_DEST=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/compose-resources/composeResources\"\nrm -rf \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/compose-resources\"\nif [ -d \"$RESOURCES_SOURCE\" ]; then\n  mkdir -p \"$RESOURCES_DEST\"\n  ditto \"$RESOURCES_SOURCE\" \"$RESOURCES_DEST\"\nfi\n";
+			shellScript = "cd \"$SRCROOT/..\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  KOTLIN_CONFIGURATION=Release\nelse\n  KOTLIN_CONFIGURATION=Debug\nfi\nif [[ \"$SDK_NAME\" == iphoneos* ]]; then\n  KOTLIN_TARGET=IosArm64\nelse\n  KOTLIN_TARGET=IosSimulatorArm64\nfi\n./gradlew \":shared:link${KOTLIN_CONFIGURATION}Framework${KOTLIN_TARGET}\" :shared:syncComposeResourcesForIos\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
