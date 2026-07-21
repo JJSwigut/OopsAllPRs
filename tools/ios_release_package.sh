@@ -90,6 +90,8 @@ if [ ! -d "$app_path" ]; then
   exit 3
 fi
 
+tools/verify_ios_app_bundle.sh "$app_path"
+
 ditto -c -k --keepParent "$app_path" "$artifact_dir/OopsAllPRs-release-simulator-app.zip"
 
 dsym_path="$product_dir/OopsAllPRs.app.dSYM"

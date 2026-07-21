@@ -208,9 +208,15 @@ platform :ios do
       }
     )
 
+    ipa_path = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    sh(
+      "#{Shellwords.escape(File.join(repo_root, 'tools', 'verify_ios_app_bundle.sh'))} " \
+      "#{Shellwords.escape(ipa_path)}"
+    )
+
     upload_to_testflight(
       api_key: api_key,
-      ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
+      ipa: ipa_path,
       skip_waiting_for_build_processing: true
     )
   end
