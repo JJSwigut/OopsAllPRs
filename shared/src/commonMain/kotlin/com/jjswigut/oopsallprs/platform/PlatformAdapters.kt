@@ -18,6 +18,10 @@ expect class LocalSettingsStore(context: Any? = null) {
 }
 
 interface RestAlertScheduler {
+    /**
+     * Schedules the platform rest alert and optional outside-app surface. Platforms
+     * without an audible completion-alert API may ignore [soundEnabled].
+     */
     fun schedule(
         restEndsAt: Instant,
         soundEnabled: Boolean = true,

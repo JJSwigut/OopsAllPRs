@@ -38,7 +38,7 @@ import com.jjswigut.oopsallprs.platform.BackupDocumentHandoff
 import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
 import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
-import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduler
 import com.jjswigut.oopsallprs.di.createExerciseLoggingComposition
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -98,7 +98,7 @@ class AppState(
             fileExportHandoff: FileExportHandoff? = null,
             backupDocumentHandoff: BackupDocumentHandoff? = null,
             fullAccessBilling: FullAccessBillingAdapter? = null,
-            restNotificationScheduler: RestNotificationScheduler? = null,
+            restAlertScheduler: RestAlertScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState =
             create(
@@ -106,7 +106,7 @@ class AppState(
                 fileExportHandoff = fileExportHandoff,
                 backupDocumentAdapter = backupDocumentHandoff,
                 fullAccessBilling = fullAccessBilling,
-                restNotificationScheduler = restNotificationScheduler,
+                restAlertScheduler = restAlertScheduler,
                 developerToolsEnabled = developerToolsEnabled
             )
 
@@ -115,7 +115,7 @@ class AppState(
             fileExportHandoff: FileExportHandoff? = null,
             backupDocumentAdapter: BackupDocumentAdapter? = null,
             fullAccessBilling: FullAccessBillingAdapter? = null,
-            restNotificationScheduler: RestNotificationScheduler? = null,
+            restAlertScheduler: RestAlertScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState {
             val store = SqlFoundationStore(database)
@@ -141,7 +141,7 @@ class AppState(
                 routines = routineRepo,
                 activeUx = workouts,
                 preferences = store,
-                notifications = restNotificationScheduler,
+                notifications = restAlertScheduler,
                 previousDefaults = previousDefaults
             )
             val setLogging = SetLoggingUseCases(
@@ -165,7 +165,7 @@ class AppState(
                 workouts,
                 personalRecordDerivation,
                 store,
-                restNotificationScheduler,
+                restAlertScheduler,
                 fullAccess,
                 exerciseLogging.management
             )

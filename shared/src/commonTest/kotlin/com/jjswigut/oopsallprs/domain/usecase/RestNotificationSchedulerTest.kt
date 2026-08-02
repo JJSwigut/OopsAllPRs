@@ -104,6 +104,21 @@ class RestNotificationSchedulerTest {
         assertEquals(0, scheduler.cancelCount)
     }
 
+    @Test
+    fun recoveryRemovesStaleSurfaceWhenNoRestIsPersisted() = runTest {
+        val store = InMemoryFoundationStore()
+        val scheduler = FakeRestAlertScheduler()
+        val lifecycle = WorkoutLifecycleUseCases(store, store, store, preferences = store, notifications = scheduler)
+
+        assertEquals(null, lifecycle.restoreActiveSession(instant(1_000)))
+        assertEquals(1, scheduler.cancelCount)
+
+        lifecycle.startEmpty(instant(2_000)).successValue()
+        lifecycle.restoreActiveSession(instant(3_000))
+
+        assertEquals(2, scheduler.cancelCount)
+    }
+
     private class FakeRestAlertScheduler(
         private val scheduleResult: RestAlertScheduleResult = RestAlertScheduleResult.SCHEDULED
     ) : RestAlertScheduler {

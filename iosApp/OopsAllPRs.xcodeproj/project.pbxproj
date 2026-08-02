@@ -11,7 +11,36 @@
 		100000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* ContentView.swift */; };
 		100000000000000000000003 /* StoreKitFullAccessBillingAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */; };
 		100000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* Assets.xcassets */; };
+		200000000000000000000001 /* RestActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* RestActivityAttributes.swift */; };
+		200000000000000000000002 /* RestLiveActivityCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* RestLiveActivityCoordinator.swift */; };
+		200000000000000000000003 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* RestTimerLiveActivity.swift */; };
+		200000000000000000000004 /* RestActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* RestActivityAttributes.swift */; };
+		200000000000000000000005 /* RestTimerLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* RestTimerLiveActivityExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		200000000000000000000060 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 200000000000000000000040;
+			remoteInfo = RestTimerLiveActivityExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		200000000000000000000020 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				200000000000000000000005 /* RestTimerLiveActivityExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		100000000000000000000010 /* OopsAllPRs.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OopsAllPRs.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -19,10 +48,22 @@
 		100000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitFullAccessBillingAdapter.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		200000000000000000000011 /* RestActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestActivityAttributes.swift; sourceTree = "<group>"; };
+		200000000000000000000012 /* RestLiveActivityCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestLiveActivityCoordinator.swift; sourceTree = "<group>"; };
+		200000000000000000000013 /* RestTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTimerLiveActivity.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		200000000000000000000015 /* RestTimerLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RestTimerLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		100000000000000000000022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000021 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -36,6 +77,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000031 /* iosApp */,
+				200000000000000000000030 /* RestTimerLiveActivityExtension */,
 				100000000000000000000032 /* Frameworks */,
 				100000000000000000000033 /* Products */,
 			);
@@ -47,6 +89,8 @@
 				100000000000000000000011 /* OopsAllPRsApp.swift */,
 				100000000000000000000012 /* ContentView.swift */,
 				100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */,
+				200000000000000000000011 /* RestActivityAttributes.swift */,
+				200000000000000000000012 /* RestLiveActivityCoordinator.swift */,
 				100000000000000000000014 /* Assets.xcassets */,
 			);
 			path = iosApp;
@@ -63,8 +107,18 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000010 /* OopsAllPRs.app */,
+				200000000000000000000015 /* RestTimerLiveActivityExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		200000000000000000000030 /* RestTimerLiveActivityExtension */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000013 /* RestTimerLiveActivity.swift */,
+				200000000000000000000014 /* Info.plist */,
+			);
+			path = RestTimerLiveActivityExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -78,15 +132,34 @@
 				100000000000000000000020 /* Sources */,
 				100000000000000000000022 /* Frameworks */,
 				100000000000000000000023 /* Resources */,
+				200000000000000000000020 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				200000000000000000000061 /* PBXTargetDependency */,
 			);
 			name = OopsAllPRs;
 			productName = OopsAllPRs;
 			productReference = 100000000000000000000010 /* OopsAllPRs.app */;
 			productType = "com.apple.product-type.application";
+		};
+		200000000000000000000040 /* RestTimerLiveActivityExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 200000000000000000000070 /* Build configuration list for PBXNativeTarget "RestTimerLiveActivityExtension" */;
+			buildPhases = (
+				200000000000000000000022 /* Sources */,
+				200000000000000000000021 /* Frameworks */,
+				200000000000000000000023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RestTimerLiveActivityExtension;
+			productName = RestTimerLiveActivityExtension;
+			productReference = 200000000000000000000015 /* RestTimerLiveActivityExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -99,6 +172,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					100000000000000000000040 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					200000000000000000000040 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -117,6 +193,7 @@
 			projectRoot = "";
 			targets = (
 				100000000000000000000040 /* OopsAllPRs */,
+				200000000000000000000040 /* RestTimerLiveActivityExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -127,6 +204,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000004 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,10 +246,29 @@
 				100000000000000000000001 /* OopsAllPRsApp.swift in Sources */,
 				100000000000000000000002 /* ContentView.swift in Sources */,
 				100000000000000000000003 /* StoreKitFullAccessBillingAdapter.swift in Sources */,
+				200000000000000000000001 /* RestActivityAttributes.swift in Sources */,
+				200000000000000000000002 /* RestLiveActivityCoordinator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000022 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				200000000000000000000003 /* RestTimerLiveActivity.swift in Sources */,
+				200000000000000000000004 /* RestActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		200000000000000000000061 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 200000000000000000000040 /* RestTimerLiveActivityExtension */;
+			targetProxy = 200000000000000000000060 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		100000000000000000000061 /* Debug */ = {
@@ -290,6 +393,7 @@
 				APP_DISPLAY_NAME = "Oops All PRs Debug";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -327,6 +431,7 @@
 				APP_DISPLAY_NAME = "Oops All PRs";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -358,6 +463,55 @@
 			};
 			name = Release;
 		};
+		200000000000000000000071 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RestTimerLiveActivityExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jjswigut.oopsallprs.ios.debug.RestTimerLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		200000000000000000000072 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RestTimerLiveActivityExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jjswigut.oopsallprs.ios.RestTimerLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -375,6 +529,15 @@
 			buildConfigurations = (
 				100000000000000000000071 /* Debug */,
 				100000000000000000000072 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		200000000000000000000070 /* Build configuration list for PBXNativeTarget "RestTimerLiveActivityExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				200000000000000000000071 /* Debug */,
+				200000000000000000000072 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

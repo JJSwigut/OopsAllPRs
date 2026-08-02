@@ -15,6 +15,7 @@ import android.net.Uri
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +53,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlin.coroutines.resume
+
+const val ACTION_OPEN_ACTIVE_WORKOUT = "com.jjswigut.oopsallprs.OPEN_ACTIVE_WORKOUT"
 
 actual class PlatformDatabaseDriverFactory actual constructor(private val context: Any?) {
     actual fun createDriver(): SqlDriver {
@@ -260,6 +263,7 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         val manager = notificationManager(androidContext)
         manager.ensureActiveRestChannel()
         val openApp = androidContext.packageManager.getLaunchIntentForPackage(androidContext.packageName)
+            ?.setAction(ACTION_OPEN_ACTIVE_WORKOUT)
             ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val contentIntent = openApp?.let { intent ->
             PendingIntent.getActivity(
@@ -270,9 +274,9 @@ actual class RestNotificationScheduler actual constructor(private val context: A
             )
         }
         val notification = android.app.Notification.Builder(androidContext, CHANNEL_ACTIVE)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Rest timer")
-            .setContentText("Rest in progress")
+            .setSmallIcon(com.jjswigut.oopsallprs.R.drawable.ic_rest_timer)
+            .setContentTitle("Rest")
+            .setContentText("Next set")
             .setCategory(android.app.Notification.CATEGORY_STOPWATCH)
             .setWhen(activeRest.restEndsAt.toEpochMilliseconds())
             .setUsesChronometer(true)
@@ -281,6 +285,10 @@ actual class RestNotificationScheduler actual constructor(private val context: A
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
+            .addExtras(Bundle().apply {
+                // Official public API 36.1 extra; older releases safely ignore the request.
+                putBoolean(REQUEST_PROMOTED_ONGOING_EXTRA, true)
+            })
             .build()
         return try {
             manager.notify(ACTIVE_REST_NOTIFICATION_ID, notification)
@@ -314,7 +322,7 @@ class RestTimerReceiver : BroadcastReceiver() {
         val channelId = if (soundEnabled) CHANNEL_SOUND else CHANNEL_SILENT
         notificationManager.ensureRestChannel(channelId, soundEnabled)
         val notification = android.app.Notification.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.jjswigut.oopsallprs.R.drawable.ic_rest_timer)
             .setContentTitle("Rest complete")
             .setContentText("Time for the next set.")
             .setAutoCancel(true)
@@ -926,3 +934,4 @@ private const val REST_OPEN_APP_REQUEST_CODE = 9220
 private const val CHANNEL_SOUND = "rest_timer_sound"
 private const val CHANNEL_SILENT = "rest_timer_silent"
 private const val CHANNEL_ACTIVE = "active_rest_timer"
+private const val REQUEST_PROMOTED_ONGOING_EXTRA = "android.requestPromotedOngoing"

@@ -55,6 +55,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AppShell(
     appState: AppState,
+    activeWorkoutOpenRequest: ActiveWorkoutOpenRequest? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -68,6 +69,10 @@ fun AppShell(
     val routineState by appState.routines.state.collectAsState()
     val profileState by appState.profile.state.collectAsState()
     val developerSeedState = appState.developerSeeds?.state?.collectAsState()?.value
+    val activeWorkoutRequestGeneration by activeWorkoutOpenRequest
+        ?.generation
+        ?.collectAsState()
+        ?: remember { mutableStateOf(0L) }
     var isDiscardDialogVisible by remember { mutableStateOf(false) }
     val confirmDiscardActiveWorkout: () -> Unit = {
         scope.launch {
@@ -100,8 +105,14 @@ fun AppShell(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(activeWorkoutRequestGeneration) {
         appState.hydrate()
+        if (activeWorkoutRequestGeneration > 0) {
+            appState.navigation.presentActiveWorkout()
+        }
+    }
+
+    LaunchedEffect(Unit) {
         scope.launch { appState.refreshFullAccessEntitlements() }
         scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
     }

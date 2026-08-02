@@ -3,13 +3,21 @@ import UIKit
 import shared
 
 struct ContentView: View {
+    private let activeWorkoutOpenRequest = ActiveWorkoutOpenRequest()
+
     var body: some View {
-        SharedAppView()
+        SharedAppView(activeWorkoutOpenRequest: activeWorkoutOpenRequest)
             .ignoresSafeArea()
+            .onOpenURL { url in
+                guard url.scheme == "oopsallprs", url.host == "active-workout" else { return }
+                activeWorkoutOpenRequest.request()
+            }
     }
 }
 
 struct SharedAppView: UIViewControllerRepresentable {
+    let activeWorkoutOpenRequest: ActiveWorkoutOpenRequest
+
     func makeUIViewController(context: Context) -> UIViewController {
         let developerToolsEnabled: Bool
         #if DEBUG
@@ -24,10 +32,13 @@ struct SharedAppView: UIViewControllerRepresentable {
         } else {
             billingAdapter = nil
         }
+        let restAlertScheduler = RestLiveActivityCoordinator()
         let sharedController = IosAppViewControllerFactory().create(
             context: container,
             developerToolsEnabled: developerToolsEnabled,
-            fullAccessBilling: billingAdapter
+            fullAccessBilling: billingAdapter,
+            restAlertScheduler: restAlertScheduler,
+            activeWorkoutOpenRequest: activeWorkoutOpenRequest
         )
         container.addChild(sharedController)
         container.view.addSubview(sharedController.view)
