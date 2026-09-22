@@ -210,6 +210,7 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
     steps:
@@ -218,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          for name in APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_BASE64 IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_DISTRIBUTION_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
+          for name in APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_BASE64 IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_DISTRIBUTION_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
             fi
@@ -259,10 +260,13 @@ jobs:
           cert_path="$RUNNER_TEMP/ios-distribution.p12"
           profile_path="$RUNNER_TEMP/ios-app-store.mobileprovision"
           profile_plist="$RUNNER_TEMP/ios-app-store.plist"
+          live_activity_profile_path="$RUNNER_TEMP/ios-live-activity-app-store.mobileprovision"
+          live_activity_profile_plist="$RUNNER_TEMP/ios-live-activity-app-store.plist"
           keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
 
           printf '%s' "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
           printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$profile_path"
+          printf '%s' "$IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$live_activity_profile_path"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
@@ -277,6 +281,12 @@ jobs:
           profile_name=$(/usr/libexec/PlistBuddy -c 'Print Name' "$profile_plist")
           cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
           echo "IOS_PROVISIONING_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
+
+          security cms -D -i "$live_activity_profile_path" > "$live_activity_profile_plist"
+          live_activity_profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$live_activity_profile_plist")
+          live_activity_profile_name=$(/usr/libexec/PlistBuddy -c 'Print Name' "$live_activity_profile_plist")
+          cp "$live_activity_profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$live_activity_profile_uuid.mobileprovision"
+          echo "IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_NAME=$live_activity_profile_name" >> "$GITHUB_ENV"
 
       - name: Set iOS build number
         if: steps.ios-secrets.outputs.ready == 'true'

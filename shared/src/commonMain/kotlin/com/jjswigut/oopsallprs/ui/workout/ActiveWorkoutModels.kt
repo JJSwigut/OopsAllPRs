@@ -24,6 +24,7 @@ import kotlinx.datetime.Instant
 
 data class ActiveWorkoutView(
     val workoutId: FoundationId,
+    val routineName: String? = null,
     val startedAt: Instant,
     val isTimerStarted: Boolean,
     val elapsedMillis: Long = 0L,
@@ -112,7 +113,8 @@ data class SetRowDraft(
     val previewDurationMs: Long? = null,
     val isPending: Boolean = false,
     val inputError: String? = null,
-    val inlineError: String? = null
+    val inlineError: String? = null,
+    val prefillHint: String? = null
 ) {
     val isTimerRunning: Boolean = timerStartedAt != null
 
@@ -213,6 +215,7 @@ fun ActiveWorkout.toView(
     val isTimerStarted = !startTimerWithFirstSet || loggedSets().isNotEmpty()
     return ActiveWorkoutView(
         workoutId = id,
+        routineName = routineSnapshotName,
         startedAt = effectiveStartedAt,
         isTimerStarted = isTimerStarted,
         elapsedMillis = if (isTimerStarted) {

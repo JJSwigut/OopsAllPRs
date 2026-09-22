@@ -128,30 +128,34 @@ fun ActiveWorkoutFlow(
             ) {
                 FoundationMutedText(
                     state.workout?.let { workout ->
-                        if (workout.isTimerStarted) formatElapsed(workout.elapsedMillis) else "Not started"
+                        workoutElapsedLabel(workout.isTimerStarted, workout.elapsedMillis)
                     }.orEmpty()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
                     state.workout?.takeIf { it.exerciseBlocks.size >= 2 }?.let {
                         FoundationTextAction("Organize", onClick = { isOrganizerOpen = true })
                     }
+                    val topAction = activeWorkoutTopAction(
+                        isExerciseOverviewVisible = state.isExerciseOverviewVisible,
+                        hasExercises = state.workout?.exerciseBlocks?.isNotEmpty() == true
+                    )
                     FoundationTextAction(
-                        "Close",
-                        if (state.isExerciseOverviewVisible || state.workout?.exerciseBlocks.isNullOrEmpty()) {
-                            onDismiss
-                        } else {
-                            onShowExerciseOverview
-                        }
+                        topAction.label,
+                        if (topAction == ActiveWorkoutTopAction.SHOW_EXERCISES) onShowExerciseOverview else onDismiss
                     )
                 }
             }
             state.workout?.let { workout ->
                 if (workout.exerciseBlocks.isEmpty()) {
                     FitCard(modifier = Modifier.fillMaxWidth(), glow = FitTheme.glow.none) {
-                        FoundationText("Add an exercise")
-                        FoundationMutedText("Start with a seeded or custom movement.")
+                        FoundationText("Your workout is ready")
+                        FoundationMutedText("Add your first exercise when you're ready.")
                     }
                 }
+                workoutTimerStartHint(
+                    hasExercises = workout.exerciseBlocks.isNotEmpty(),
+                    isTimerStarted = workout.isTimerStarted
+                )?.let { hint -> FoundationMutedText(hint) }
                 workout.exerciseBlockGroups().forEach { group ->
                     if (group.isGrouped) {
                         ExerciseBlockGroupCard(
@@ -260,6 +264,21 @@ fun ActiveWorkoutFlow(
             )
         }
 }
+
+internal enum class ActiveWorkoutTopAction(val label: String) {
+    SHOW_EXERCISES("Exercises"),
+    CLOSE_WORKOUT("Close workout")
+}
+
+internal fun activeWorkoutTopAction(
+    isExerciseOverviewVisible: Boolean,
+    hasExercises: Boolean
+): ActiveWorkoutTopAction =
+    if (hasExercises && !isExerciseOverviewVisible) {
+        ActiveWorkoutTopAction.SHOW_EXERCISES
+    } else {
+        ActiveWorkoutTopAction.CLOSE_WORKOUT
+    }
 
 @Composable
 private fun ExerciseSettingsDialog(
@@ -636,6 +655,7 @@ private fun ActiveWorkoutBottomBar(
     weightStepAmount: Double,
     modifier: Modifier = Modifier
 ) {
+    val canFinishWorkout = workout.exerciseBlocks.any { it.loggedRows.isNotEmpty() }
     val focusedBlock = workout.exerciseBlocks.firstOrNull {
         it.exerciseInstanceId == workout.focus?.exerciseInstanceId
     } ?: workout.exerciseBlocks.firstOrNull()
@@ -701,6 +721,9 @@ private fun ActiveWorkoutBottomBar(
             if (state.isFinishConfirmationVisible) {
                 FoundationText("Finish workout?", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
                 FoundationMutedText("This saves the workout to History and closes the active session.")
+                state.errorMessage?.let { message ->
+                    FoundationText(message, style = FitTheme.type.caption.copy(color = FitTheme.colors.danger))
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
@@ -769,21 +792,30 @@ private fun ActiveWorkoutBottomBar(
                     modifier = Modifier.fillMaxWidth(),
                     style = FitButtonStyle.Primary
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (canFinishWorkout) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FitButton(
+                            text = "Discard workout",
+                            onClick = onRequestDiscard,
+                            modifier = Modifier.weight(1f),
+                            style = FitButtonStyle.Secondary
+                        )
+                        FitButton(
+                            text = "Finish workout",
+                            onClick = onRequestFinish,
+                            modifier = Modifier.weight(1f),
+                            style = FitButtonStyle.Secondary
+                        )
+                    }
+                } else {
                     FitButton(
                         text = "Discard workout",
                         onClick = onRequestDiscard,
-                        modifier = Modifier.weight(1f),
-                        style = FitButtonStyle.Secondary
-                    )
-                    FitButton(
-                        text = "Finish workout",
-                        onClick = onRequestFinish,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         style = FitButtonStyle.Secondary
                     )
                 }
@@ -791,24 +823,12 @@ private fun ActiveWorkoutBottomBar(
             }
 
             if (workout.exerciseBlocks.isEmpty()) {
-                Row(
+                FitButton(
+                    text = "Add exercise",
+                    onClick = onAddExercise,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FitButton(
-                        text = "Add exercise",
-                        onClick = onAddExercise,
-                        modifier = Modifier.weight(1f),
-                        style = FitButtonStyle.Primary
-                    )
-                    FitButton(
-                        text = "Finish workout",
-                        onClick = onRequestFinish,
-                        modifier = Modifier.weight(1f),
-                        style = FitButtonStyle.Secondary
-                    )
-                }
+                    style = FitButtonStyle.Primary
+                )
                 FitButton(
                     text = "Discard workout",
                     onClick = onRequestDiscard,
@@ -891,22 +911,31 @@ private fun ActiveWorkoutBottomBar(
                     style = FitButtonStyle.Secondary
                 )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            if (canFinishWorkout) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FitButton(
+                        text = "Add exercise",
+                        onClick = onAddExercise,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Primary
+                    )
+                    FitButton(
+                        text = "Finish workout",
+                        onClick = onRequestFinish,
+                        modifier = Modifier.weight(1f),
+                        style = FitButtonStyle.Secondary
+                    )
+                }
+            } else {
                 FitButton(
                     text = "Add exercise",
                     onClick = onAddExercise,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     style = FitButtonStyle.Primary
-                )
-                FitButton(
-                    text = "Finish workout",
-                    onClick = onRequestFinish,
-                    modifier = Modifier.weight(1f),
-                    style = FitButtonStyle.Secondary
                 )
             }
         }
@@ -958,6 +987,12 @@ internal fun formatElapsed(elapsedMillis: Long): String {
     }
 }
 
+internal fun workoutElapsedLabel(isTimerStarted: Boolean, elapsedMillis: Long): String =
+    if (isTimerStarted) formatElapsed(elapsedMillis) else "Starts with first set"
+
+internal fun workoutTimerStartHint(hasExercises: Boolean, isTimerStarted: Boolean): String? =
+    if (hasExercises && !isTimerStarted) "The workout timer starts when you log your first set." else null
+
 private fun formatRest(milliseconds: Long): String {
     val totalSeconds = (milliseconds / 1_000L).coerceAtLeast(0L)
     val minutes = totalSeconds / 60L
@@ -976,7 +1011,9 @@ private fun LoggingContextHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
         ) {
-            FoundationMutedText("Logging")
+            FoundationMutedText(
+                listOfNotNull("Logging", workout.routineName).joinToString(" • ")
+            )
             FoundationText(
                 text = block.displayName,
                 style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)

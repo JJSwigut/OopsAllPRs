@@ -7,9 +7,11 @@ import com.jjswigut.oopsallprs.domain.model.BackupSyncOutcome
 import com.jjswigut.oopsallprs.domain.model.BackupSyncState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.SnapshotSummary
+import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.BackupRepository
 import com.jjswigut.oopsallprs.domain.repository.BackupSyncRepository
+import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
 import com.jjswigut.oopsallprs.testing.instant
 import com.jjswigut.oopsallprs.testing.successValue
@@ -20,23 +22,25 @@ import kotlin.test.assertEquals
 class BackupSyncConflictPolicyTest {
     @Test
     fun localOnlyChangeWritesBackup() = runTest {
-        val pkg = packageWithRevision("local-1")
+        val pkg = packageWithRevision("local-2")
         val repo = FakeBackupRepository(pkg, BackupRevision("local-2", instant(2), SnapshotSummary(workoutCount = 2)))
         val sync = FakeSyncRepository(
             BackupSyncState(
                 linkedFile = LINK,
-                lastBackupRevision = "local-1",
-                lastLocalRevision = "local-1",
+                lastBackupRevision = contentRevision("local-1"),
+                lastLocalRevision = contentRevision("local-1"),
                 lastOutcome = BackupSyncOutcome.CLEAN,
                 updatedAt = instant(1)
             )
         )
-        val documents = FakeDocumentAdapter(BackupPackageCodec().encode(pkg).successValue())
+        val documents = FakeDocumentAdapter(BackupPackageCodec().encode(packageWithRevision("local-1")).successValue())
 
         val state = BackupSyncCoordinator(repo, sync, documents).syncNow().successValue()
 
         assertEquals(BackupSyncOutcome.LOCAL_WRITTEN, state.lastOutcome)
         assertEquals(1, documents.writeCount)
+        assertEquals(contentRevision("local-2"), state.lastLocalRevision)
+        assertEquals(contentRevision("local-2"), state.lastBackupRevision)
     }
 
     @Test
@@ -46,8 +50,8 @@ class BackupSyncConflictPolicyTest {
         val sync = FakeSyncRepository(
             BackupSyncState(
                 linkedFile = LINK,
-                lastBackupRevision = "backup-1",
-                lastLocalRevision = "local-1",
+                lastBackupRevision = contentRevision("backup-1"),
+                lastLocalRevision = contentRevision("local-1"),
                 lastOutcome = BackupSyncOutcome.CLEAN,
                 updatedAt = instant(1)
             )
@@ -86,12 +90,18 @@ internal class FakeBackupRepository(
     override suspend fun restorePlan(pkg: BackupPackage) = foundationSuccess(
         com.jjswigut.oopsallprs.domain.model.BackupRestorePlan(pkg.summary.toDomain(), revision.summary, false)
     )
-    override suspend fun restore(pkg: BackupPackage): FoundationResult<com.jjswigut.oopsallprs.domain.model.BackupRestoreResult> {
+    override suspend fun restore(pkg: BackupPackage, expectedLocalRevision: String?): FoundationResult<com.jjswigut.oopsallprs.domain.model.BackupRestoreResult> {
+        if (expectedLocalRevision != null && expectedLocalRevision != BackupSnapshotIdentity.revision(this.pkg)) {
+            return foundationFailure(FoundationError.Conflict("Local data changed after the safety backup."))
+        }
         restoreCount += 1
+        val safety = this.pkg
+        this.pkg = pkg
+        revision = BackupRevision(BackupSnapshotIdentity.revision(pkg), pkg.createdAt.toBackupInstant(), pkg.summary.toDomain())
         return foundationSuccess(
             com.jjswigut.oopsallprs.domain.model.BackupRestoreResult(
                 restoredSummary = pkg.summary.toDomain(),
-                safetyBackup = this.pkg,
+                safetyBackup = safety,
                 activeWorkoutReplaced = restoredActiveWorkoutReplaced
             )
         )
@@ -155,7 +165,7 @@ internal fun packageWithRevision(revision: String): BackupPackage =
         lastLocalRevision = revision,
         appSchemaVersion = 8,
         summary = SnapshotSummary().toDto(),
-        preferences = PreferencesSnapshotDto("POUNDS", 5.0, 2.5, 120, true),
+        preferences = PreferencesSnapshotDto("POUNDS", 5.0, 2.5, fixtureRestSeconds(revision), true),
         loggingConfigurations = emptyList(),
         userExerciseConfigurations = emptyList(),
         exercises = emptyList(),
@@ -169,3 +179,13 @@ internal fun packageWithRevision(revision: String): BackupPackage =
         progressPoints = emptyList(),
         exportMetadata = emptyList()
     )
+
+internal fun contentRevision(label: String): String = BackupSnapshotIdentity.revision(packageWithRevision(label))
+
+private fun fixtureRestSeconds(label: String): Int =
+    (when (label.substringBefore('-')) {
+        "local" -> 60
+        "remote" -> 120
+        "backup" -> 180
+        else -> 240
+    }) + (label.last().digitToIntOrNull() ?: 1)

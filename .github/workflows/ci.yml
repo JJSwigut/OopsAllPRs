@@ -27,12 +27,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run Gradle checks
-        run: ./gradlew --no-daemon check :androidApp:assembleDebug :androidApp:assembleRelease
+      - name: Run release-equivalent Android checks
+        run: tools/release_gate.sh --skip-ios
 
   ios:
-    name: iOS simulator build
+    name: iOS Release simulator package
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,18 +47,5 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build shared debug simulator framework
-        run: ./gradlew --no-daemon :shared:linkDebugFrameworkIosSimulatorArm64
-
-      - name: Build iOS debug simulator app
-        run: |
-          xcodebuild \
-            -project iosApp/OopsAllPRs.xcodeproj \
-            -scheme OopsAllPRs \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: Build iOS Release simulator package
+        run: IOS_RELEASE_TIMEOUT_SECONDS=1080 tools/ios_release_package.sh

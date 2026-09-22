@@ -1,0 +1,41 @@
+{
+  "identifier" : "8665E47C-6C9A-4F37-86C7-CCDF8A4167B3",
+  "nonRenewingSubscriptionGroups" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "14.99",
+      "familyShareable" : false,
+      "internalID" : "C1C32B1E-BF66-4A27-976B-2C7D71E47126",
+      "localizations" : [
+        {
+          "description" : "Unlock unlimited workout logging, backup, restore, and sync.",
+          "displayName" : "Lifetime Full Access",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "lifetime_unlock",
+      "referenceName" : "Lifetime Unlock",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6791339090",
+    "_developerTeamID" : "JD46J87QLK",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storeKitErrors" : [
+
+    ],
+    "_storefront" : "USA"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

@@ -1,6 +1,6 @@
 package com.jjswigut.oopsallprs.ui.routine
 
-import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.FinishWorkoutOutcome
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.RestConfiguration
@@ -19,6 +19,7 @@ import com.jjswigut.oopsallprs.ui.history.TemplateListItem
 import com.jjswigut.oopsallprs.ui.history.TemplateSaveDraft
 import com.jjswigut.oopsallprs.ui.history.toTemplateListItem
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -51,18 +52,26 @@ class RoutineStateHolder(
     suspend fun finishWorkout(
         activeWorkoutId: FoundationId,
         finishedAt: Instant = Clock.System.now()
-    ): FoundationResult<CompletedWorkout> =
+    ): FoundationResult<FinishWorkoutOutcome> =
         useCases.finishWorkout(activeWorkoutId, finishedAt)
 
     fun beginTemplateSave(completedWorkoutId: FoundationId) {
+        if (_state.value.saveDraft?.isSaving == true) return
         _state.value = _state.value.copy(
             saveDraft = TemplateSaveDraft(completedWorkoutId = completedWorkoutId),
+            lastSavedTemplateId = null,
             errorMessage = null
         )
     }
 
+    fun cancelTemplateSave() {
+        if (_state.value.saveDraft?.isSaving == true) return
+        _state.value = _state.value.copy(saveDraft = null, errorMessage = null)
+    }
+
     fun updateTemplateName(name: String) {
         val draft = _state.value.saveDraft ?: return
+        if (draft.isSaving) return
         _state.value = _state.value.copy(saveDraft = draft.copy(name = name, errorMessage = null))
     }
 
@@ -318,6 +327,9 @@ class RoutineStateHolder(
     suspend fun saveTemplate(now: Instant = Clock.System.now()): FoundationResult<ReusableRoutine> {
         val draft = _state.value.saveDraft
             ?: return foundationFailure(FoundationError.Validation("No completed workout selected"))
+        if (draft.isSaving) {
+            return foundationFailure(FoundationError.Conflict("Template save is already in progress"))
+        }
         if (draft.name.isBlank()) {
             val error = FoundationError.Validation("Template name is required")
             _state.value = _state.value.copy(saveDraft = draft.copy(errorMessage = error.message))
@@ -325,14 +337,28 @@ class RoutineStateHolder(
         }
 
         _state.value = _state.value.copy(saveDraft = draft.copy(isSaving = true, errorMessage = null))
-        return when (val result = useCases.saveCompletedWorkoutAsRoutine(draft.completedWorkoutId, draft.name, now)) {
+        val result = try {
+            useCases.saveCompletedWorkoutAsRoutine(draft.completedWorkoutId, draft.name, now)
+        } catch (cancellation: CancellationException) {
+            _state.value = _state.value.copy(saveDraft = draft.copy(
+                isSaving = false,
+                errorMessage = "Save interrupted. Check Templates before trying again."
+            ))
+            throw cancellation
+        } catch (_: Exception) {
+            foundationFailure(FoundationError.Persistence("Couldn't confirm the save. Check Templates before trying again."))
+        }
+        return when (result) {
             is FoundationResult.Failure -> {
                 _state.value = _state.value.copy(saveDraft = draft.copy(isSaving = false, errorMessage = result.error.message))
                 result
             }
             is FoundationResult.Success -> {
-                refresh()
+                val savedRoutines = (_state.value.routines.filterNot { it.id == result.value.id } + result.value)
+                    .sortedByDescending { it.updatedAt }
                 _state.value = _state.value.copy(
+                    routines = savedRoutines,
+                    templateRows = savedRoutines.map { it.toTemplateListItem() },
                     saveDraft = null,
                     lastSavedTemplateId = result.value.id,
                     errorMessage = null

@@ -11,6 +11,8 @@ import com.jjswigut.oopsallprs.testing.successValue
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 class WorkoutEffectiveStartTest {
     @Test
@@ -19,7 +21,7 @@ class WorkoutEffectiveStartTest {
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
         harness.logSet(workout.id, harness.weightedReference, loggedAtMs = 86_401_000)
 
-        val completed = harness.routines.finishWorkout(workout.id, instant(86_461_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(86_461_000)).successValue().workout
 
         assertEquals(instant(86_401_000), completed.startedAt)
         assertEquals(60_000L, completed.durationMs)
@@ -32,7 +34,7 @@ class WorkoutEffectiveStartTest {
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
         harness.logSet(workout.id, harness.weightedReference, loggedAtMs = 86_401_000)
 
-        val completed = harness.routines.finishWorkout(workout.id, instant(86_461_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(86_461_000)).successValue().workout
 
         assertEquals(instant(1_000), completed.startedAt)
         assertEquals(86_460_000L, completed.durationMs)
@@ -45,7 +47,7 @@ class WorkoutEffectiveStartTest {
         harness.logSet(workout.id, harness.weightedReference, loggedAtMs = 5_000)
         harness.logSet(workout.id, harness.bodyweightReference, loggedAtMs = 3_000)
 
-        val completed = harness.routines.finishWorkout(workout.id, instant(8_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(8_000)).successValue().workout
 
         assertEquals(instant(3_000), completed.startedAt)
         assertEquals(5_000L, completed.durationMs)
@@ -59,22 +61,22 @@ class WorkoutEffectiveStartTest {
         harness.logSet(workout.id, harness.bodyweightReference, loggedAtMs = 5_000)
         harness.setLogging.deleteLoggedSet(workout.id, earliest.id, instant(6_000)).successValue()
 
-        val completed = harness.routines.finishWorkout(workout.id, instant(8_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(8_000)).successValue().workout
 
         assertEquals(instant(5_000), completed.startedAt)
         assertEquals(3_000L, completed.durationMs)
     }
 
     @Test
-    fun noLoggedSetsFallBackToWorkoutCreationTime() = runTest {
+    fun noLoggedSetsCannotCreateAnEmptyCompletedWorkout() = runTest {
         val harness = FoundationHarness()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
 
-        val completed = harness.routines.finishWorkout(workout.id, instant(4_000)).successValue()
+        val result = harness.routines.finishWorkout(workout.id, instant(4_000))
 
-        assertEquals(instant(1_000), completed.startedAt)
-        assertEquals(3_000L, completed.durationMs)
-        assertEquals(emptyList(), completed.exercises)
+        assertIs<com.jjswigut.oopsallprs.domain.model.FoundationResult.Failure>(result)
+        assertNotNull(harness.store.activeWorkout(workout.id))
+        assertEquals(emptyList(), harness.store.completedWorkouts())
     }
 
     @Test
@@ -91,7 +93,7 @@ class WorkoutEffectiveStartTest {
 
         val recoveredSession = harness.lifecycle.restoreActiveSession(instant(15_000))
 
-        val completed = recoveredRoutines.finishWorkout(workout.id, instant(20_000)).successValue()
+        val completed = recoveredRoutines.finishWorkout(workout.id, instant(20_000)).successValue().workout
 
         assertEquals(instant(10_000), recoveredSession?.startedAt)
         assertEquals(instant(10_000), completed.startedAt)
@@ -104,7 +106,7 @@ class WorkoutEffectiveStartTest {
         harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
         harness.logSet(workout.id, harness.weightedReference, loggedAtMs = 3_000)
-        val completed = harness.routines.finishWorkout(workout.id, instant(5_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(5_000)).successValue().workout
 
         harness.store.setStartWorkoutTimerWithFirstSet(true).successValue()
         val historical = harness.store.completedWorkout(completed.id)

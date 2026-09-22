@@ -3,6 +3,7 @@ package com.jjswigut.oopsallprs.ui.workout
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.EffortKind
@@ -178,6 +180,7 @@ fun CompactSetInput(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
         ) {
+            draft.prefillHint?.let { FoundationMutedText(it) }
             draft.loggingConfiguration.measures.forEach { measure ->
                 when (measure.kind) {
                     MeasureKind.REPETITIONS -> NumericStepper(
@@ -391,37 +394,46 @@ private fun NumericStepper(
     placeholder: String = label,
     trailingContent: (@Composable () -> Unit)? = null
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FoundationMutedText(label, modifier = Modifier.weight(0.85f))
-            FitIconButton(onClick = onDecrease, contentDescription = "Decrease $label") {
-                BasicText("-", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
+    BoxWithConstraints(modifier = modifier) {
+        val stackedLabel = numericStepperUsesStackedLabel(maxWidth)
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+            if (stackedLabel) FoundationMutedText(label)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!stackedLabel) FoundationMutedText(label, modifier = Modifier.weight(0.85f))
+                FitIconButton(onClick = onDecrease, contentDescription = "Decrease $label") {
+                    BasicText("-", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
+                }
+                FitTextField(
+                    value = value,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.weight(1.4f).semantics { contentDescription = label },
+                    placeholder = placeholder,
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                    selectAllOnFocus = true
+                )
+                FitIconButton(onClick = onIncrease, contentDescription = "Increase $label") {
+                    BasicText("+", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
+                }
+                trailingContent?.let { content ->
+                    Box(
+                        modifier = Modifier.sizeIn(
+                            minWidth = FitTheme.size.touchMin,
+                            minHeight = FitTheme.size.touchMin
+                        ),
+                        contentAlignment = Alignment.Center
+                    ) { content() }
+                }
             }
-            FitTextField(
-                value = value,
-                onValueChange = onTextChange,
-                modifier = Modifier.weight(1.4f).semantics { contentDescription = label },
-                placeholder = placeholder,
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                selectAllOnFocus = true
-            )
-            FitIconButton(onClick = onIncrease, contentDescription = "Increase $label") {
-                BasicText("+", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
-            }
-            Box(
-                modifier = Modifier.sizeIn(
-                    minWidth = FitTheme.size.touchMin,
-                    minHeight = FitTheme.size.touchMin
-                ),
-                contentAlignment = Alignment.Center
-            ) { trailingContent?.invoke() }
         }
     }
 }
+
+internal fun numericStepperUsesStackedLabel(availableWidth: Dp): Boolean =
+    availableWidth < 360.dp
 
 @Composable
 private fun CalculatorGlyph() {

@@ -12,7 +12,9 @@ import com.jjswigut.oopsallprs.domain.model.BackupRevision
 import com.jjswigut.oopsallprs.domain.model.BackupSyncOutcome
 import com.jjswigut.oopsallprs.domain.model.BackupSyncState
 import com.jjswigut.oopsallprs.domain.model.ExportType
+import com.jjswigut.oopsallprs.testing.setFullAccessForTest
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
+import com.jjswigut.oopsallprs.domain.model.FullAccessOfferState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.SnapshotSummary
 import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
@@ -24,10 +26,77 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertIs
 
 class ProfileFullAccessGateTest {
     @Test
-    fun unpaidTrialCannotExportOrStartBackupSetup() = runTest {
+    fun lockedBackupCheckAndLaterUnlockPreservePersistedConflictWarning() = runTest {
+        val store = InMemoryFoundationStore()
+        val warning = "Provider unavailable; review the backup conflict."
+        val sync = FakeSyncRepository(BackupSyncState(
+            linkedFile = LINK,
+            lastOutcome = BackupSyncOutcome.CONFLICT,
+            lastError = warning,
+            updatedAt = instant(1)
+        ))
+        val documents = FakeDocumentAdapter("unavailable")
+        val holder = ProfileStateHolder(
+            backupSync = BackupSyncCoordinator(
+                FakeBackupRepository(packageWithRevision("local-1")), sync, documents
+            ),
+            fullAccess = FullAccessUseCases(store)
+        )
+
+        holder.hydrate()
+        assertEquals(warning, holder.state.value.backupError)
+        holder.checkLinkedBackup().successValue()
+        assertEquals(warning, holder.state.value.backupError)
+        assertTrue(holder.state.value.backupStatus.hasConflict)
+        assertEquals(0, documents.readCount)
+        assertEquals(0, documents.writeCount)
+
+        store.setFullAccessForTest(FullAccessState(lifetimeUnlocked = true)).successValue()
+        holder.refreshFullAccess()
+        assertEquals(warning, holder.state.value.backupError)
+        assertTrue(holder.state.value.backupStatus.hasConflict)
+        holder.hydrate()
+        assertEquals(warning, holder.state.value.backupError)
+    }
+
+    @Test
+    fun exportDoesNotOpenAnUnlockDialogForAFreeUser() = runTest {
+        val store = InMemoryFoundationStore()
+        val holder = ProfileStateHolder(exports = store, fullAccess = FullAccessUseCases(store))
+        holder.export(ExportType.WORKOUTS).successValue()
+
+        assertEquals(ExportType.WORKOUTS, holder.state.value.lastExport?.type)
+        assertFalse(holder.state.value.isUnlockDialogVisible)
+        assertNull(holder.state.value.exportError)
+    }
+
+    @Test
+    fun entitlementLossAtReadyStepReplacesSetupWithUnlockInsteadOfStackingDialogs() = runTest {
+        val store = InMemoryFoundationStore()
+        store.setFullAccessForTest(FullAccessState(lifetimeUnlocked = true)).successValue()
+        val holder = ProfileStateHolder(fullAccess = FullAccessUseCases(store))
+        holder.hydrate()
+        holder.startBackupSetup()
+        holder.advanceBackupSetup()
+        holder.advanceBackupSetup()
+        assertEquals(BackupSetupStep.READY, holder.state.value.backupSetupStep)
+
+        store.setFullAccessForTest(FullAccessState()).successValue()
+        assertTrue(holder.linkBackupFile() is FoundationResult.Failure)
+
+        assertNull(holder.state.value.backupSetupStep)
+        assertTrue(holder.state.value.isUnlockDialogVisible)
+        holder.dismissUnlockDialog()
+        assertFalse(holder.state.value.isUnlockDialogVisible)
+        assertNull(holder.state.value.backupSetupStep)
+    }
+
+    @Test
+    fun unpaidTrialCanExportButCannotStartBackupSetup() = runTest {
         val store = InMemoryFoundationStore()
         val holder = ProfileStateHolder(
             preferences = store,
@@ -39,17 +108,20 @@ class ProfileFullAccessGateTest {
         val exportResult = holder.export(ExportType.WORKOUTS)
         holder.startBackupSetup()
 
-        assertTrue(exportResult is FoundationResult.Failure)
-        assertNull(holder.state.value.lastExport)
-        assertEquals("Unlock forever to export your data.", holder.state.value.exportError)
+        assertTrue(exportResult is FoundationResult.Success)
+        assertEquals(ExportType.WORKOUTS, holder.state.value.lastExport?.type)
+        assertNull(holder.state.value.exportError)
         assertNull(holder.state.value.backupSetupStep)
         assertEquals("Unlock forever to set up backup.", holder.state.value.backupError)
+        assertTrue(holder.state.value.isUnlockDialogVisible)
+        holder.dismissUnlockDialog()
+        assertFalse(holder.state.value.isUnlockDialogVisible)
     }
 
     @Test
     fun freeStatusUsesDefaultTenWorkoutLimit() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(FullAccessState(completedFreeWorkouts = 7)).successValue()
+        store.setFullAccessForTest(FullAccessState(completedFreeWorkouts = 7)).successValue()
         val holder = ProfileStateHolder(
             preferences = store,
             fullAccess = FullAccessUseCases(store)
@@ -68,7 +140,7 @@ class ProfileFullAccessGateTest {
     @Test
     fun limitReachedStatusUsesLifetimeOnlyUnlockCopy() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(
+        store.setFullAccessForTest(
             FullAccessState(completedFreeWorkouts = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT)
         ).successValue()
         val holder = ProfileStateHolder(
@@ -77,19 +149,22 @@ class ProfileFullAccessGateTest {
         )
 
         holder.hydrate()
+        holder.refreshStoreOffer()
 
         val access = holder.state.value.fullAccessStatus
         assertEquals("Unlock required", access.statusLabel)
         assertEquals("You've used your free workouts.", access.detailLabel)
-        assertEquals("${'$'}14.99", access.offerLabel)
-        assertEquals("One-time purchase. No subscription. No account.", access.termsLabel)
+        assertIs<FullAccessOfferState.Unavailable>(access.offerState)
+        assertEquals("", access.offerLabel)
+        assertEquals("", access.termsLabel)
+        assertFalse(access.canPurchase)
         assertTrue(access.isFreeLimitReached)
     }
 
     @Test
     fun paidUserCanExport() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(FullAccessState(lifetimeUnlocked = true)).successValue()
+        store.setFullAccessForTest(FullAccessState(lifetimeUnlocked = true)).successValue()
         val holder = ProfileStateHolder(
             preferences = store,
             exports = store,
@@ -172,6 +247,7 @@ class ProfileFullAccessGateTest {
         assertEquals(0, documents.readCount)
         assertEquals(0, documents.writeCount)
         assertEquals("Unlock forever to restore from backup.", holder.state.value.backupError)
+        assertTrue(holder.state.value.isUnlockDialogVisible)
     }
 
     @Test

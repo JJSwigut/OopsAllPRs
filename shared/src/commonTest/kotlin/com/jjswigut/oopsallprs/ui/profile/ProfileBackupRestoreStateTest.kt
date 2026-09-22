@@ -1,5 +1,6 @@
 package com.jjswigut.oopsallprs.ui.profile
 
+import com.jjswigut.oopsallprs.data.backup.ActiveWorkoutDto
 import com.jjswigut.oopsallprs.data.backup.BackupPackageCodec
 import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
 import com.jjswigut.oopsallprs.data.backup.FakeBackupRepository
@@ -15,7 +16,20 @@ import kotlin.test.assertNotNull
 class ProfileBackupRestoreStateTest {
     @Test
     fun restoreFromFileExportsSafetyBackupAndReportsActiveWorkoutReplacement() = runTest {
-        val pkg = packageWithRevision("local-1")
+        val empty = packageWithRevision("local-1")
+        val pkg = empty.copy(
+            activeWorkout = ActiveWorkoutDto(
+                id = "restored-active",
+                startedAt = 1_000,
+                routineId = null,
+                routineSnapshotName = null,
+                exercises = emptyList(),
+                createdAt = 1_000,
+                updatedAt = 1_000,
+                status = "ACTIVE"
+            ),
+            summary = empty.summary.copy(hasActiveWorkout = true)
+        )
         val documents = FakeDocumentAdapter(BackupPackageCodec().encode(pkg).successValue())
         val holder = ProfileStateHolder(
             backupSync = BackupSyncCoordinator(

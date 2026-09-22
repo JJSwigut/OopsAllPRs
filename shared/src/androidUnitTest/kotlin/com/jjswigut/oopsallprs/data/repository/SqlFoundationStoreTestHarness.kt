@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.data.repository
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import app.cash.sqldelight.db.SqlDriver
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
@@ -11,8 +12,9 @@ import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
 import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
 import kotlinx.datetime.Instant
 
-internal class SqlFoundationStoreTestHarness {
-    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+internal class SqlFoundationStoreTestHarness(
+    val driver: SqlDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+) {
     val database: WorkoutDatabase
 
     init {

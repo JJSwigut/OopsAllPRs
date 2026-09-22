@@ -15,6 +15,7 @@ import com.jjswigut.oopsallprs.ui.navigation.ActiveWorkoutOpenRequest
 
 class MainActivity : ComponentActivity() {
     private val activeWorkoutOpenRequest = ActiveWorkoutOpenRequest()
+    private lateinit var fullAccessBillingHandoff: FullAccessBillingHandoff
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,7 +23,7 @@ class MainActivity : ComponentActivity() {
         val databaseDriverFactory = PlatformDatabaseDriverFactory(this)
         val fileExportHandoff = FileExportHandoff(this)
         val backupDocumentHandoff = BackupDocumentHandoff(this)
-        val fullAccessBillingHandoff = FullAccessBillingHandoff(this)
+        fullAccessBillingHandoff = FullAccessBillingHandoff(this)
         val restNotificationScheduler = RestNotificationScheduler(this)
 
         setContent {
@@ -35,6 +36,19 @@ class MainActivity : ComponentActivity() {
                 activeWorkoutOpenRequest = activeWorkoutOpenRequest,
                 developerToolsEnabled = BuildConfig.DEBUG
             )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        fullAccessBillingHandoff.onResume()
+    }
+
+    override fun onDestroy() {
+        try {
+            fullAccessBillingHandoff.dispose()
+        } finally {
+            super.onDestroy()
         }
     }
 

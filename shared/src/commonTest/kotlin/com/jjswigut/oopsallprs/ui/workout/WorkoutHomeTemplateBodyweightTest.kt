@@ -16,7 +16,7 @@ class WorkoutHomeTemplateBodyweightTest {
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
         val exercise = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_100)).successValue()
         harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.BODYWEIGHT, reps = 12, weight = null, position = 0, loggedAt = instant(1_200)).successValue()
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
         val template = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Pull", instant(3_000)).successValue()
         val holder = WorkoutHomeStateHolder(harness.lifecycle, harness.routines)
 

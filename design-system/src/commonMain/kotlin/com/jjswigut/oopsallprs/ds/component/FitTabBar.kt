@@ -1,7 +1,6 @@
 package com.jjswigut.oopsallprs.ds.component
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -15,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -24,6 +22,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.ds.haptic.HapticType
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
@@ -56,11 +55,6 @@ fun FitTabBar(
                 animationSpec = FitTheme.motion.smoothSpec(),
                 label = "tabTint",
             )
-            val iconOffset by animateDpAsState(
-                targetValue = if (selected) (-8).dp else 4.dp,
-                animationSpec = FitTheme.motion.snappySpec(),
-                label = "tabIconOffset",
-            )
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -79,13 +73,12 @@ fun FitTabBar(
                             onSelect(i)
                             true
                         }
-                    }
-                    .padding(horizontal = FitTheme.spacing.md),
+                    },
             ) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .offset(y = iconOffset),
+                        .offset(y = (-8).dp),
                     contentAlignment = Alignment.Center
                 ) {
                     item.icon(tint)
@@ -93,8 +86,9 @@ fun FitTabBar(
                 BasicText(
                     text = item.label,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .alpha(if (selected) 1f else 0f),
+                        .align(Alignment.BottomCenter),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = FitTheme.type.caption.copy(color = tint)
                 )
             }

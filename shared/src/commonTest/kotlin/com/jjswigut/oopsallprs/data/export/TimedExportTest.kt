@@ -26,7 +26,7 @@ class TimedExportTest {
             loggedAt = instant(1_200),
             durationMs = 75_000L
         ).successValue()
-        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 
         val workoutExport = ExportService(harness.store).export(ExportType.WORKOUTS, WeightUnit.POUNDS).successValue()
         val prExport = ExportService(harness.store).export(ExportType.PERSONAL_RECORDS, WeightUnit.POUNDS).successValue()

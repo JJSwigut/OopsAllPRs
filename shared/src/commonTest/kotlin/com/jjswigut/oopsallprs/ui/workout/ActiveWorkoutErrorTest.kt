@@ -12,6 +12,26 @@ import kotlin.test.assertTrue
 
 class ActiveWorkoutErrorTest {
     @Test
+    fun failedFinishKeepsWorkoutAndShowsRetryMessageUntilCanceled() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle)
+        holder.hydrate(workout.id)
+        val before = holder.state.value.workout
+        holder.requestFinish()
+
+        holder.reportFinishFailure()
+
+        assertEquals(before, holder.state.value.workout)
+        assertTrue(holder.state.value.isFinishConfirmationVisible)
+        assertEquals("Couldn't finish the workout. Please try again.", holder.state.value.errorMessage)
+        assertEquals(workout.id, harness.store.currentActiveWorkout()?.id)
+        assertTrue(harness.store.completedWorkouts().isEmpty())
+        holder.cancelFinish()
+        assertNull(holder.state.value.errorMessage)
+    }
+
+    @Test
     fun invalidWeightedDraftPreservesValuesAndStaysUnlogged() = runTest {
         val harness = FoundationHarness()
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()

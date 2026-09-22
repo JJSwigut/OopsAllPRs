@@ -46,7 +46,7 @@ class RoutineBuilderCreateTest {
     @Test
     fun blankRoutineTargetsSaveAndLaunchWithPreviousValues() = runTest {
         val harness = FoundationHarness()
-        val completed = harness.routines.finishWorkout(harness.workoutWithLoggedWeightedSet(), instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(harness.workoutWithLoggedWeightedSet(), instant(2_000)).successValue().workout
         val holder = RoutineStateHolder(harness.routines, harness.exerciseCatalog)
         holder.beginCreateRoutine()
         holder.updateEditorName("Bench shell")

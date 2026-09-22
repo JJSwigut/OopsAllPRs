@@ -48,7 +48,7 @@ data class PreferencesSnapshotDto(
     val defaultRestSeconds: Int,
     val restSoundEnabled: Boolean,
     val startWorkoutTimerWithFirstSet: Boolean = true,
-    val restTimerSurfaceEnabled: Boolean = true
+    val restTimerSurfaceEnabled: Boolean = false
 )
 
 @Serializable

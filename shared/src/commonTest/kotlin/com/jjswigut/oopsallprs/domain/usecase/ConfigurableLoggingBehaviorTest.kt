@@ -194,7 +194,7 @@ class ConfigurableLoggingBehaviorTest {
             0,
             instant(2_200)
         ).successValue()
-        val completed = harness.routines.finishWorkout(historyWorkout.id, instant(2_500)).successValue()
+        val completed = harness.routines.finishWorkout(historyWorkout.id, instant(2_500)).successValue().workout
 
         val overrideWorkout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
         val overrideExercise = harness.setLogging.addExercise(overrideWorkout.id, pullUp.id, instant(3_100)).successValue()

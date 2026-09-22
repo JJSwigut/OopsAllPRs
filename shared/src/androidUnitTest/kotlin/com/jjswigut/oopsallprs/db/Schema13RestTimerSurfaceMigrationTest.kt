@@ -6,11 +6,12 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class Schema13RestTimerSurfaceMigrationTest {
     @Test
     fun schema12PreferenceRowsPreserveFirstSetChoiceAndGainRestSurfaceDefault() {
-        assertEquals(13, WorkoutDatabase.Schema.version.toInt())
+        assertTrue(WorkoutDatabase.Schema.version >= 13)
         val resource = checkNotNull(javaClass.getResourceAsStream("/schema-10/representative.db"))
         val databaseFile = Files.createTempFile("schema-13-rest-surface-", ".db").toFile()
         resource.use { input ->

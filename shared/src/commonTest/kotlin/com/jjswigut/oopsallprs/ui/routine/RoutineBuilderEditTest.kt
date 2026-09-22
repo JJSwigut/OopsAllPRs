@@ -17,7 +17,7 @@ class RoutineBuilderEditTest {
     fun editRoutineDoesNotMutateCompletedWorkoutHistory() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
         val holder = RoutineStateHolder(harness.routines, harness.exerciseCatalog)
 

@@ -8,7 +8,6 @@ import com.jjswigut.oopsallprs.testing.successValue
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -24,8 +23,8 @@ class HistoryStateHolderListTest {
 
         assertEquals(listOf(newer.id, older.id), holder.state.value.rows.map { it.workoutId })
         val newestRow = holder.state.value.rows.first()
-        assertNotEquals("Bench Press", newestRow.title)
-        assertTrue(Regex("""\d{4}-\d{2}-\d{2} \d{2}:\d{2}""").matches(newestRow.title))
+        assertEquals("Bench Press + Pull-Up", newestRow.title)
+        assertTrue(newestRow.dateLabel.contains(" at "))
         holder.selectWorkout(older.id)
         assertEquals(older.id, holder.state.value.selectedSummary?.workoutId)
         holder.clearSelection()

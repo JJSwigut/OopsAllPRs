@@ -28,7 +28,53 @@ def copy_ordered_assets(source_glob, destination_dir, prefix: nil)
   paths.length
 end
 
+def png_dimensions(path)
+  header = File.binread(path, 24)
+  expected_signature = "\x89PNG\r\n\x1a\n".b
+  UI.user_error!("Invalid PNG asset: #{path}") unless header.start_with?(expected_signature)
+
+  header.byteslice(16, 8).unpack("N2")
+end
+
+def validate_listing_text(path, maximum_characters)
+  content = File.read(path, encoding: "UTF-8").strip
+  UI.user_error!("Listing text is empty: #{path}") if content.empty?
+  UI.user_error!("Listing text exceeds #{maximum_characters} characters: #{path}") if content.length > maximum_characters
+end
+
+def validate_png_dimensions(path, expected_dimensions)
+  UI.user_error!("Missing listing asset: #{path}") unless File.exist?(path)
+  actual_dimensions = png_dimensions(path)
+  return if actual_dimensions == expected_dimensions
+
+  UI.user_error!(
+    "Unexpected dimensions for #{path}: #{actual_dimensions.join('x')} " \
+    "(expected #{expected_dimensions.join('x')})"
+  )
+end
+
+def validate_store_listing_assets
+  source_root = File.join(repo_root, "assets", "store-listing")
+  google_root = File.join(source_root, "google-play")
+  listing_root = File.join(google_root, "listing", "en-US")
+
+  validate_listing_text(File.join(listing_root, "title.txt"), 30)
+  validate_listing_text(File.join(listing_root, "short_description.txt"), 80)
+  validate_listing_text(File.join(listing_root, "full_description.txt"), 4_000)
+  validate_png_dimensions(File.join(google_root, "icon-512x512.png"), [512, 512])
+  validate_png_dimensions(File.join(google_root, "feature-graphic-1024x500.png"), [1024, 500])
+
+  phone_screenshots = Dir[File.join(google_root, "screenshots", "*.png")].sort
+  UI.user_error!("No Google Play phone screenshots found") if phone_screenshots.empty?
+  phone_screenshots.each { |path| validate_png_dimensions(path, [1080, 1920]) }
+
+  app_store_screenshots = Dir[File.join(source_root, "app-store", "iphone-6-9", "*.png")].sort
+  UI.user_error!("No App Store iPhone screenshots found") if app_store_screenshots.empty?
+  app_store_screenshots.each { |path| validate_png_dimensions(path, [1320, 2868]) }
+end
+
 def prepare_android_listing_assets
+  validate_store_listing_assets
   source_root = File.join(repo_root, "assets", "store-listing", "google-play")
   listing_root = File.join(source_root, "listing", "en-US")
   icon = File.join(source_root, "icon-512x512.png")
@@ -176,9 +222,11 @@ platform :ios do
   desc "Build the iOS app and upload it to TestFlight"
   lane :beta do
     app_identifier = ENV.fetch("IOS_BUNDLE_ID", "com.jjswigut.oopsallprs.ios")
+    live_activity_identifier = ENV.fetch("IOS_LIVE_ACTIVITY_BUNDLE_ID", "#{app_identifier}.RestTimerLiveActivity")
     build_number = ENV.fetch("IOS_BUILD_NUMBER")
     marketing_version = ENV.fetch("IOS_MARKETING_VERSION", "1.0")
     provisioning_profile_name = ENV.fetch("IOS_PROVISIONING_PROFILE_NAME")
+    live_activity_provisioning_profile_name = ENV.fetch("IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_NAME")
 
     api_key = app_store_connect_key
 
@@ -204,6 +252,7 @@ platform :ios do
         teamID: ENV.fetch("APPLE_TEAM_ID"),
         provisioningProfiles: {
           app_identifier => provisioning_profile_name,
+          live_activity_identifier => live_activity_provisioning_profile_name,
         },
       }
     )

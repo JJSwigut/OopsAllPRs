@@ -16,6 +16,8 @@
 		200000000000000000000003 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* RestTimerLiveActivity.swift */; };
 		200000000000000000000004 /* RestActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* RestActivityAttributes.swift */; };
 		200000000000000000000005 /* RestTimerLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* RestTimerLiveActivityExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		300000000000000000000001 /* FullAccessStoreKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000011 /* FullAccessStoreKitTests.swift */; };
+		300000000000000000000002 /* FullAccess.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* FullAccess.storekit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +27,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 200000000000000000000040;
 			remoteInfo = RestTimerLiveActivityExtension;
+		};
+		300000000000000000000060 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000040;
+			remoteInfo = OopsAllPRs;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -48,11 +57,14 @@
 		100000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitFullAccessBillingAdapter.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		100000000000000000000015 /* FullAccess.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FullAccess.storekit; sourceTree = "<group>"; };
 		200000000000000000000011 /* RestActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestActivityAttributes.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* RestLiveActivityCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestLiveActivityCoordinator.swift; sourceTree = "<group>"; };
 		200000000000000000000013 /* RestTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTimerLiveActivity.swift; sourceTree = "<group>"; };
 		200000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		200000000000000000000015 /* RestTimerLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RestTimerLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000010 /* OopsAllPRsStoreKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OopsAllPRsStoreKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000011 /* FullAccessStoreKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullAccessStoreKitTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +82,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		300000000000000000000022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -78,6 +97,7 @@
 			children = (
 				100000000000000000000031 /* iosApp */,
 				200000000000000000000030 /* RestTimerLiveActivityExtension */,
+				300000000000000000000030 /* StoreKitTests */,
 				100000000000000000000032 /* Frameworks */,
 				100000000000000000000033 /* Products */,
 			);
@@ -89,6 +109,7 @@
 				100000000000000000000011 /* OopsAllPRsApp.swift */,
 				100000000000000000000012 /* ContentView.swift */,
 				100000000000000000000013 /* StoreKitFullAccessBillingAdapter.swift */,
+				100000000000000000000015 /* FullAccess.storekit */,
 				200000000000000000000011 /* RestActivityAttributes.swift */,
 				200000000000000000000012 /* RestLiveActivityCoordinator.swift */,
 				100000000000000000000014 /* Assets.xcassets */,
@@ -108,6 +129,7 @@
 			children = (
 				100000000000000000000010 /* OopsAllPRs.app */,
 				200000000000000000000015 /* RestTimerLiveActivityExtension.appex */,
+				300000000000000000000010 /* OopsAllPRsStoreKitTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -119,6 +141,14 @@
 				200000000000000000000014 /* Info.plist */,
 			);
 			path = RestTimerLiveActivityExtension;
+			sourceTree = "<group>";
+		};
+		300000000000000000000030 /* StoreKitTests */ = {
+			isa = PBXGroup;
+			children = (
+				300000000000000000000011 /* FullAccessStoreKitTests.swift */,
+			);
+			path = StoreKitTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -161,6 +191,24 @@
 			productReference = 200000000000000000000015 /* RestTimerLiveActivityExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		300000000000000000000040 /* OopsAllPRsStoreKitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 300000000000000000000070 /* Build configuration list for PBXNativeTarget "OopsAllPRsStoreKitTests" */;
+			buildPhases = (
+				300000000000000000000021 /* Sources */,
+				300000000000000000000022 /* Frameworks */,
+				300000000000000000000023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				300000000000000000000061 /* PBXTargetDependency */,
+			);
+			name = OopsAllPRsStoreKitTests;
+			productName = OopsAllPRsStoreKitTests;
+			productReference = 300000000000000000000010 /* OopsAllPRsStoreKitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -176,6 +224,9 @@
 					};
 					200000000000000000000040 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					300000000000000000000040 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -194,6 +245,7 @@
 			targets = (
 				100000000000000000000040 /* OopsAllPRs */,
 				200000000000000000000040 /* RestTimerLiveActivityExtension */,
+				300000000000000000000040 /* OopsAllPRsStoreKitTests */,
 			);
 		};
 /* End PBXProject section */
@@ -211,6 +263,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000002 /* FullAccess.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +320,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		300000000000000000000021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000001 /* FullAccessStoreKitTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -267,6 +335,11 @@
 			isa = PBXTargetDependency;
 			target = 200000000000000000000040 /* RestTimerLiveActivityExtension */;
 			targetProxy = 200000000000000000000060 /* PBXContainerItemProxy */;
+		};
+		300000000000000000000061 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 100000000000000000000040 /* OopsAllPRs */;
+			targetProxy = 300000000000000000000060 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -398,9 +471,9 @@
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework",
-					"$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework",
 				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework";
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework";
 					GENERATE_INFOPLIST_FILE = NO;
 					INFOPLIST_FILE = iosApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -435,9 +508,9 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework",
-					"$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework",
 				);
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/../shared/build/bin/iosArm64/releaseFramework";
+				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/releaseFramework";
 					GENERATE_INFOPLIST_FILE = NO;
 					INFOPLIST_FILE = iosApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -512,6 +585,37 @@
 			};
 			name = Release;
 		};
+		300000000000000000000071 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jjswigut.oopsallprs.ios.storekittests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphonesimulator;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OopsAllPRs.app/OopsAllPRs";
+			};
+			name = Debug;
+		};
+		300000000000000000000072 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jjswigut.oopsallprs.ios.storekittests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = iphonesimulator;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OopsAllPRs.app/OopsAllPRs";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -538,6 +642,15 @@
 			buildConfigurations = (
 				200000000000000000000071 /* Debug */,
 				200000000000000000000072 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		300000000000000000000070 /* Build configuration list for PBXNativeTarget "OopsAllPRsStoreKitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				300000000000000000000071 /* Debug */,
+				300000000000000000000072 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

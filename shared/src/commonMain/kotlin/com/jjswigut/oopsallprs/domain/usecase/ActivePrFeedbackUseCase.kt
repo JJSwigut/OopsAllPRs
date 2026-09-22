@@ -32,7 +32,6 @@ class ActivePrFeedbackUseCase(
                     reps = repetitions ?: return null
                 )
                 val previousSets = previousWeightedSets(workout, exercise, set, configurationCache)
-                if (previousSets.any { it.blocksNewPersonalRecord(candidate) }) return null
                 previousSets.filter { it.reps == candidate.reps }.maxOfOrNull { it.weightKg }
             }
             ProgressEvidenceMetric.REPS,
@@ -159,6 +158,9 @@ class ActivePrFeedbackUseCase(
             ActivePrFeedbackKind.BODYWEIGHT_REPS -> "${newValue.toInt()} reps"
             ActivePrFeedbackKind.WEIGHT_FOR_REPS -> "${newValue.trimmed()} kg x ${reps ?: 0}"
             ActivePrFeedbackKind.TIME -> formatDuration(newValue.toLong())
+        }
+        if (kind == ActivePrFeedbackKind.WEIGHT_FOR_REPS) {
+            return "New ${reps ?: 0}-rep PR: $value"
         }
         return if (previous == null) {
             "New PR: $value"

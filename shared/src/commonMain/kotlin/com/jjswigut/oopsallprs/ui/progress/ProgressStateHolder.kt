@@ -1,26 +1,42 @@
 package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.EvidenceLadderSnapshot
+import com.jjswigut.oopsallprs.domain.model.EvidenceReading
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
+import com.jjswigut.oopsallprs.domain.model.ProgressionSummary
+import com.jjswigut.oopsallprs.domain.model.RecentTrainingReview
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
+import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
+import com.jjswigut.oopsallprs.domain.usecase.EvidenceLadderUseCase
+import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
+import com.jjswigut.oopsallprs.domain.usecase.RecentTrainingReviewUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
 
 data class ProgressState(
     val personalRecords: List<PersonalRecord> = emptyList(),
     val progressPoints: List<ProgressPoint> = emptyList(),
     val recentRows: List<ProgressPrRow> = emptyList(),
     val latestPr: ProgressPrRow? = null,
+    val isRecentTrainingRecordsOpen: Boolean = false,
     val exerciseGroups: List<ProgressExerciseGroup> = emptyList(),
     val selectedExerciseId: FoundationId? = null,
     val selectedExercise: ProgressExerciseGroup? = null,
     val selectedChartMetric: ProgressEvidenceMetric? = null,
     val selectedEvidence: ProgressEvidence? = null,
+    val evidenceLadder: EvidenceLadderSnapshot? = null,
+    val overallReadings: List<ProgressionSummary> = emptyList(),
+    val recentTrainingReview: RecentTrainingReview? = null,
+    val selectedReading: ProgressionSummary? = null,
     val weightUnit: WeightUnit = WeightUnit.POUNDS,
     val emptyMessage: String = "Finish workouts to build PRs here."
 )
@@ -28,7 +44,13 @@ data class ProgressState(
 class ProgressStateHolder(
     private val progress: ProgressRepository,
     private val workouts: WorkoutRepository,
-    private val preferences: PreferencesRepository? = null
+    private val preferences: PreferencesRepository? = null,
+    private val personalRecordDerivation: PersonalRecordDerivationUseCase? = null,
+    private val evidenceLadderUseCase: EvidenceLadderUseCase = EvidenceLadderUseCase(),
+    private val loggingConfigurations: LoggingConfigurationRepository? = null,
+    private val recentTrainingReviewUseCase: RecentTrainingReviewUseCase = RecentTrainingReviewUseCase(),
+    private val clock: () -> kotlinx.datetime.Instant = { Clock.System.now() },
+    private val timeZone: () -> TimeZone = { TimeZone.currentSystemDefault() }
 ) {
     private val _state = MutableStateFlow(ProgressState())
     val state: StateFlow<ProgressState> = _state
@@ -37,7 +59,9 @@ class ProgressStateHolder(
         _state.value = buildState(
             selectedExerciseId = _state.value.selectedExerciseId,
             selectedChartMetric = _state.value.selectedChartMetric,
-            selectedEvidenceRecordId = _state.value.selectedEvidence?.recordId
+            selectedEvidenceRecordId = _state.value.selectedEvidence?.recordId,
+            selectedReading = _state.value.selectedReading?.reading,
+            isRecentTrainingRecordsOpen = _state.value.isRecentTrainingRecordsOpen
         )
     }
 
@@ -47,7 +71,9 @@ class ProgressStateHolder(
             selectedExerciseId = exerciseId,
             selectedExercise = selected,
             selectedChartMetric = selected?.chart?.selectedMetric,
-            selectedEvidence = null
+            selectedEvidence = null,
+            selectedReading = null,
+            isRecentTrainingRecordsOpen = false
         )
     }
 
@@ -80,7 +106,9 @@ class ProgressStateHolder(
         _state.value = buildState(
             selectedExerciseId = _state.value.selectedExerciseId,
             selectedChartMetric = _state.value.selectedChartMetric,
-            selectedEvidenceRecordId = recordId
+            selectedEvidenceRecordId = recordId,
+            selectedReading = _state.value.selectedReading?.reading,
+            isRecentTrainingRecordsOpen = _state.value.isRecentTrainingRecordsOpen
         )
     }
 
@@ -88,17 +116,69 @@ class ProgressStateHolder(
         _state.value = _state.value.copy(selectedEvidence = null)
     }
 
+    fun selectReading(reading: EvidenceReading) {
+        _state.value = _state.value.copy(
+            selectedReading = _state.value.overallReadings.firstOrNull { it.reading == reading },
+            selectedEvidence = null,
+            selectedExerciseId = null,
+            selectedExercise = null,
+            isRecentTrainingRecordsOpen = false
+        )
+    }
+
+    fun clearReading() {
+        _state.value = _state.value.copy(selectedReading = null)
+    }
+
+    fun openRecentTrainingRecords() {
+        if (_state.value.recentTrainingReview?.personalRecords.isNullOrEmpty()) return
+        _state.value = _state.value.copy(
+            isRecentTrainingRecordsOpen = true,
+            selectedEvidence = null,
+            selectedReading = null,
+            selectedExerciseId = null,
+            selectedExercise = null,
+            selectedChartMetric = null
+        )
+    }
+
+    fun clearRecentTrainingRecords() {
+        _state.value = _state.value.copy(isRecentTrainingRecordsOpen = false)
+    }
+
     private suspend fun buildState(
         selectedExerciseId: FoundationId?,
         selectedChartMetric: ProgressEvidenceMetric?,
-        selectedEvidenceRecordId: FoundationId?
+        selectedEvidenceRecordId: FoundationId?,
+        selectedReading: EvidenceReading?,
+        isRecentTrainingRecordsOpen: Boolean
     ): ProgressState {
+        val completedWorkouts = workouts.completedWorkouts()
+        personalRecordDerivation?.rebuildFrom(completedWorkouts)
         val records = progress.personalRecords()
         val points = progress.progressPoints()
-        val completedWorkouts = workouts.completedWorkouts()
         val unit = preferences?.weightUnit() ?: WeightUnit.POUNDS
+        val ladder = evidenceLadderUseCase.project(
+            completedWorkouts,
+            records,
+            points,
+            loggingConfigurations = loggingConfigurations?.loggingConfigurations() ?: LegacyLoggingConfigurations.all
+        )
+        val recentTrainingReview = recentTrainingReviewUseCase.project(
+            workouts = completedWorkouts,
+            personalRecords = records,
+            progressReadings = ladder.overallReadings,
+            now = clock(),
+            timeZone = timeZone()
+        )
         val recentRows = buildRecentPrRows(records, completedWorkouts, unit)
-        val groups = buildExerciseGroups(records, points, completedWorkouts, unit)
+        val groups = buildExerciseGroups(
+            records,
+            points,
+            completedWorkouts,
+            unit,
+            ladder.exerciseProgressions.associate { it.exerciseCatalogId to it.capability }
+        )
         val selectedExercise = selectedExerciseId?.let { id ->
             groups.firstOrNull { it.exerciseCatalogId == id }?.let { group ->
                 val chart = buildProgressChartState(
@@ -126,11 +206,16 @@ class ProgressStateHolder(
             progressPoints = points,
             recentRows = recentRows,
             latestPr = recentRows.firstOrNull(),
+            isRecentTrainingRecordsOpen = isRecentTrainingRecordsOpen && recentTrainingReview.personalRecords.isNotEmpty(),
             exerciseGroups = groups,
             selectedExerciseId = selectedExerciseId,
             selectedExercise = selectedExercise,
             selectedChartMetric = selectedExercise?.chart?.selectedMetric,
             selectedEvidence = selectedEvidence,
+            evidenceLadder = ladder,
+            overallReadings = ladder.overallReadings,
+            recentTrainingReview = recentTrainingReview,
+            selectedReading = selectedReading?.let { reading -> ladder.overallReadings.firstOrNull { it.reading == reading } },
             weightUnit = unit
         )
     }

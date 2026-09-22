@@ -298,7 +298,7 @@ class WorkoutLifecycleUseCases(
         val request = RestAlertRequest(
             restEndsAt = restEndsAt,
             soundEnabled = preferences?.restSoundEnabled() ?: true,
-            persistentSurfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: true
+            persistentSurfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: false
         )
         if (request == lastRestAlertRequest) return
         scheduler.schedule(

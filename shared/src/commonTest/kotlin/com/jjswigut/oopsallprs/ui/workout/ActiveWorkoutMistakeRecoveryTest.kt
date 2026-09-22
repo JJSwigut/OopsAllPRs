@@ -63,7 +63,7 @@ class ActiveWorkoutMistakeRecoveryTest {
     }
 
     @Test
-    fun finishConfirmationCanBeRequestedAndCanceledWithoutCompletingWorkout() = runTest {
+    fun finishRequestRequiresALoggedSet() = runTest {
         val harness = FoundationHarness()
         val holder = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle, harness.store)
         val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
@@ -71,12 +71,9 @@ class ActiveWorkoutMistakeRecoveryTest {
         holder.hydrate(workout.id, now = instant(1_100))
         holder.requestFinish()
 
-        assertTrue(holder.state.value.isFinishConfirmationVisible)
-        assertFalse(holder.state.value.isDiscardConfirmationVisible)
-
-        holder.cancelFinish()
-
         assertFalse(holder.state.value.isFinishConfirmationVisible)
+        assertFalse(holder.state.value.isDiscardConfirmationVisible)
+        assertEquals("Log at least one set before finishing, or discard this workout.", holder.state.value.errorMessage)
         assertEquals(workout.id, holder.state.value.workout?.workoutId)
         assertEquals(workout.id, harness.store.activeWorkout(workout.id)?.id)
     }

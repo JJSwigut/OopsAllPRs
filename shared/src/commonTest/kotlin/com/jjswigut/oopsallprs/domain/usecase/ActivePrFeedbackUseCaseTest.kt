@@ -33,7 +33,31 @@ import kotlin.test.assertNull
 
 class ActivePrFeedbackUseCaseTest {
     @Test
-    fun weightedFeedbackRejectsDominatedSetButAllowsHeavierLowerRepSet() = runTest {
+    fun lowerLoadAtNewRepCountGetsPreciseRepSeriesCelebration() = runTest {
+        val harness = FoundationHarness()
+        val useCase = ActivePrFeedbackUseCase(harness.store)
+        val firstWorkout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val firstExercise = harness.setLogging.addExercise(firstWorkout.id, harness.weightedReference, instant(1_100)).successValue()
+        harness.setLogging.confirmSet(
+            firstWorkout.id, firstExercise.id, SetKind.WEIGHTED, 7, WeightKg(25.0), 0, instant(1_200)
+        ).successValue()
+        harness.routines.finishWorkout(firstWorkout.id, instant(2_000)).successValue().workout
+
+        val laterWorkout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
+        val laterExercise = harness.setLogging.addExercise(laterWorkout.id, harness.weightedReference, instant(3_100)).successValue()
+        val laterSet = harness.setLogging.confirmSet(
+            laterWorkout.id, laterExercise.id, SetKind.WEIGHTED, 8, WeightKg(20.0), 0, instant(3_200)
+        ).successValue()
+        val active = requireNotNull(harness.lifecycle.activeWorkout(laterWorkout.id))
+
+        assertEquals(
+            "New 8-rep PR: 20 kg x 8",
+            useCase.feedbackFor(active, active.exercises.single(), laterSet)?.label
+        )
+    }
+
+    @Test
+    fun weightedFeedbackCelebratesEachExactRepSeries() = runTest {
         val harness = FoundationHarness()
         val useCase = ActivePrFeedbackUseCase(harness.store)
         val previousWorkout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
@@ -49,7 +73,7 @@ class ActivePrFeedbackUseCaseTest {
             position = 0,
             loggedAt = instant(1_200)
         ).successValue()
-        harness.routines.finishWorkout(previousWorkout.id, instant(2_000)).successValue()
+        harness.routines.finishWorkout(previousWorkout.id, instant(2_000)).successValue().workout
 
         val workout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
         val exercise = harness.setLogging
@@ -66,7 +90,10 @@ class ActivePrFeedbackUseCaseTest {
         ).successValue()
         val afterDominated = harness.lifecycle.activeWorkout(workout.id)!!
 
-        assertNull(useCase.feedbackFor(afterDominated, afterDominated.exercises.single(), dominated))
+        assertEquals(
+            "New 14-rep PR: 25 kg x 14",
+            useCase.feedbackFor(afterDominated, afterDominated.exercises.single(), dominated)?.label
+        )
 
         val heavier = harness.setLogging.confirmSet(
             workout.id,
@@ -80,7 +107,7 @@ class ActivePrFeedbackUseCaseTest {
         val afterHeavier = harness.lifecycle.activeWorkout(workout.id)!!
 
         assertEquals(
-            "New PR: 30 kg x 10",
+            "New 10-rep PR: 30 kg x 10",
             useCase.feedbackFor(afterHeavier, afterHeavier.exercises.single(), heavier)?.label
         )
     }
@@ -105,7 +132,7 @@ class ActivePrFeedbackUseCaseTest {
         val feedback = useCase.feedbackFor(afterFirst, afterFirst.exercises.single(), first)
 
         assertNotNull(feedback)
-        assertEquals("New PR: 100 kg x 5", feedback.label)
+        assertEquals("New 5-rep PR: 100 kg x 5", feedback.label)
 
         val second = harness.setLogging.confirmSet(
             workout.id,

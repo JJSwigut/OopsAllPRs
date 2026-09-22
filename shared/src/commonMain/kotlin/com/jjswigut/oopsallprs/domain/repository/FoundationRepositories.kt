@@ -10,6 +10,7 @@ import com.jjswigut.oopsallprs.domain.model.BackupRestoreResult
 import com.jjswigut.oopsallprs.domain.model.BackupRevision
 import com.jjswigut.oopsallprs.domain.model.BackupSyncState
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.WorkoutCompletionReceipt
 import com.jjswigut.oopsallprs.domain.model.ExerciseCatalogItem
 import com.jjswigut.oopsallprs.domain.model.ExerciseSeedImport
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
@@ -36,6 +37,9 @@ interface WorkoutRepository {
     suspend fun saveActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout>
     suspend fun discardActiveWorkout(id: FoundationId, now: Instant): FoundationResult<Unit>
     suspend fun finishWorkout(workout: CompletedWorkout): FoundationResult<CompletedWorkout>
+    // Completion, active-state cleanup, durable receipt, and free allowance commit together.
+    // Repeating a source id returns the original receipt without another allowance charge.
+    suspend fun finishActiveWorkout(id: FoundationId, finishedAt: Instant): FoundationResult<WorkoutCompletionReceipt>
     suspend fun deleteCompletedWorkout(id: FoundationId, now: Instant): FoundationResult<Unit>
     suspend fun completedWorkout(id: FoundationId): CompletedWorkout?
     suspend fun completedWorkouts(): List<CompletedWorkout>
@@ -118,7 +122,8 @@ interface PreferencesRepository {
 
 interface FullAccessRepository {
     suspend fun loadFullAccess(): FullAccessState
-    suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState>
+    // Read and transform current state atomically with completion accounting; never suspend in transform.
+    suspend fun updateFullAccess(transform: (FullAccessState) -> FullAccessState): FoundationResult<FullAccessState>
 }
 
 interface ProgressRepository {
@@ -138,7 +143,9 @@ interface BackupRepository {
     suspend fun currentRevision(): BackupRevision
     suspend fun currentSummary(): SnapshotSummary
     suspend fun restorePlan(pkg: BackupPackage): FoundationResult<BackupRestorePlan>
-    suspend fun restore(pkg: BackupPackage): FoundationResult<BackupRestoreResult>
+    // When supplied, compare the canonical local snapshot identity and replace data atomically.
+    // A mismatch must return Conflict without replacing data or acknowledging sync.
+    suspend fun restore(pkg: BackupPackage, expectedLocalRevision: String? = null): FoundationResult<BackupRestoreResult>
 }
 
 interface BackupSyncRepository {

@@ -44,7 +44,7 @@ class BackupSnapshotReaderTest {
         harness.store.setRestTimerSurfaceEnabled(false).successValue()
         harness.seedExerciseCatalog()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val reader = BackupSnapshotReader(
             workouts = harness.store,
             sessions = harness.store,
@@ -132,7 +132,7 @@ class BackupSnapshotReaderTest {
             position = 0,
             loggedAt = instant(1_500)
         ).successValue()
-        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
         val reader = BackupSnapshotReader(
             workouts = harness.store,
             sessions = harness.store,

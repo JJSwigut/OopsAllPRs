@@ -426,7 +426,7 @@ internal fun BackupPackageV1Dto.normalizeToV2(): BackupPackage {
             preferences.defaultRestSeconds,
             preferences.restSoundEnabled,
             startWorkoutTimerWithFirstSet = true,
-            restTimerSurfaceEnabled = true
+            restTimerSurfaceEnabled = false
         ),
         loggingConfigurations = configurations.values.map { it.toDto() },
         userExerciseConfigurations = emptyList(),

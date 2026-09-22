@@ -25,7 +25,7 @@ interface RestAlertScheduler {
     fun schedule(
         restEndsAt: Instant,
         soundEnabled: Boolean = true,
-        persistentSurfaceEnabled: Boolean = true
+        persistentSurfaceEnabled: Boolean = false
     ): RestAlertScheduleResult
     fun cancel()
 }
@@ -63,7 +63,14 @@ expect class BackupDocumentHandoff(context: Any? = null) : BackupDocumentAdapter
     override suspend fun writeBackup(linkedFile: BackupLinkedFile, content: String): FoundationResult<BackupLinkedFile>
 }
 
+interface FullAccessBillingObserver {
+    fun onEntitlementsChanged()
+}
+
 interface FullAccessBillingAdapter {
+    fun setEntitlementObserver(observer: FullAccessBillingObserver?) = Unit
+    suspend fun completeEntitlementDelivery(deliveryToken: String?): FoundationResult<Unit> =
+        com.jjswigut.oopsallprs.domain.model.foundationSuccess(Unit)
     suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>>
     suspend fun refreshEntitlements(): FoundationResult<FullAccessEntitlementSnapshot>
     suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot>
@@ -71,6 +78,7 @@ interface FullAccessBillingAdapter {
 }
 
 expect class FullAccessBillingHandoff(context: Any? = null) : FullAccessBillingAdapter {
+    override fun setEntitlementObserver(observer: FullAccessBillingObserver?)
     override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>>
     override suspend fun refreshEntitlements(): FoundationResult<FullAccessEntitlementSnapshot>
     override suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot>

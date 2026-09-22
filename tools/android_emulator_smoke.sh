@@ -7,8 +7,13 @@ activity_name="${ANDROID_ACTIVITY_NAME:-com.jjswigut.oopsallprs.MainActivity}"
 adb_bin="${ADB:-}"
 emulator_bin="${EMULATOR:-}"
 avd_name="${ANDROID_AVD_NAME:-}"
+requested_device="${ANDROID_DEVICE_SERIAL:-}"
 artifact_dir="${SMOKE_ARTIFACT_DIR:-$repo_root/build/smoke/android}"
+launch_settle_seconds="${ANDROID_LAUNCH_SETTLE_SECONDS:-3}"
+emulator_boot_attempts="${ANDROID_EMULATOR_BOOT_ATTEMPTS:-60}"
+emulator_boot_delay_seconds="${ANDROID_EMULATOR_BOOT_DELAY_SECONDS:-5}"
 emulator_log="$artifact_dir/emulator.log"
+started_emulator_pid=""
 
 cd "$repo_root"
 
@@ -45,9 +50,31 @@ fi
 
 "$adb_bin" start-server >/dev/null
 
+cleanup() {
+  local status="$?"
+  if [ -n "$started_emulator_pid" ] && [ "${ANDROID_SHUTDOWN_STARTED_EMULATOR:-0}" = "1" ]; then
+    if [ -n "${device:-}" ]; then
+      "$adb_bin" -s "$device" emu kill >/dev/null 2>&1 || true
+    fi
+    kill "$started_emulator_pid" 2>/dev/null || true
+    # The macOS emulator launcher can fork QEMU and exit before cleanup runs.
+    # Target only the AVD this invocation started, never a connected device.
+    for qemu_pid in $(pgrep -f "qemu-system.*-avd $avd_name" 2>/dev/null || true); do
+      kill "$qemu_pid" 2>/dev/null || true
+    done
+  fi
+  exit "$status"
+}
+
+trap cleanup EXIT
+
 find_online_device() {
+  if [ -n "$requested_device" ]; then
+    "$adb_bin" devices | awk -v serial="$requested_device" 'NR > 1 && $1 == serial && $2 == "device" { print $1; exit }'
+    return
+  fi
   "$adb_bin" devices \
-    | awk 'NR > 1 && $2 == "device" { print $1; exit }'
+    | awk 'NR > 1 && $1 ~ /^emulator-/ && $2 == "device" { print $1; exit }'
 }
 
 device="$(find_online_device)"
@@ -73,8 +100,7 @@ if [ -z "$device" ] && [ "${ANDROID_START_EMULATOR:-1}" != "0" ]; then
   "$emulator_bin" -avd "$avd_name" ${ANDROID_EMULATOR_ARGS:--no-snapshot-save -no-boot-anim} > "$emulator_log" 2>&1 &
   started_emulator_pid="$!"
 
-  "$adb_bin" wait-for-device
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 "$emulator_boot_attempts"); do
     device="$(find_online_device)"
     if [ -n "$device" ]; then
       boot_completed="$("$adb_bin" -s "$device" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
@@ -82,10 +108,10 @@ if [ -z "$device" ] && [ "${ANDROID_START_EMULATOR:-1}" != "0" ]; then
         break
       fi
     fi
-    sleep 5
+    sleep "$emulator_boot_delay_seconds"
   done
 else
-  started_emulator_pid=""
+  :
 fi
 
 if [ -z "$device" ]; then
@@ -118,11 +144,31 @@ test -f "$apk_path" || {
 }
 
 "$adb_bin" -s "$device" install -r "$apk_path" >/dev/null
+"$adb_bin" -s "$device" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+"$adb_bin" -s "$device" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+"$adb_bin" -s "$device" shell input keyevent KEYCODE_MENU >/dev/null 2>&1 || true
 "$adb_bin" -s "$device" shell am force-stop "$package_name" >/dev/null || true
 if ! "$adb_bin" -s "$device" shell am start -n "$package_name/$activity_name" >/dev/null 2>&1; then
   "$adb_bin" -s "$device" shell monkey -p "$package_name" -c android.intent.category.LAUNCHER 1 >/dev/null || true
 fi
-sleep 4
+
+foreground_path="$artifact_dir/foreground-activity.txt"
+foreground=0
+for _ in $(seq 1 10); do
+  "$adb_bin" -s "$device" shell dumpsys activity activities > "$foreground_path" || true
+  if rg -F 'mCurrentFocus=' "$foreground_path" | rg -F -q "$package_name" &&
+    ! rg -q 'isSleeping=true' "$foreground_path"; then
+    foreground=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$foreground" -ne 1 ]; then
+  "$adb_bin" -s "$device" logcat -d -t 300 > "$artifact_dir/logcat-tail.txt" || true
+  echo "App did not become an awake foreground activity. Activity state: $foreground_path; log tail: $artifact_dir/logcat-tail.txt" >&2
+  exit 5
+fi
 
 pid="$("$adb_bin" -s "$device" shell pidof "$package_name" | tr -d '\r' || true)"
 if [ -z "$pid" ]; then
@@ -130,6 +176,9 @@ if [ -z "$pid" ]; then
   echo "App did not stay running after launch. Log tail: $artifact_dir/logcat-tail.txt" >&2
   exit 5
 fi
+
+# A foreground activity can still be displaying Android's starting window.
+sleep "$launch_settle_seconds"
 
 screenshot_path="$artifact_dir/launch.png"
 "$adb_bin" -s "$device" exec-out screencap -p > "$screenshot_path" || true
@@ -141,8 +190,5 @@ Package: $package_name
 Activity: $activity_name
 PID: $pid
 Screenshot: $screenshot_path
+Foreground window: $foreground_path
 EOF
-
-if [ -n "$started_emulator_pid" ] && [ "${ANDROID_SHUTDOWN_STARTED_EMULATOR:-0}" = "1" ]; then
-  "$adb_bin" -s "$device" emu kill >/dev/null || kill "$started_emulator_pid" 2>/dev/null || true
-fi

@@ -58,7 +58,7 @@ class BackupPackageCodecTest {
         assertEquals(BACKUP_FORMAT_VERSION_V1, decoded.formatVersion)
         assertEquals(8, decoded.appSchemaVersion)
         assertTrue(decoded.preferences.startWorkoutTimerWithFirstSet)
-        assertTrue(decoded.preferences.restTimerSurfaceEnabled)
+        assertFalse(decoded.preferences.restTimerSurfaceEnabled)
     }
 
     @Test
@@ -72,9 +72,9 @@ class BackupPackageCodecTest {
             )
         ).successValue()
         harness.store.setStartWorkoutTimerWithFirstSet(false).successValue()
-        harness.store.setRestTimerSurfaceEnabled(false).successValue()
+        harness.store.setRestTimerSurfaceEnabled(true).successValue()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val reader = BackupSnapshotReader(
             workouts = harness.store,
             sessions = harness.store,
@@ -97,7 +97,7 @@ class BackupPackageCodecTest {
         assertEquals(pkg.summary.workoutCount, decoded.summary.workoutCount)
         assertEquals("test-device", decoded.deviceId)
         assertFalse(decoded.preferences.startWorkoutTimerWithFirstSet)
-        assertFalse(decoded.preferences.restTimerSurfaceEnabled)
+        assertTrue(decoded.preferences.restTimerSurfaceEnabled)
     }
 
     @Test

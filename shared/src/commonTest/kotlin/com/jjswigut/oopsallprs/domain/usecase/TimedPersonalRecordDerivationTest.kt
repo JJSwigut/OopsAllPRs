@@ -20,9 +20,8 @@ class TimedPersonalRecordDerivationTest {
         val records = harness.store.personalRecords().filter { it.recordKind == PersonalRecordKind.TIME }
         val points = harness.store.progressPoints().filter { it.metric == ProgressMetric.TIME }
 
-        assertEquals(1, records.size)
-        assertEquals(75_000.0, records.single().value)
-        assertEquals(second, records.single().sourceWorkoutId)
+        assertEquals(listOf(45_000.0, 75_000.0), records.sortedBy { it.achievedAt }.map { it.value })
+        assertEquals(second, records.maxBy { it.value }.sourceWorkoutId)
         assertEquals(listOf(45_000.0, 75_000.0), points.map { it.value })
     }
 
@@ -52,5 +51,5 @@ private suspend fun FoundationHarness.completeTimedWorkout(durationMs: Long, sta
             loggedAt = instant(startedAtMs + 200),
             durationMs = durationMs
         ).successValue()
-        routines.finishWorkout(workout.id, instant(startedAtMs + 1_000)).successValue().id
+        routines.finishWorkout(workout.id, instant(startedAtMs + 1_000)).successValue().workout.id
     }

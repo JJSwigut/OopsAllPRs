@@ -11,6 +11,7 @@ import com.jjswigut.oopsallprs.domain.model.RoutineExercise
 import com.jjswigut.oopsallprs.domain.model.RoutineSetTemplate
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
+import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.domain.model.canonicalExerciseName
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
@@ -41,17 +42,14 @@ class DeveloperSeedUseCase(
     suspend fun loadProgressDemo(): DeveloperSeedResult =
         runScenario(DeveloperSeedScenario.PROGRESS) {
             val exercises = resolveExercises()
-            val plans = progressWorkoutPlans()
-            val existingFinishedAt = workouts.completedWorkouts()
-                .map { it.finishedAt }
-                .toSet()
-            val missingPlans = plans.filterNot { it.finishedAt in existingFinishedAt }
-            if (missingPlans.isEmpty()) {
+            val progressRoutines = ensureProgressRoutines(exercises)
+            val progressRoutineIds = progressRoutines.values.map { it.id }.toSet()
+            if (workouts.completedWorkouts().any { it.routineId in progressRoutineIds }) {
                 return@runScenario skipped("Progress demo already loaded")
             }
 
-            val progressRoutines = ensureProgressRoutines(exercises)
-            missingPlans.forEach { plan ->
+            val plans = progressWorkoutPlans()
+            plans.forEach { plan ->
                 val routine = progressRoutines.getValue(plan.routineName)
                 val active = workoutLifecycle.startFromRoutine(routine.id, plan.startedAt).successValue()
                 plan.sets.forEachIndexed { index, set ->
@@ -73,8 +71,24 @@ class DeveloperSeedUseCase(
             }
 
             val records = progress.personalRecords().size
-            loaded("Loaded ${missingPlans.size} demo workouts and $records PR records")
+            loaded("Loaded ${plans.size} demo workouts and $records PR records")
         }
+
+    suspend fun loadProgressDemoIfEmpty(): DeveloperSeedResult {
+        val hasUserHistory = workouts.completedWorkouts().isNotEmpty() ||
+            workoutLifecycle.currentActiveWorkout() != null ||
+            routines.listRoutines().isNotEmpty() ||
+            exerciseCatalog.userCreatedExercises().isNotEmpty()
+        return if (hasUserHistory) {
+            DeveloperSeedResult(
+                DeveloperSeedScenario.PROGRESS,
+                DeveloperSeedOutcome.SKIPPED,
+                "Debug history was not loaded because the database contains user data"
+            )
+        } else {
+            loadProgressDemo()
+        }
+    }
 
     suspend fun loadRoutineDemo(): DeveloperSeedResult =
         runScenario(DeveloperSeedScenario.ROUTINES) {
@@ -120,10 +134,11 @@ class DeveloperSeedUseCase(
     private suspend fun resolveExercises(): DemoExercises {
         exerciseCatalog.ensureSeeded(seedCsvProvider()).successValue()
         return DemoExercises(
-            bench = resolveExercise("Barbell Bench Press - Medium Grip"),
-            squat = resolveExercise("Barbell Squat"),
-            deadlift = resolveExercise("Barbell Deadlift"),
-            pullUp = resolveExercise("Wide-Grip Rear Pull-Up"),
+            bench = resolveExercise("Bench Press"),
+            squat = resolveExercise("Squat"),
+            deadlift = resolveExercise("Deadlift"),
+            triceps = resolveExercise("Cable Triceps Extension"),
+            pullUp = resolveExercise("Wide-Grip Pull-Up"),
             plank = resolveExercise("Plank")
         )
     }
@@ -187,6 +202,14 @@ class DeveloperSeedUseCase(
                     sets = listOf(
                         DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 5, weightKg = 80.0),
                         DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 8, weightKg = 72.5)
+                    )
+                ),
+                DemoRoutineExercisePlan(
+                    exercise = DemoExercise.TRICEPS,
+                    restSeconds = 90,
+                    sets = listOf(
+                        DemoSetPlan(DemoExercise.TRICEPS, SetKind.WEIGHTED, reps = 7, weightKg = pounds(25.0)),
+                        DemoSetPlan(DemoExercise.TRICEPS, SetKind.WEIGHTED, reps = 8, weightKg = pounds(20.0))
                     )
                 ),
                 DemoRoutineExercisePlan(
@@ -308,62 +331,56 @@ class DeveloperSeedUseCase(
             )
         )
 
-    private fun progressWorkoutPlans(): List<DemoWorkoutPlan> =
-        listOf(
-            DemoWorkoutPlan(
-                routineName = PROGRESS_PUSH_ROUTINE_NAME,
-                startedAt = day(0),
-                finishedAt = day(0, minutes = 48),
-                sets = listOf(
-                    DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 5, weightKg = 80.0),
-                    DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 8, weightKg = 72.5),
-                    DemoSetPlan(DemoExercise.PULL_UP, SetKind.BODYWEIGHT, reps = 6, weightKg = null),
-                    DemoSetPlan(DemoExercise.PLANK, SetKind.TIMED, reps = 0, weightKg = null, durationMs = 45_000L)
-                )
-            ),
-            DemoWorkoutPlan(
-                routineName = PROGRESS_LOWER_ROUTINE_NAME,
-                startedAt = day(3),
-                finishedAt = day(3, minutes = 52),
-                sets = listOf(
-                    DemoSetPlan(DemoExercise.SQUAT, SetKind.WEIGHTED, reps = 5, weightKg = 100.0),
-                    DemoSetPlan(DemoExercise.DEADLIFT, SetKind.WEIGHTED, reps = 3, weightKg = 125.0)
-                )
-            ),
-            DemoWorkoutPlan(
-                routineName = PROGRESS_PUSH_ROUTINE_NAME,
-                startedAt = day(7),
-                finishedAt = day(7, minutes = 50),
-                sets = listOf(
-                    DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 5, weightKg = 82.5),
-                    DemoSetPlan(DemoExercise.PULL_UP, SetKind.BODYWEIGHT, reps = 8, weightKg = null),
-                    DemoSetPlan(DemoExercise.PLANK, SetKind.TIMED, reps = 0, weightKg = null, durationMs = 60_000L)
-                )
-            ),
-            DemoWorkoutPlan(
-                routineName = PROGRESS_LOWER_ROUTINE_NAME,
-                startedAt = day(10),
-                finishedAt = day(10, minutes = 55),
-                sets = listOf(
-                    DemoSetPlan(DemoExercise.SQUAT, SetKind.WEIGHTED, reps = 5, weightKg = 105.0),
-                    DemoSetPlan(DemoExercise.DEADLIFT, SetKind.WEIGHTED, reps = 3, weightKg = 132.5)
-                )
-            ),
-            DemoWorkoutPlan(
-                routineName = PROGRESS_PUSH_ROUTINE_NAME,
-                startedAt = day(14),
-                finishedAt = day(14, minutes = 47),
-                sets = listOf(
-                    DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 5, weightKg = 87.5),
-                    DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 3, weightKg = 90.0),
-                    DemoSetPlan(DemoExercise.PULL_UP, SetKind.BODYWEIGHT, reps = 10, weightKg = null),
-                    DemoSetPlan(DemoExercise.PLANK, SetKind.TIMED, reps = 0, weightKg = null, durationMs = 75_000L)
-                )
-            )
-        )
+    private fun progressWorkoutPlans(): List<DemoWorkoutPlan> {
+        // Keep the most recent demo session two days old so the Recent training
+        // review is populated, while the preceding sessions still form a useful
+        // multi-week evidence history.
+        val baseEpochMs = clock().toEpochMilliseconds() - (9L * 7L + 2L) * DAY_MS
+        fun progressDay(offset: Int, minutes: Int = 0): Instant =
+            Instant.fromEpochMilliseconds(baseEpochMs + offset * DAY_MS + minutes * MINUTE_MS)
 
-    private fun day(offset: Int, minutes: Int = 0): Instant =
-        Instant.fromEpochMilliseconds(DEMO_BASE_MS + offset * DAY_MS + minutes * MINUTE_MS)
+        return buildList {
+            repeat(10) { week ->
+                val finalWeek = week == 9
+                add(
+                    DemoWorkoutPlan(
+                        routineName = PROGRESS_PUSH_ROUTINE_NAME,
+                        startedAt = progressDay(week * 7),
+                        finishedAt = progressDay(week * 7, minutes = 48 + (week % 4)),
+                        sets = listOf(
+                            DemoSetPlan(DemoExercise.BENCH, SetKind.WEIGHTED, reps = 5, weightKg = 50.0 + week * 2.0),
+                            DemoSetPlan(DemoExercise.PULL_UP, SetKind.BODYWEIGHT, reps = 6 + minOf(week, 6), weightKg = null),
+                            DemoSetPlan(DemoExercise.PLANK, SetKind.TIMED, reps = 0, weightKg = null, durationMs = 45_000L + minOf(week, 6) * 5_000L),
+                            DemoSetPlan(
+                                DemoExercise.TRICEPS,
+                                SetKind.WEIGHTED,
+                                reps = if (finalWeek) 8 else 7,
+                                weightKg = pounds(if (finalWeek) 20.0 else 25.0)
+                            )
+                        )
+                    )
+                )
+                if (week < 9) {
+                    add(
+                        DemoWorkoutPlan(
+                            routineName = PROGRESS_LOWER_ROUTINE_NAME,
+                            startedAt = progressDay(week * 7 + 3),
+                            finishedAt = progressDay(week * 7 + 3, minutes = 52 + (week % 3)),
+                            sets = listOf(
+                                DemoSetPlan(DemoExercise.SQUAT, SetKind.WEIGHTED, reps = 5, weightKg = 100.0),
+                                DemoSetPlan(
+                                    DemoExercise.DEADLIFT,
+                                    SetKind.WEIGHTED,
+                                    reps = if (week < 4) 15 else 5,
+                                    weightKg = 120.0
+                                )
+                            )
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     private suspend fun runScenario(
         scenario: DeveloperSeedScenario,
@@ -396,6 +413,7 @@ class DeveloperSeedUseCase(
         val bench: ExerciseCatalogItem,
         val squat: ExerciseCatalogItem,
         val deadlift: ExerciseCatalogItem,
+        val triceps: ExerciseCatalogItem,
         val pullUp: ExerciseCatalogItem,
         val plank: ExerciseCatalogItem
     )
@@ -404,6 +422,7 @@ class DeveloperSeedUseCase(
         BENCH,
         SQUAT,
         DEADLIFT,
+        TRICEPS,
         PULL_UP,
         PLANK;
 
@@ -412,6 +431,7 @@ class DeveloperSeedUseCase(
                 BENCH -> exercises.bench
                 SQUAT -> exercises.squat
                 DEADLIFT -> exercises.deadlift
+                TRICEPS -> exercises.triceps
                 PULL_UP -> exercises.pullUp
                 PLANK -> exercises.plank
             }
@@ -456,4 +476,6 @@ class DeveloperSeedUseCase(
         const val ACTIVE_RECOVERY_ELAPSED_MS = 25 * MINUTE_MS
         val DEMO_CREATED_AT: Instant = Instant.fromEpochMilliseconds(DEMO_BASE_MS)
     }
+
+    private fun pounds(value: Double): Double = WeightKg.fromDisplay(value, WeightUnit.POUNDS).value
 }

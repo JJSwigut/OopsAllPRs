@@ -4,6 +4,7 @@ import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
+import com.jjswigut.oopsallprs.ui.common.shortDateLabel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -21,7 +22,7 @@ class ProgressDisplayModelsTest {
 
         assertEquals("220.5 lb x 5", row.valueLabel)
         assertEquals("5 reps", row.detailLabel)
-        assertEquals("1970-01-01", row.achievedDateLabel)
+        assertEquals(record.achievedAt.shortDateLabel(), row.achievedDateLabel)
         assertEquals(WeightKg(100.0), record.weight)
     }
 

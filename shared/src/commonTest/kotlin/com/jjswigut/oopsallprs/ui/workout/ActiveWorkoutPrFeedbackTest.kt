@@ -33,7 +33,7 @@ class ActiveWorkoutPrFeedbackTest {
 
         val feedback = holder.state.value.workout?.exerciseBlocks?.single()?.loggedRows?.single()?.prFeedback
         assertNotNull(feedback)
-        assertEquals("New PR: 100 kg x 5", feedback.label)
+        assertEquals("New 5-rep PR: 100 kg x 5", feedback.label)
     }
 
     @Test
@@ -47,7 +47,7 @@ class ActiveWorkoutPrFeedbackTest {
             newValue = 100.0
         )
 
-        assertEquals("New PR: 220.5 lb x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.POUNDS))
-        assertEquals("New PR: 100 kg x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.KILOGRAMS))
+        assertEquals("New 5-rep PR: 220.5 lb x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.POUNDS))
+        assertEquals("New 5-rep PR: 100 kg x 5", feedback.displayLabel(reps = 5, weightUnit = WeightUnit.KILOGRAMS))
     }
 }

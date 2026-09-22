@@ -21,7 +21,7 @@ class IosAppViewControllerFactory {
     ): UIViewController = ComposeUIViewController {
         App(
             databaseDriverFactory = PlatformDatabaseDriverFactory(),
-            fileExportHandoff = FileExportHandoff(),
+            fileExportHandoff = FileExportHandoff(context),
             backupDocumentHandoff = BackupDocumentHandoff(context),
             fullAccessBilling = fullAccessBilling ?: FullAccessBillingHandoff(context),
             restAlertScheduler = restAlertScheduler ?: RestNotificationScheduler(),
