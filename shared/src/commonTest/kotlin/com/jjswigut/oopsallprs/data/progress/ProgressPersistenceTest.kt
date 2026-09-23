@@ -15,7 +15,7 @@ class ProgressPersistenceTest {
     fun progressDataIsRebuildableFromCompletedWorkouts() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val derivation = PersonalRecordDerivationUseCase(harness.store)
         derivation.rebuildFrom(listOf(completed))
         derivation.rebuildFrom(listOf(completed))

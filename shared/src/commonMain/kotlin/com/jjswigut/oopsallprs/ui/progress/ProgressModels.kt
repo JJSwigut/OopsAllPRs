@@ -1,6 +1,11 @@
 package com.jjswigut.oopsallprs.ui.progress
 
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.ProgressionSummary
+import com.jjswigut.oopsallprs.domain.model.RecentTrainingReview
+import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceSource
+import com.jjswigut.oopsallprs.domain.model.ProgressSourceMeasurement
+import com.jjswigut.oopsallprs.domain.model.ProgressTrendState
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
@@ -19,6 +24,22 @@ import kotlin.math.abs
 import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlin.math.pow
+
+internal fun RecentTrainingReview.factsLabel(): String = buildList {
+    add("$completedWorkoutCount ${if (completedWorkoutCount == 1) "workout" else "workouts"}")
+    add("$loggedSetCount ${if (loggedSetCount == 1) "set" else "sets"}")
+    if (totalDurationMs > 0L) add(recentTrainingDurationLabel(totalDurationMs))
+}.joinToString(" \u2022 ")
+
+internal fun recentTrainingDurationLabel(durationMs: Long): String {
+    val normalizedDuration = durationMs.coerceAtLeast(0L)
+    if (normalizedDuration in 1L..<60_000L) return "<1m"
+    val totalMinutes = normalizedDuration / 60_000L
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return if (hours > 0L) "${hours}h ${minutes}m" else "${minutes}m"
+}
 
 data class ProgressPrRow(
     val recordId: FoundationId,
@@ -42,7 +63,8 @@ data class ProgressExerciseGroup(
     val latestRecord: ProgressPrRow?,
     val trendRows: List<ProgressTrendRow>,
     val chart: ProgressChartState,
-    val latestAchievedAt: Instant?
+    val latestAchievedAt: Instant?,
+    val capability: ProgressionSummary? = null
 )
 
 data class ProgressTrendRow(
@@ -72,6 +94,24 @@ data class ProgressEvidence(
     val isAvailable: Boolean
 )
 
+internal fun ProgressionSummary.displayStateLabel(): String =
+    if (state == ProgressTrendState.BUILDING_TREND && coverage.isMature) {
+        "Need comparable workouts"
+    } else {
+        state.label
+    }
+
+internal fun ProgressEvidenceSource.displayValueLabel(weightUnit: WeightUnit): String =
+    when (val measure = measurement) {
+        is ProgressSourceMeasurement.EstimatedStrength ->
+            "${WeightKg(measure.estimatedOneRepMaxKg).format(weightUnit)} estimated 1RM • " +
+                "from ${measure.sourceWeight.format(weightUnit, decimalPlaces = 2)} x ${measure.sourceReps}"
+        is ProgressSourceMeasurement.CompletedWork ->
+            "${measure.sourceWeight.format(weightUnit, decimalPlaces = 2)} x ${measure.sourceReps} • " +
+                "${WeightKg(measure.loadRepTotalKg).format(weightUnit)} load x reps"
+        ProgressSourceMeasurement.CompletedSession -> "Completed session"
+    }
+
 internal fun buildRecentPrRows(
     records: List<PersonalRecord>,
     workouts: List<CompletedWorkout>,
@@ -96,7 +136,8 @@ internal fun buildExerciseGroups(
     records: List<PersonalRecord>,
     points: List<ProgressPoint>,
     workouts: List<CompletedWorkout>,
-    weightUnit: WeightUnit
+    weightUnit: WeightUnit,
+    capabilityByExercise: Map<FoundationId, ProgressionSummary> = emptyMap()
 ): List<ProgressExerciseGroup> {
     val names = buildExerciseNameLookup(workouts)
     val sourceRecordByPoint = points.associate { point ->
@@ -108,6 +149,7 @@ internal fun buildExerciseGroups(
         }?.id
     }
     val trendRowsByExercise = points
+        .filter { it.isDisplayableTrendPoint() }
         .groupBy { it.exerciseCatalogId }
         .mapValues { (_, exercisePoints) ->
             exercisePoints
@@ -148,7 +190,8 @@ internal fun buildExerciseGroups(
                 latestRecord = rows.maxByOrNull { it.achievedAt },
                 trendRows = trendRowsByExercise[exerciseId].orEmpty(),
                 chart = chart,
-                latestAchievedAt = rows.maxByOrNull { it.achievedAt }?.achievedAt ?: latestPointAt
+                latestAchievedAt = rows.maxByOrNull { it.achievedAt }?.achievedAt ?: latestPointAt,
+                capability = capabilityByExercise[exerciseId]
             )
         }
         .sortedWith(
@@ -205,7 +248,7 @@ internal fun PersonalRecord.toProgressPrRow(
         exerciseName = exerciseName,
         kind = recordKind,
         metricCode = metricCode,
-        kindLabel = evidenceMetric()?.recordLabel() ?: "Record",
+        kindLabel = evidenceMetric()?.recordLabel(reps) ?: "Record",
         valueLabel = valueLabel(weightUnit),
         detailLabel = detailLabel(weightUnit),
         sourceWorkoutId = sourceWorkoutId,
@@ -270,7 +313,7 @@ private fun ProgressPoint.valueLabel(
             "$weightLabel$repsLabel"
         }
         ProgressEvidenceMetric.REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
-        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} e1RM"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} Estimated 1RM"
         ProgressEvidenceMetric.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
         ProgressEvidenceMetric.LONGEST_DURATION -> value.roundToLong().formatDurationMs()
         ProgressEvidenceMetric.LONGEST_DISTANCE -> "${value.formatCompact()} m"
@@ -285,15 +328,15 @@ private fun PersonalRecord.sourceSetDetail(weightUnit: WeightUnit): String {
 private fun CompletedSetSummary.formatSetLabel(weightUnit: WeightUnit): String {
     val values = listOfNotNull(
         reps?.let { "${it.coerceAtLeast(0)} reps" },
-        weight?.format(weightUnit),
+        weight?.format(weightUnit, decimalPlaces = 2),
         durationMs?.formatDurationMs(),
         distanceMeters?.let { "${it.formatCompact()} m" }
     ).joinToString(" • ").ifEmpty { "Performance unavailable" }
     return "Set ${position + 1}: $values"
 }
 
-internal fun WeightKg.format(unit: WeightUnit): String =
-    "${displayValue(unit).formatCompact()} ${unit.abbreviation()}"
+internal fun WeightKg.format(unit: WeightUnit, decimalPlaces: Int = 1): String =
+    "${displayValue(unit).formatCompact(decimalPlaces)} ${unit.abbreviation()}"
 
 private fun WeightUnit.abbreviation(): String =
     when (this) {
@@ -301,10 +344,11 @@ private fun WeightUnit.abbreviation(): String =
         WeightUnit.POUNDS -> "lb"
     }
 
-private fun Double.formatCompact(): String {
-    val oneDecimal = round(this * 10.0) / 10.0
-    val whole = oneDecimal.roundToInt()
-    return if (abs(oneDecimal - whole.toDouble()) < 0.0001) whole.toString() else oneDecimal.toString()
+private fun Double.formatCompact(decimalPlaces: Int = 1): String {
+    val factor = 10.0.pow(decimalPlaces)
+    val rounded = round(this * factor) / factor
+    val whole = rounded.roundToInt()
+    return if (abs(rounded - whole.toDouble()) < 0.0001) whole.toString() else rounded.toString()
 }
 
 private fun buildExerciseNameLookup(workouts: List<CompletedWorkout>): Map<FoundationId, String> {
@@ -322,9 +366,9 @@ private fun fallbackExerciseName(exerciseId: FoundationId): String = "Exercise $
 private fun PersonalRecord.evidenceMetric(): ProgressEvidenceMetric? =
     ProgressEvidenceMetric.fromWireCode(metricCode.value)
 
-private fun ProgressEvidenceMetric.recordLabel(): String =
+private fun ProgressEvidenceMetric.recordLabel(reps: Int?): String =
     when (this) {
-        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> "Best weight"
+        ProgressEvidenceMetric.WEIGHT_FOR_REPS -> "${reps ?: 0}-rep PR"
         ProgressEvidenceMetric.REPS -> "Bodyweight reps"
         ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM"
         ProgressEvidenceMetric.VOLUME -> "Best volume"

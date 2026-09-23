@@ -24,7 +24,7 @@ class ActiveWorkoutConflictTest {
     fun startFromRoutineRejectsSecondActiveWorkout() = runTest {
         val harness = FoundationHarness()
         val sourceWorkoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(sourceWorkoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(sourceWorkoutId, instant(2_000)).successValue().workout
         val template = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
         harness.lifecycle.startEmpty(instant(4_000)).successValue()
 

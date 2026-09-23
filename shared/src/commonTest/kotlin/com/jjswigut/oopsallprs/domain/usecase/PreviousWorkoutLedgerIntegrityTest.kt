@@ -51,5 +51,5 @@ private suspend fun FoundationHarness.completeLedgerSource() {
         position = 0,
         loggedAt = instant(1_200)
     ).successValue()
-    routines.finishWorkout(workout.id, instant(2_000)).successValue()
+    routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 }

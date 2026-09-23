@@ -1,14 +1,26 @@
 package com.jjswigut.oopsallprs.ui.history
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.WeightKg
@@ -16,11 +28,10 @@ import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ds.component.FitButton
 import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
 import com.jjswigut.oopsallprs.ds.component.FitCard
-import com.jjswigut.oopsallprs.ds.component.FitListRow
-import com.jjswigut.oopsallprs.ds.component.FitStatTile
 import com.jjswigut.oopsallprs.ds.component.FitTextField
+import com.jjswigut.oopsallprs.ds.foundation.pressable
+import com.jjswigut.oopsallprs.ds.haptic.HapticType
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
-import com.jjswigut.oopsallprs.ui.common.shortDateLabel
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
@@ -37,6 +48,10 @@ fun HistoryFlow(
     onStartSaveTemplate: (FoundationId) -> Unit = {},
     onTemplateNameChange: (String) -> Unit = {},
     onSaveTemplate: () -> Unit = {},
+    onCancelTemplateSave: () -> Unit = {},
+    templateSavedName: String? = null,
+    onOpenTrain: () -> Unit = {},
+    onViewProgress: () -> Unit = {},
     onRequestDeleteWorkout: () -> Unit = {},
     onCancelDeleteWorkout: () -> Unit = {},
     onConfirmDeleteWorkout: () -> Unit = {},
@@ -60,9 +75,20 @@ fun HistoryFlow(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier.verticalScroll(rememberScrollState()),
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
     ) {
+        state.completionNotice?.let { message ->
+            FoundationText(message, style = FitTheme.type.caption.copy(color = FitTheme.colors.onSurface))
+        }
+        templateSaveDraft?.takeIf {
+            it.isSaving && it.completedWorkoutId != state.selectedSummary?.workoutId
+        }?.let { pendingSave ->
+            FoundationMutedText(
+                "Saving template: ${pendingSave.name}",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         state.selectedSummary?.let { summary ->
             CompletedWorkoutDetail(
                 summary = summary,
@@ -72,6 +98,10 @@ fun HistoryFlow(
                 onStartSaveTemplate = onStartSaveTemplate,
                 onTemplateNameChange = onTemplateNameChange,
                 onSaveTemplate = onSaveTemplate,
+                onCancelTemplateSave = onCancelTemplateSave,
+                templateSavedName = templateSavedName,
+                onOpenTrain = onOpenTrain,
+                onViewProgress = onViewProgress,
                 pendingDeleteSummary = state.pendingDeleteSummary,
                 errorMessage = state.errorMessage,
                 onRequestDeleteWorkout = onRequestDeleteWorkout,
@@ -99,31 +129,42 @@ fun HistoryFlow(
             return@Column
         }
 
-        FitStatTile(
-            label = "Workouts",
-            value = state.rows.size,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            glow = FitTheme.glow.none
-        )
+            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FoundationText(
+                "History",
+                modifier = Modifier.weight(1f).semantics { heading() },
+                style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+            )
+            FoundationMutedText(historyCountLabel(state.rows.size, "workout"))
+        }
         if (state.rows.isEmpty()) {
-            FitCard(glow = FitTheme.glow.none) {
-                FoundationText(
-                    text = "No completed workouts yet",
-                    style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
-                )
-                FoundationMutedText("Finish a workout and it will show here with sets, PRs, and template actions.")
-            }
+            FoundationMutedText("No completed workouts yet")
+            FitButton(
+                text = "Plan your first workout",
+                onClick = onOpenTrain,
+                modifier = Modifier.fillMaxWidth(),
+                style = FitButtonStyle.Primary
+            )
         } else {
             state.rows.forEach { row ->
-                FitCard(glow = FitTheme.glow.none) {
-                    FitListRow(onClick = { onSelectWorkout(row.workoutId) }) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
-                        ) {
-                            FoundationText(row.title, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-                            FoundationMutedText("${row.durationLabel} • ${row.exerciseCount} exercises • ${row.setCount} sets")
-                        }
+                FitCard(
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(min = FitTheme.size.touchMin)
+                        .semantics { role = Role.Button }
+                        .pressable(haptic = HapticType.Light, onClick = { onSelectWorkout(row.workoutId) }),
+                    glow = FitTheme.glow.none
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                        FoundationText(
+                            row.title,
+                            style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
+                        )
+                        FoundationMutedText(row.dateLabel)
+                        HistoryWorkoutCounts(row.durationLabel, row.exerciseCount, row.setCount)
                     }
                 }
             }
@@ -134,6 +175,7 @@ fun HistoryFlow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompletedWorkoutDetail(
     summary: CompletedWorkoutSummary,
@@ -143,6 +185,10 @@ private fun CompletedWorkoutDetail(
     onStartSaveTemplate: (FoundationId) -> Unit,
     onTemplateNameChange: (String) -> Unit,
     onSaveTemplate: () -> Unit,
+    onCancelTemplateSave: () -> Unit,
+    templateSavedName: String?,
+    onOpenTrain: () -> Unit,
+    onViewProgress: () -> Unit,
     pendingDeleteSummary: CompletedWorkoutSummary?,
     errorMessage: String?,
     onRequestDeleteWorkout: () -> Unit,
@@ -191,65 +237,149 @@ private fun CompletedWorkoutDetail(
         )
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+            verticalAlignment = Alignment.Top
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
-                FoundationText("Completed workout", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
-                FoundationMutedText(
-                    "${summary.finishedAt.shortDateLabel()} • ${summary.durationLabel} • " +
-                        "${summary.exerciseCount} exercises • ${summary.setCount} sets"
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+            ) {
+                FoundationText(
+                    "Completed workout",
+                    modifier = Modifier.semantics { heading() },
+                    style = FitTheme.type.body.copy(
+                        color = FitTheme.colors.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 )
+                FoundationMutedText(summary.finishedAt.historyDateLabel())
             }
             FoundationTextAction("Back", onBack)
         }
-        summary.exercises.forEach { exercise ->
-            FitCard(glow = FitTheme.glow.none) {
-                FoundationText(exercise.displayName, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-                exercise.setRows.forEach { row ->
-                    FoundationMutedText(row.historyDisplayLabel(weightUnit))
+        HistoryWorkoutCounts(summary.durationLabel, summary.exerciseCount, summary.setCount)
+        if (summary.prCount > 0) {
+            val prSetCount = summary.exercises.sumOf { exercise ->
+                exercise.setRows.count { it.prMarkers.isNotEmpty() }
+            }
+            FoundationText(
+                "${historyCountLabel(summary.prCount, "PR")} across ${historyCountLabel(prSetCount, "set")}",
+                modifier = Modifier.semantics { heading() },
+                style = FitTheme.type.title.copy(color = FitTheme.colors.accent)
+            )
+        }
+        val draft = templateSaveDraft?.takeIf { it.completedWorkoutId == summary.workoutId }
+        if (draft?.isSaving != true) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+            ) {
+                if (draft == null && templateSavedName == null) {
+                    FitButton(
+                        text = "Save as template",
+                        onClick = { onStartSaveTemplate(summary.workoutId) },
+                        enabled = templateSaveDraft?.isSaving != true,
+                        style = FitButtonStyle.Secondary
+                    )
                 }
+                FoundationTextAction("View progress", onViewProgress)
+                FoundationTextAction("Edit workout", onEditWorkout)
             }
         }
-        FitButton(
-            text = "Edit workout",
-            onClick = onEditWorkout,
-            modifier = Modifier.fillMaxWidth(),
-            style = FitButtonStyle.Primary
-        )
-        FitCard(glow = FitTheme.glow.none) {
-            val draft = templateSaveDraft?.takeIf { it.completedWorkoutId == summary.workoutId }
-            if (draft == null) {
-                FitButton(
-                    text = "Save as template",
-                    onClick = { onStartSaveTemplate(summary.workoutId) },
-                    style = FitButtonStyle.Secondary
+        templateSavedName?.let { name ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+            ) {
+                FoundationText(
+                    "Template saved: $name",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitTheme.type.caption.copy(color = FitTheme.colors.success)
                 )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
-                    FoundationText("Template name", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                FoundationTextAction("Open in Train", onOpenTrain)
+            }
+        }
+        if (draft != null) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)
+            ) {
+                FoundationText("Template name", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                if (draft.isSaving) {
+                    FoundationText(
+                        draft.name,
+                        modifier = Modifier.fillMaxWidth()
+                            .heightIn(min = FitTheme.size.controlHeight)
+                            .padding(horizontal = FitTheme.spacing.lg, vertical = FitTheme.spacing.md)
+                    )
+                } else {
                     FitTextField(
                         value = draft.name,
                         onValueChange = onTemplateNameChange,
                         placeholder = "Template name",
                         modifier = Modifier.fillMaxWidth()
                     )
-                    draft.errorMessage?.let { message ->
-                        FoundationText(message, style = FitTheme.type.caption.copy(color = FitTheme.colors.danger))
-                    }
+                }
+                draft.errorMessage?.let { message ->
+                    FoundationText(message, style = FitTheme.type.caption.copy(color = FitTheme.colors.danger))
+                }
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+                ) {
                     FitButton(
-                        text = "Save template",
+                        text = if (draft.isSaving) "Saving..." else "Save template",
                         onClick = onSaveTemplate,
-                        style = FitButtonStyle.Primary,
-                        modifier = Modifier.fillMaxWidth()
+                        enabled = !draft.isSaving,
+                        style = FitButtonStyle.Primary
+                    )
+                    FitButton(
+                        text = "Cancel",
+                        onClick = onCancelTemplateSave,
+                        enabled = !draft.isSaving,
+                        style = FitButtonStyle.Secondary
                     )
                 }
             }
         }
-        FitCard(glow = FitTheme.glow.none) {
+        summary.exercises.forEach { exercise ->
+            HistorySectionDivider()
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)
+            ) {
+                FoundationText(
+                    exercise.displayName,
+                    modifier = Modifier.fillMaxWidth().semantics { heading() },
+                    style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface, fontWeight = FontWeight.SemiBold)
+                )
+                exercise.setRows.forEach { row ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+                    ) {
+                        FoundationText(row.historyPerformanceLabel(weightUnit), modifier = Modifier.fillMaxWidth())
+                        row.prMarkers.forEach { marker ->
+                            FoundationText(
+                                marker.historyLabel(weightUnit),
+                                modifier = Modifier.fillMaxWidth(),
+                                style = FitTheme.type.label.copy(color = FitTheme.colors.accent)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        HistorySectionDivider()
+        Column(modifier = Modifier.fillMaxWidth()) {
             val isConfirmingDelete = pendingDeleteSummary?.workoutId == summary.workoutId
             if (isConfirmingDelete) {
                 Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
@@ -275,11 +405,9 @@ private fun CompletedWorkoutDetail(
                     }
                 }
             } else {
-                FitButton(
-                    text = "Delete workout",
+                FoundationTextAction(
+                    label = "Delete workout",
                     onClick = onRequestDeleteWorkout,
-                    modifier = Modifier.fillMaxWidth(),
-                    style = FitButtonStyle.Secondary
                 )
             }
         }
@@ -287,6 +415,25 @@ private fun CompletedWorkoutDetail(
             FoundationText(message, style = FitTheme.type.caption.copy(color = FitTheme.colors.danger))
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HistoryWorkoutCounts(durationLabel: String, exerciseCount: Int, setCount: Int) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md),
+        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+    ) {
+        FoundationMutedText(durationLabel)
+        FoundationMutedText(historyCountLabel(exerciseCount, "exercise"))
+        FoundationMutedText(historyCountLabel(setCount, "set"))
+    }
+}
+
+@Composable
+private fun HistorySectionDivider() {
+    Box(Modifier.fillMaxWidth().height(FitTheme.size.hairline).background(FitTheme.colors.border))
 }
 
 @Composable
@@ -334,7 +481,7 @@ private fun CompletedWorkoutEditor(
                 FoundationText(exercise.displayName, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
                 exercise.setRows.forEach { row ->
                     Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
-                        FoundationMutedText(row.historyDisplayLabel(weightUnit))
+                        FoundationMutedText(row.historyPerformanceLabel(weightUnit))
                         if (editDraft.pendingDeleteSetId == row.setId) {
                             FoundationText("Delete this set?", style = FitTheme.type.caption.copy(color = FitTheme.colors.danger))
                             Row(horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {

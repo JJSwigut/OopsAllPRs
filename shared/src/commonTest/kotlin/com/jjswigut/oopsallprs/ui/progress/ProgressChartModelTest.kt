@@ -12,6 +12,32 @@ import kotlin.test.assertTrue
 
 class ProgressChartModelTest {
     @Test
+    fun estimatedStrengthChartAndRowsExcludeUnqualifiedEvidenceWithoutHidingRepRecords() {
+        val exerciseId = FoundationId("exercise-bench")
+        val qualified = progressPoint(
+            id = FoundationId("qualified"),
+            metric = ProgressMetric.ESTIMATED_ONE_REP_MAX,
+            reps = 12
+        )
+        val highRep = qualified.copy(id = FoundationId("high-rep"), reps = 13)
+        val missingReps = qualified.copy(id = FoundationId("missing-reps"), reps = null)
+        val missingWeight = qualified.copy(id = FoundationId("missing-weight"), weight = null)
+        val missingSource = qualified.copy(id = FoundationId("missing-source"), sourceSetId = null)
+        val invalidValue = qualified.copy(id = FoundationId("invalid"), value = Double.NaN)
+        val oneRep = qualified.copy(id = FoundationId("one-rep"), reps = 1)
+        val repRecord = progressPoint(id = FoundationId("high-rep-best"), reps = 20)
+        val points = listOf(qualified, highRep, missingReps, missingWeight, missingSource, invalidValue, oneRep, repRecord)
+
+        val chart = buildProgressChartState(points, emptyList(), exerciseId,
+            ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX, WeightUnit.POUNDS)
+        val group = buildExerciseGroups(emptyList(), points, emptyList(), WeightUnit.POUNDS).single()
+
+        assertEquals(setOf(qualified.id, oneRep.id), chart.points.map { it.pointId }.toSet())
+        assertEquals(setOf(qualified.id, oneRep.id, repRecord.id), group.trendRows.map { it.pointId }.toSet())
+        assertTrue(ProgressEvidenceMetric.WEIGHT_FOR_REPS in chart.availableMetrics)
+    }
+
+    @Test
     fun emptyChartStateHasNoSelectedMetric() {
         val state = buildProgressChartState(
             points = emptyList(),

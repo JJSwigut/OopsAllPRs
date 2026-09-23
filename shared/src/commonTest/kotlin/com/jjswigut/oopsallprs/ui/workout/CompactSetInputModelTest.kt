@@ -1,5 +1,6 @@
 package com.jjswigut.oopsallprs.ui.workout
 
+import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.EffortKind
 import com.jjswigut.oopsallprs.domain.model.LoadRole
@@ -11,6 +12,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class CompactSetInputModelTest {
+    @Test
+    fun numericStepperStacksLabelsBelowItsCompactWidth() {
+        assertEquals(true, numericStepperUsesStackedLabel(359.dp))
+        assertEquals(false, numericStepperUsesStackedLabel(360.dp))
+    }
+
     @Test
     fun repsStepperNeverDropsBelowOne() {
         assertEquals(1, nextPositiveInt(1, -1))

@@ -40,7 +40,7 @@ class ConfigurationDrivenPersonalRecordDerivationTest {
             result.points.map { it.metricCode.value }.toSet()
         )
         assertEquals(3, result.records.size)
-        assertTrue(result.records.all { it.derivationVersion == ProgressDerivationVersions.CONFIGURATION_CAPTURE })
+        assertTrue(result.records.all { it.derivationVersion == ProgressDerivationVersions.CURRENT })
         assertFalse(result.points.any { it.metricCode == ProgressEvidenceMetric.REPS.wireCode })
     }
 
@@ -54,9 +54,8 @@ class ConfigurationDrivenPersonalRecordDerivationTest {
         )
 
         assertEquals(listOf("reps", "reps"), result.points.map { it.metricCode.value })
-        assertEquals(1, result.records.size)
-        assertEquals(12.0, result.records.single().value)
-        assertEquals("reps", result.records.single().metricCode.value)
+        assertEquals(listOf(10.0, 12.0), result.records.map { it.value })
+        assertTrue(result.records.all { it.metricCode.value == "reps" })
     }
 
     @Test
@@ -148,7 +147,8 @@ class ConfigurationDrivenPersonalRecordDerivationTest {
         )
 
         assertEquals(2, result.points.size)
-        val record = result.records.single()
+        assertEquals(2, result.records.size)
+        val record = result.records.maxBy { it.value }
         assertEquals(1_500.0, record.value)
         assertEquals("longest_distance", record.metricCode.value)
         assertEquals(FoundationId("distance-long"), record.sourceSetId)

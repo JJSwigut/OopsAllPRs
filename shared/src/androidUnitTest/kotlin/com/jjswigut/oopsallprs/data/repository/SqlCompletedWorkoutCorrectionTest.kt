@@ -106,5 +106,5 @@ private suspend fun SqlRepositoryBundle.completedWeightedWorkout(
         0,
         instant(startedAt + 200)
     ).successValue()
-    routineUseCases.finishWorkout(workout.id, instant(finishedAt)).successValue()
+    routineUseCases.finishWorkout(workout.id, instant(finishedAt)).successValue().workout
 }

@@ -26,4 +26,5 @@ class AppStateDeveloperToolsTest {
 
         assertNotNull(appState.developerSeeds)
     }
+
 }

@@ -97,7 +97,7 @@ private suspend fun FoundationHarness.completeWeightedRoutineSource(sets: List<C
             loggedAt = instant(1_200L + set.position)
         ).successValue()
     }
-    routines.finishWorkout(workout.id, instant(2_000)).successValue()
+    routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 }
 
 private suspend fun FoundationHarness.saveRoutineWithSets(sets: List<RoutineSetTemplate>) =

@@ -173,7 +173,7 @@ class CompletedWorkoutCorrectionStateTest {
         val exercise = harness.setLogging.addExercise(workout.id, harness.weightedReference, instant(1_100)).successValue()
         harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
         harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 6, WeightKg(90.0), 1, instant(1_300)).successValue()
-        return harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        return harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
     }
 
     private suspend fun configuredWorkout(

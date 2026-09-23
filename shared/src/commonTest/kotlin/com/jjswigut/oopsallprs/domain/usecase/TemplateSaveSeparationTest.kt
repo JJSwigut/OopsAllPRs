@@ -13,7 +13,7 @@ class TemplateSaveSeparationTest {
     fun savingCompletedWorkoutAsTemplateDoesNotMutateCompletedHistory() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
 
         harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
 

@@ -50,7 +50,7 @@ class WorkoutHomeStateHolderTest {
     fun hydrateIgnoresRouteOnlySessionAfterWorkoutFinishes() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         harness.lifecycle.saveLastOpenedRoute("history", instant(2_200)).successValue()
         val holder = WorkoutHomeStateHolder(harness.lifecycle)
 

@@ -45,7 +45,7 @@ internal fun buildProgressChartState(
     weightUnit: WeightUnit
 ): ProgressChartState {
     val exercisePoints = points
-        .filter { it.exerciseCatalogId == exerciseCatalogId && it.value.isFinite() }
+        .filter { it.exerciseCatalogId == exerciseCatalogId && it.isDisplayableTrendPoint() }
         .mapNotNull { point -> point.evidenceMetric()?.let { point to it } }
     val availableMetrics = exercisePoints
         .map { it.second }
@@ -89,7 +89,7 @@ internal fun ProgressEvidenceMetric.label(): String =
 internal fun ProgressEvidenceMetric.shortLabel(): String =
     when (this) {
         ProgressEvidenceMetric.WEIGHT_FOR_REPS -> "Best"
-        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "e1RM"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "Est. 1RM"
         ProgressEvidenceMetric.VOLUME -> "Volume"
         ProgressEvidenceMetric.REPS -> "Reps"
         ProgressEvidenceMetric.LONGEST_DURATION -> "Time"
@@ -132,7 +132,7 @@ private fun ProgressPoint.valueLabel(evidenceMetric: ProgressEvidenceMetric, wei
             "$weightLabel$repsLabel"
         }
         ProgressEvidenceMetric.REPS -> "${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
-        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} e1RM"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "${WeightKg(value).format(weightUnit)} Estimated 1RM"
         ProgressEvidenceMetric.VOLUME -> "${WeightKg(value).format(weightUnit)} volume"
         ProgressEvidenceMetric.LONGEST_DURATION -> value.roundToLong().formatDurationMs()
         ProgressEvidenceMetric.LONGEST_DISTANCE -> "${value.formatCompact()} m"
@@ -154,6 +154,10 @@ private fun List<ProgressEvidenceMetric>.defaultMetric(): ProgressEvidenceMetric
         ?: firstOrNull { it == ProgressEvidenceMetric.LONGEST_DURATION }
         ?: firstOrNull { it == ProgressEvidenceMetric.LONGEST_DISTANCE }
         ?: firstOrNull()
+
+internal fun ProgressPoint.isDisplayableTrendPoint(): Boolean =
+    value.isFinite() && (metricCode != ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX.wireCode ||
+        (reps in 1..12 && weight != null && sourceSetId != null))
 
 private fun ProgressPoint.evidenceMetric(): ProgressEvidenceMetric? =
     ProgressEvidenceMetric.fromWireCode(metricCode.value)

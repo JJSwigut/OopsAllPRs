@@ -163,11 +163,10 @@ Setup-only work such as fetching refs, creating a branch, switching worktrees, i
 
 Use the smallest credible verification for a feature, then broaden when shared behavior changes.
 
-Baseline checks:
+Baseline Android checks:
 
 ```bash
-./gradlew --no-daemon check
-./gradlew --no-daemon :androidApp:assembleDebug
+tools/release_gate.sh --skip-ios
 ```
 
 Android runtime smoke:
@@ -176,7 +175,25 @@ Android runtime smoke:
 tools/android_emulator_smoke.sh
 ```
 
-If no Android device is online, the script starts the first configured AVD or the AVD named by `ANDROID_AVD_NAME`.
+The script ignores connected physical devices by default and starts or reuses an
+emulator. If no Android emulator is online, it starts the first configured AVD
+or the AVD named by `ANDROID_AVD_NAME`. A physical device requires an explicit
+`ANDROID_DEVICE_SERIAL=<serial>` opt-in because the smoke installs and launches
+the debug app. Successful proof requires an awake foreground activity, a live
+app process, and a settled screenshot rather than a lock-screen or splash-frame
+capture.
+
+iOS runtime smoke:
+
+```bash
+tools/ios_simulator_smoke.sh
+```
+
+The script builds a debug simulator app, creates an isolated simulator, installs
+and launches the app, waits for a settled frame, checks that the capture is not
+an almost-uniform startup surface, then deletes only that simulator. It never
+uses a connected physical iOS device. The runtime and device type can be
+overridden with `IOS_SMOKE_RUNTIME` and `IOS_SMOKE_DEVICE_TYPE`.
 
 Release gate:
 
@@ -185,6 +202,10 @@ tools/release_gate.sh
 ```
 
 `tools/release_gate.sh --android-smoke` also installs and launches the debug Android app on an attached device or running emulator.
+
+`tools/release_gate.sh --ios-smoke` adds the disposable iOS simulator launch
+check. Use both smoke flags before a release when the host has the required
+simulator runtimes available.
 
 Successful release gates write proof files under `build/release-gate/`, including `summary.txt`, `artifacts.txt`, and `proof.env`.
 
@@ -235,9 +256,17 @@ When the owner says "cut a release":
 6. The deploy workflow runs `tools/release_gate.sh --skip-ios`, uploads Android release artifacts and `build/release-gate/` proof files, attempts `tools/ios_release_package.sh` as a timeout-bounded iOS Release simulator package, uploads GitHub Actions artifacts, and creates a GitHub Release on `main` pushes with an automatic `v1.0.<run-number + 1000>` tag. Manual dispatch can override the release tag.
 7. Google Play and App Store upload jobs remain credential-gated. They skip with notices until the required secrets are configured.
 
-Current iOS note: local Release simulator packaging can take longer than debug framework linking and may stall in `:shared:linkReleaseFrameworkIosSimulatorArm64`. Until that is fixed, Android release artifacts and any successful iOS package artifacts are published to GitHub, but iOS packaging is best-effort and timeout-bounded so it does not block the Android/GitHub release package.
+Current iOS note: the local Release simulator package and StoreKit entitlement
+smoke are required local release-gate steps. CI requires the iOS Release
+simulator package. The deployment workflow still keeps its separate iOS
+packaging job best-effort so a GitHub Release can publish verified Android
+artifacts when GitHub's macOS runner has an infrastructure failure. A failed
+package or local StoreKit smoke must be investigated before claiming an iOS
+release is ready.
 
 ## GitHub Actions
 
-- `.github/workflows/ci.yml`: pull requests plus pushes to `development` and `main`.
+- `.github/workflows/ci.yml`: pull requests plus pushes to `development` and
+  `main`; it runs the release-equivalent Android gate and required iOS Release
+  simulator package.
 - `.github/workflows/deploy.yml`: pushes to `main` and manual dispatch. It runs `tools/release_gate.sh --skip-ios`, uploads release packages and proof files to GitHub Actions artifacts, creates a GitHub Release for `main` pushes or manual dispatch with a tag, runs iOS simulator packaging as best-effort, and stubs store publishing when secrets are missing.

@@ -2,6 +2,9 @@ package com.jjswigut.oopsallprs.domain.usecase
 
 import com.jjswigut.oopsallprs.data.repository.InMemoryFoundationStore
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.ExerciseReference
+import com.jjswigut.oopsallprs.domain.model.SetKind
+import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.platform.RestAlertScheduler
 import com.jjswigut.oopsallprs.platform.RestAlertScheduleResult
 import com.jjswigut.oopsallprs.testing.instant
@@ -14,9 +17,10 @@ import kotlin.test.assertNotNull
 
 class RestNotificationSchedulerTest {
     @Test
-    fun restLifecycleSchedulesWithSoundPreferenceAndCancelsOnClearAndDiscard() = runTest {
+    fun optedInRestLifecycleSchedulesWithSoundPreferenceAndCancelsOnClearAndDiscard() = runTest {
         val store = InMemoryFoundationStore()
         store.setRestSoundEnabled(false).successValue()
+        store.setRestTimerSurfaceEnabled(true).successValue()
         val scheduler = FakeRestAlertScheduler()
         val lifecycle = WorkoutLifecycleUseCases(store, store, store, preferences = store, notifications = scheduler)
         val workout = lifecycle.startEmpty(instant(1_000)).successValue()
@@ -47,9 +51,18 @@ class RestNotificationSchedulerTest {
             restNotifications = scheduler
         )
         val workout = lifecycle.startEmpty(instant(1_000)).successValue()
+        val logging = SetLoggingUseCases(store, store)
+        val exercise = logging.addExercise(
+            workout.id,
+            ExerciseReference(FoundationId("exercise-bench"), "Bench Press", isBodyweight = false),
+            instant(1_100)
+        ).successValue()
+        logging.confirmSet(
+            workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)
+        ).successValue()
         lifecycle.startRestTimer(workout.id, FoundationId("set-1"), durationSeconds = 60, now = instant(2_000)).successValue()
 
-        routines.finishWorkout(workout.id, instant(3_000)).successValue()
+        routines.finishWorkout(workout.id, instant(3_000)).successValue().workout
 
         assertEquals(1, scheduler.cancelCount)
     }
@@ -85,6 +98,7 @@ class RestNotificationSchedulerTest {
     @Test
     fun permissionDeniedSurfaceDoesNotCorruptPersistedRestOrRecovery() = runTest {
         val store = InMemoryFoundationStore()
+        store.setRestTimerSurfaceEnabled(true).successValue()
         val scheduler = FakeRestAlertScheduler(scheduleResult = RestAlertScheduleResult.PERMISSION_DENIED)
         val lifecycle = WorkoutLifecycleUseCases(store, store, store, preferences = store, notifications = scheduler)
         val workout = lifecycle.startEmpty(instant(1_000)).successValue()
@@ -102,6 +116,21 @@ class RestNotificationSchedulerTest {
         assertEquals(instant(62_000), recovered?.restEndsAt)
         assertEquals(2, scheduler.scheduleCount)
         assertEquals(0, scheduler.cancelCount)
+    }
+
+    @Test
+    fun recoveryRemovesStaleSurfaceWhenNoRestIsPersisted() = runTest {
+        val store = InMemoryFoundationStore()
+        val scheduler = FakeRestAlertScheduler()
+        val lifecycle = WorkoutLifecycleUseCases(store, store, store, preferences = store, notifications = scheduler)
+
+        assertEquals(null, lifecycle.restoreActiveSession(instant(1_000)))
+        assertEquals(1, scheduler.cancelCount)
+
+        lifecycle.startEmpty(instant(2_000)).successValue()
+        lifecycle.restoreActiveSession(instant(3_000))
+
+        assertEquals(2, scheduler.cancelCount)
     }
 
     private class FakeRestAlertScheduler(

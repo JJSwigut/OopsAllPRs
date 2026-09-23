@@ -38,6 +38,10 @@ end
 load File.expand_path("../Fastfile", __dir__)
 
 class GooglePlayListingTest < Minitest::Test
+  def test_validates_the_source_controlled_store_listing_assets
+    validate_store_listing_assets
+  end
+
   def test_selects_highest_existing_version_code
     assert_equal 42, GooglePlayListing.latest_version_code([17, 42, 31], track: "internal")
   end
@@ -109,7 +113,8 @@ class GooglePlayListingTest < Minitest::Test
       "APP_STORE_CONNECT_API_KEY_BASE64" => "key-content",
       "APPLE_TEAM_ID" => "team-id",
       "IOS_BUILD_NUMBER" => "1010",
-      "IOS_PROVISIONING_PROFILE_NAME" => "Oops All PRs App Store"
+      "IOS_PROVISIONING_PROFILE_NAME" => "Oops All PRs App Store",
+      "IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_NAME" => "Oops All PRs Rest Timer App Store"
     ) do
       Dir.chdir(File.join(root, "fastlane")) do
         instance_exec(&FASTLANE_LANES.fetch([:ios, :beta]))
@@ -125,6 +130,13 @@ class GooglePlayListingTest < Minitest::Test
     )
     assert_equal File.join(root, "iosApp", "OopsAllPRs.xcodeproj"), build_options.fetch(:project)
     assert_equal File.join(root, "iosApp", "build", "fastlane"), build_options.fetch(:output_directory)
+    assert_equal(
+      {
+        "com.jjswigut.oopsallprs.ios" => "Oops All PRs App Store",
+        "com.jjswigut.oopsallprs.ios.RestTimerLiveActivity" => "Oops All PRs Rest Timer App Store",
+      },
+      build_options.fetch(:export_options).fetch(:provisioningProfiles)
+    )
     assert_equal "/tmp/OopsAllPRs.ipa", upload_options.fetch(:ipa)
   end
 

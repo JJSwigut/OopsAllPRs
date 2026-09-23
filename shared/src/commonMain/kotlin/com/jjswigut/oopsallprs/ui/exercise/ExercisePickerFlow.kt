@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
 import com.jjswigut.oopsallprs.ds.component.FitButton
 import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
@@ -46,12 +48,22 @@ fun ExercisePickerFlow(
                 modifier = Modifier.weight(1f)
             )
         } else {
-            ExerciseResultList(
-                state = state,
-                onShowCreate = onShowCreate,
-                onSelect = onSelect,
-                modifier = Modifier.weight(1f)
-            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
+            ) {
+                FoundationText(
+                    text = "Add exercise",
+                    modifier = Modifier.semantics { heading() },
+                    style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
+                )
+                ExerciseResultList(
+                    state = state,
+                    onShowCreate = onShowCreate,
+                    onSelect = onSelect,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
         PickerBottomControls(
             state = state,

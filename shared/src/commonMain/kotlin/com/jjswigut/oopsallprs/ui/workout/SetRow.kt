@@ -125,13 +125,14 @@ private fun Effort.displayLabel(): String? =
     }
 
 internal fun ActivePrFeedback.displayLabel(reps: Int?, weightUnit: WeightUnit): String {
+    if (kind == ActivePrFeedbackKind.WEIGHT_FOR_REPS) {
+        val weight = WeightKg(newValue)
+        return "New ${reps ?: 0}-rep PR: ${formatDisplayWeight(weight, weightUnit)} ${weightUnitLabel(weightUnit)} x ${reps ?: 0}"
+    }
     val prefix = if (previousValue == null) "New PR" else "PR"
     val value = when (kind) {
         ActivePrFeedbackKind.BODYWEIGHT_REPS -> "${newValue.toInt()} reps"
-        ActivePrFeedbackKind.WEIGHT_FOR_REPS -> {
-            val weight = WeightKg(newValue)
-            "${formatDisplayWeight(weight, weightUnit)} ${weightUnitLabel(weightUnit)} x ${reps ?: 0}"
-        }
+        ActivePrFeedbackKind.WEIGHT_FOR_REPS -> error("Weighted feedback returns above")
         ActivePrFeedbackKind.TIME -> formatDurationMs(newValue.toLong())
     }
     return "$prefix: $value"

@@ -64,6 +64,11 @@ kotlin {
         androidUnitTest.dependencies {
             implementation(libs.sqldelight.sqlite)
         }
+        androidInstrumentedTest.dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.junit)
+        }
         iosMain.dependencies {
             implementation(libs.sqldelight.native)
         }
@@ -72,9 +77,12 @@ kotlin {
 
 android {
     namespace = "com.jjswigut.oopsallprs"
+    testNamespace = "com.jjswigut.oopsallprs.backupcontract.test"
     compileSdk = 35
     defaultConfig {
         minSdk = 31
+        testApplicationId = "com.jjswigut.oopsallprs.backupcontract.test"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8

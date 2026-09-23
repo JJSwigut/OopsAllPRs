@@ -44,7 +44,7 @@ class CompletedWorkoutSummaryModelTest {
             .single()
 
         assertEquals("Set 1: 5 reps • 100 kg", weightedRow.historyDisplayLabel(WeightUnit.KILOGRAMS))
-        assertEquals("Set 1: 5 reps • 220.5 lb", weightedRow.historyDisplayLabel(WeightUnit.POUNDS))
+        assertEquals("Set 1: 5 reps • 220.46 lb", weightedRow.historyDisplayLabel(WeightUnit.POUNDS))
     }
 }
 

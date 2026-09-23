@@ -32,5 +32,5 @@ private suspend fun FoundationHarness.completedWorkoutForTemplate() = run {
     val workout = lifecycle.startEmpty(instant(1_000)).successValue()
     val exercise = setLogging.addExercise(workout.id, weightedReference, instant(1_100)).successValue()
     setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200))
-    routines.finishWorkout(workout.id, instant(2_000)).successValue()
+    routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 }

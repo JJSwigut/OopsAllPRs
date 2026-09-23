@@ -11,7 +11,7 @@ import com.jjswigut.oopsallprs.domain.model.ExportType
 import com.jjswigut.oopsallprs.domain.model.FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT
 import com.jjswigut.oopsallprs.domain.model.FullAccessGate
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
-import com.jjswigut.oopsallprs.domain.model.FullAccessStoreOffer
+import com.jjswigut.oopsallprs.domain.model.FullAccessOfferState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.RestConfiguration
 import com.jjswigut.oopsallprs.domain.model.WeightStepPreference
@@ -25,6 +25,9 @@ import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.ui.navigation.PaletteMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.datetime.Clock
 import kotlin.coroutines.cancellation.CancellationException
 
 const val DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT: Int = FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT
@@ -45,22 +48,30 @@ data class ProfileBackupStatus(
     val canBackup: Boolean = false,
     val canSync: Boolean = false,
     val hasConflict: Boolean = false,
-    val isLinked: Boolean = false
+    val isLinked: Boolean = false,
+    val warning: String? = null
 )
 
 data class ProfileFullAccessStatus(
     val access: FullAccessState = FullAccessState(),
     val statusLabel: String = "Free",
     val detailLabel: String = "0 of 10 free workouts used",
-    val offerLabel: String = "${'$'}14.99",
-    val termsLabel: String = "One-time purchase. No subscription. No account.",
+    val offerState: FullAccessOfferState = FullAccessOfferState.Loading,
     val completedFreeWorkouts: Int = 0,
     val freeWorkoutLimit: Int = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT,
     val isFreeLimitReached: Boolean = false,
     val hasFullAccess: Boolean = false,
     val isStoreBusy: Boolean = false,
-    val error: String? = null
-)
+    val error: String? = null,
+    val storeMessage: String? = null
+) {
+    val canPurchase: Boolean
+        get() = !hasFullAccess && !isStoreBusy && offerState is FullAccessOfferState.Available
+    val offerLabel: String
+        get() = (offerState as? FullAccessOfferState.Available)?.offer?.priceLabel.orEmpty()
+    val termsLabel: String
+        get() = (offerState as? FullAccessOfferState.Available)?.offer?.termsLabel.orEmpty()
+}
 
 enum class BackupSetupStep {
     INTRO,
@@ -80,7 +91,7 @@ data class ProfileState(
     val defaultRestError: String? = null,
     val restSoundEnabled: Boolean = true,
     val startWorkoutTimerWithFirstSet: Boolean = true,
-    val restTimerSurfaceEnabled: Boolean = true,
+    val restTimerSurfaceEnabled: Boolean = false,
     val paletteMode: PaletteMode = PaletteMode.DARK,
     val hapticsEnabled: Boolean = true,
     val reduceMotion: Boolean = false,
@@ -95,7 +106,8 @@ data class ProfileState(
     val restoreWarning: String? = null,
     val safetyBackupMessage: String? = null,
     val backupSetupStep: BackupSetupStep? = null,
-    val fullAccessStatus: ProfileFullAccessStatus = ProfileFullAccessStatus()
+    val fullAccessStatus: ProfileFullAccessStatus = ProfileFullAccessStatus(),
+    val isUnlockDialogVisible: Boolean = false
 )
 
 class ProfileStateHolder(
@@ -104,11 +116,11 @@ class ProfileStateHolder(
     private val exportHandoff: ((ExportFile) -> Unit)? = null,
     private val backupSync: BackupSyncCoordinator? = null,
     private val fullAccess: FullAccessUseCases? = null,
-    private val onRestTimerSurfacePreferenceChanged: (suspend () -> Unit)? = null,
-    freeCompletedWorkoutLimit: Int = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
+    private val onRestTimerSurfacePreferenceChanged: (suspend () -> Unit)? = null
 ) {
-    private val freeWorkoutLimit = freeCompletedWorkoutLimit.coerceAtLeast(0)
+    private val freeWorkoutLimit = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
     private val _state = MutableStateFlow(ProfileState())
+    private val storeMutex = Mutex()
     val state: StateFlow<ProfileState> = _state
 
     suspend fun hydrate() {
@@ -119,7 +131,12 @@ class ProfileStateHolder(
         val startTimerWithFirstSet = preferences?.startWorkoutTimerWithFirstSet()
             ?: _state.value.startWorkoutTimerWithFirstSet
         val surfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: _state.value.restTimerSurfaceEnabled
+        val previousAccessStatus = _state.value.fullAccessStatus
         val accessStatus = loadFullAccessStatus()
+        val syncState = backupSync?.loadState()
+        // Do not replace a store-operation result that arrived during local hydration.
+        val latestAccessStatus = if (_state.value.fullAccessStatus === previousAccessStatus) accessStatus
+            else _state.value.fullAccessStatus
         _state.value = _state.value.copy(
             weightUnit = unit,
             weightStep = step,
@@ -134,8 +151,28 @@ class ProfileStateHolder(
             restTimerSurfaceEnabled = surfaceEnabled,
             isHydrated = true,
             exportError = null,
-            backupStatus = backupSync?.loadState()?.toProfileStatus() ?: ProfileBackupStatus(),
-            fullAccessStatus = accessStatus
+            backupStatus = syncState?.toProfileStatus() ?: ProfileBackupStatus(),
+            fullAccessStatus = latestAccessStatus,
+            isUnlockDialogVisible = !latestAccessStatus.hasFullAccess && _state.value.isUnlockDialogVisible,
+            backupError = syncState?.lastError ?: if (latestAccessStatus.hasFullAccess) {
+                _state.value.backupError.withoutGateError()
+            } else _state.value.backupError
+        )
+    }
+
+    suspend fun refreshFullAccess() {
+        val latestAccessStatus = loadFullAccessStatus()
+        val unlocked = latestAccessStatus.hasFullAccess
+        val accessChanged = unlocked != _state.value.fullAccessStatus.hasFullAccess
+        _state.value = _state.value.copy(
+            fullAccessStatus = latestAccessStatus.copy(
+                storeMessage = if (accessChanged) null else latestAccessStatus.storeMessage
+            ),
+            isUnlockDialogVisible = !unlocked && _state.value.isUnlockDialogVisible,
+            exportError = if (unlocked) _state.value.exportError.withoutGateError() else _state.value.exportError,
+            backupError = if (unlocked) {
+                _state.value.backupError.withoutGateError() ?: _state.value.backupStatus.warning
+            } else _state.value.backupError
         )
     }
 
@@ -300,7 +337,6 @@ class ProfileStateHolder(
     }
 
     suspend fun export(type: ExportType): FoundationResult<ProfileExportResult> {
-        requireFullAccess(FullAccessGate.EXPORT)?.let { return exportFailure(it) }
         val repository = exports
             ?: return exportFailure(FoundationError.Platform("Export unavailable"))
         val unit = _state.value.weightUnit
@@ -333,6 +369,7 @@ class ProfileStateHolder(
             _state.value = _state.value.copy(
                 backupSetupStep = null,
                 backupError = message,
+                isUnlockDialogVisible = true,
                 fullAccessStatus = _state.value.fullAccessStatus.copy(error = message)
             )
             return
@@ -369,6 +406,10 @@ class ProfileStateHolder(
         _state.value = _state.value.copy(backupSetupStep = null)
     }
 
+    fun dismissUnlockDialog() {
+        _state.value = _state.value.copy(isUnlockDialogVisible = false)
+    }
+
     suspend fun linkBackupFile(): FoundationResult<BackupSyncState> =
         requireFullAccess(FullAccessGate.BACKUP_LINK)?.let { backupFailure(it) }
             ?: backupOperation(closeSetup = true) { it.linkNewBackup() }
@@ -386,14 +427,19 @@ class ProfileStateHolder(
             ?: return backupFailure(FoundationError.Platform("Backup unavailable"))
         val access = fullAccess
         if (access != null) {
-            val accessState = access.loadState()
+            val accessState = storeMutex.withLock {
+                access.loadState().also { loaded ->
+                    _state.value = _state.value.copy(fullAccessStatus = accessStatus(
+                        loaded, _state.value.fullAccessStatus.offerState, error = _state.value.fullAccessStatus.error
+                    ).copy(storeMessage = _state.value.fullAccessStatus.storeMessage))
+                }
+            }
             if (!accessState.hasFullAccess) {
                 val syncState = coordinator.loadState()
                 _state.value = _state.value.copy(
                     isBackupBusy = false,
                     backupStatus = syncState.toProfileStatus(),
-                    backupError = null,
-                    fullAccessStatus = accessStatus(accessState, access.offers(), error = null)
+                    backupError = syncState.lastError
                 )
                 return foundationSuccess(syncState)
             }
@@ -412,7 +458,7 @@ class ProfileStateHolder(
                     _state.value = _state.value.copy(
                         isBackupBusy = false,
                         backupStatus = result.value.toProfileStatus(),
-                        backupError = null
+                        backupError = result.value.lastError
                     )
                     result
                 }
@@ -439,20 +485,35 @@ class ProfileStateHolder(
             when (val result = coordinator.restoreFromFile()) {
                 is FoundationResult.Failure -> backupRestoreFailure(result.error)
                 is FoundationResult.Success -> {
-                    val syncState = coordinator.loadState()
+                    val syncState = try {
+                        coordinator.loadState()
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        BackupSyncState(
+                            lastOutcome = BackupSyncOutcome.RESTORED,
+                            lastError = "Workout data was restored, but backup state could not be read. Review your backup connection before syncing.",
+                            updatedAt = Clock.System.now()
+                        )
+                    }
+                    val warning = result.value.syncWarning ?: syncState.lastError
                     _state.value = _state.value.copy(
                         isBackupBusy = false,
                         backupStatus = syncState.toProfileStatus(),
-                        backupError = null,
+                        backupError = warning,
                         lastRestoreMessage = "Restored ${result.value.restoredSummary.displayCounts()}",
                         restoreWarning = if (result.value.activeWorkoutReplaced) {
-                            "Active workout was replaced by the backup."
+                            if (result.value.restoredSummary.hasActiveWorkout) {
+                                "Active workout was replaced by the backup."
+                            } else {
+                                "Active workout was removed. It is preserved in your safety backup."
+                            }
                         } else {
                             null
                         },
                         safetyBackupMessage = "Safety backup created before restore."
                     )
-                    result
+                    foundationSuccess(result.value.copy(syncWarning = warning))
                 }
             }
         } catch (cancellation: CancellationException) {
@@ -473,31 +534,83 @@ class ProfileStateHolder(
     suspend fun cancelBackupConflict(): FoundationResult<BackupSyncState> =
         backupOperation { it.resolveConflict(BackupConflictDecision.CANCEL) }
 
-    suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessState> {
-        val access = fullAccess
-            ?: return fullAccessFailure(FoundationError.Platform("Store purchases unavailable"))
-        _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = true, error = null))
-        return when (val result = access.purchaseLifetimeUnlock()) {
-            is FoundationResult.Failure -> fullAccessFailure(result.error)
-            is FoundationResult.Success -> {
-                val status = accessStatus(result.value, access.offers(), error = null)
-                _state.value = _state.value.copy(fullAccessStatus = status)
-                foundationSuccess(result.value)
-            }
+    suspend fun refreshStoreOffer(): FullAccessOfferState = storeMutex.withLock {
+        refreshStoreOfferLocked()
+    }
+
+    private suspend fun refreshStoreOfferLocked(): FullAccessOfferState {
+        _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(
+            offerState = FullAccessOfferState.Loading, isStoreBusy = true, error = null
+        ))
+        try {
+            val offer = fullAccess?.loadLifetimeOffer()
+                ?: FullAccessOfferState.Unavailable("Store purchases are unavailable on this build.")
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(offerState = offer))
+            return offer
+        } catch (cancellation: CancellationException) {
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(
+                offerState = FullAccessOfferState.Unavailable("Loading the store offer was canceled. Try again.")
+            ))
+            throw cancellation
+        } finally {
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = false))
         }
     }
 
-    suspend fun restorePurchases(): FoundationResult<FullAccessState> {
+    suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessState> = storeMutex.withLock {
+        if (_state.value.fullAccessStatus.hasFullAccess) {
+            foundationSuccess(_state.value.fullAccessStatus.access)
+        } else if (_state.value.fullAccessStatus.offerState !is FullAccessOfferState.Available) {
+            fullAccessFailure(FoundationError.Platform("Load the store offer before purchasing. Try again."))
+        } else {
+            storeOperationLocked(restore = false)
+        }
+    }
+
+    suspend fun restorePurchases(): FoundationResult<FullAccessState> = storeMutex.withLock {
+        storeOperationLocked(restore = true)
+    }
+
+    private suspend fun storeOperationLocked(restore: Boolean): FoundationResult<FullAccessState> {
         val access = fullAccess
-            ?: return fullAccessFailure(FoundationError.Platform("Restore purchase unavailable"))
-        _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = true, error = null))
-        return when (val result = access.restorePurchases()) {
-            is FoundationResult.Failure -> fullAccessFailure(result.error)
-            is FoundationResult.Success -> {
-                val status = accessStatus(result.value, access.offers(), error = null)
-                _state.value = _state.value.copy(fullAccessStatus = status)
-                foundationSuccess(result.value)
+            ?: return fullAccessFailure(FoundationError.Platform("Store purchases unavailable"))
+        _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(
+            isStoreBusy = true, error = null, storeMessage = null
+        ))
+        return try {
+            val result = if (restore) access.restorePurchases() else access.purchaseLifetimeUnlock()
+            when (result) {
+                is FoundationResult.Failure -> fullAccessFailure(result.error)
+                is FoundationResult.Success -> {
+                    val unlocked = result.value.hasFullAccess
+                    val message = result.value.lastError ?: when {
+                        restore && unlocked -> "Lifetime purchase restored."
+                        restore -> "No lifetime purchase was found for this store account."
+                        !unlocked -> "Purchase did not unlock Full Access. Try again or restore your purchase."
+                        else -> null
+                    }
+                    val status = accessStatus(result.value, _state.value.fullAccessStatus.offerState, error = null)
+                        .copy(isStoreBusy = true, error = null, storeMessage = message)
+                    _state.value = _state.value.copy(
+                        fullAccessStatus = status,
+                        isUnlockDialogVisible = !unlocked && _state.value.isUnlockDialogVisible,
+                        exportError = if (unlocked) _state.value.exportError.withoutGateError() else _state.value.exportError,
+                        backupError = if (unlocked) {
+                            _state.value.backupError.withoutGateError() ?: _state.value.backupStatus.warning
+                        } else _state.value.backupError
+                    )
+                    result
+                }
             }
+        } catch (cancellation: CancellationException) {
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(
+                error = if (restore) "Restore purchase was canceled. Try again." else "Purchase was canceled. Try again."
+            ))
+            throw cancellation
+        } catch (error: Exception) {
+            fullAccessFailure(FoundationError.Platform(error.message ?: "Store operation failed. Try again."))
+        } finally {
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = false))
         }
     }
 
@@ -513,15 +626,25 @@ class ProfileStateHolder(
         _state.value = _state.value.copy(reduceMotion = enabled)
     }
 
-    private suspend fun requireFullAccess(gate: FullAccessGate): FoundationError? {
-        val access = fullAccess ?: return null
+    private suspend fun requireFullAccess(gate: FullAccessGate): FoundationError? = storeMutex.withLock {
+        val access = fullAccess ?: return@withLock null
         val result = access.checkGate(gate)
-        val offers = access.offers()
-        val message = if (result.allowed) null else gate.blockedMessage()
-        _state.value = _state.value.copy(
-            fullAccessStatus = accessStatus(result.state, offers, error = message)
-        )
-        return if (result.allowed) null else FoundationError.Validation(message ?: gate.blockedMessage())
+        if (result.allowed) {
+            _state.value = _state.value.copy(fullAccessStatus = accessStatus(
+                result.state, _state.value.fullAccessStatus.offerState, error = null
+            ))
+            null
+        } else {
+            val message = gate.blockedMessage()
+            _state.value = _state.value.copy(
+                isUnlockDialogVisible = true,
+                backupSetupStep = null,
+                fullAccessStatus = accessStatus(result.state, FullAccessOfferState.Loading, error = message)
+            )
+            refreshStoreOfferLocked()
+            _state.value = _state.value.copy(fullAccessStatus = _state.value.fullAccessStatus.copy(error = message))
+            FoundationError.Validation(message)
+        }
     }
 
     private suspend fun loadFullAccessStatus(): ProfileFullAccessStatus {
@@ -530,15 +653,19 @@ class ProfileStateHolder(
             statusLabel = "Unlocked",
             detailLabel = "Unlimited workout logging is unlocked."
         )
-        return accessStatus(access.loadState(), access.offers(), error = null)
+        return accessStatus(access.loadState(), _state.value.fullAccessStatus.offerState, error = null)
+            .copy(isStoreBusy = _state.value.fullAccessStatus.isStoreBusy, storeMessage = _state.value.fullAccessStatus.storeMessage)
     }
 
     private fun currentFullAccess(): FullAccessState =
         _state.value.fullAccessStatus.access
 
+    private fun String?.withoutGateError(): String? =
+        takeUnless { message -> FullAccessGate.entries.any { it.blockedMessage() == message } }
+
     private fun fullAccessFailure(error: FoundationError): FoundationResult<FullAccessState> {
         _state.value = _state.value.copy(
-            fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = false, error = error.message)
+            fullAccessStatus = _state.value.fullAccessStatus.copy(isStoreBusy = false, error = error.message, storeMessage = null)
         )
         return foundationFailure(error)
     }
@@ -567,12 +694,15 @@ class ProfileStateHolder(
         )
         return try {
             when (val result = block(coordinator)) {
-                is FoundationResult.Failure -> backupFailure(result.error)
+                is FoundationResult.Failure -> {
+                    _state.value = _state.value.copy(backupStatus = coordinator.loadState().toProfileStatus())
+                    backupFailure(result.error)
+                }
                 is FoundationResult.Success -> {
                     _state.value = _state.value.copy(
                         isBackupBusy = false,
                         backupStatus = result.value.toProfileStatus(),
-                        backupError = null
+                        backupError = result.value.lastError
                     )
                     result
                 }
@@ -612,7 +742,8 @@ class ProfileStateHolder(
             canBackup = linked != null && !isTerminalUnavailable(),
             canSync = linked != null && !isTerminalUnavailable(),
             hasConflict = lastOutcome == BackupSyncOutcome.CONFLICT || lastOutcome == BackupSyncOutcome.BACKUP_CHANGED,
-            isLinked = linked != null
+            isLinked = linked != null,
+            warning = lastError
         )
     }
 
@@ -634,18 +765,16 @@ class ProfileStateHolder(
 
     private fun accessStatus(
         access: FullAccessState,
-        offers: List<FullAccessStoreOffer>,
+        offerState: FullAccessOfferState,
         error: String?
     ): ProfileFullAccessStatus {
-        val lifetime = offers.firstOrNull()
         val completed = access.normalizedCompletedFreeWorkouts
         val displayedCompleted = completed.coerceAtMost(freeWorkoutLimit)
         return ProfileFullAccessStatus(
             access = access,
             statusLabel = access.statusLabel(freeWorkoutLimit),
             detailLabel = access.detailLabel(freeWorkoutLimit),
-            offerLabel = lifetime?.priceLabel ?: "${'$'}14.99",
-            termsLabel = "One-time purchase. No subscription. No account.",
+            offerState = offerState,
             completedFreeWorkouts = displayedCompleted,
             freeWorkoutLimit = freeWorkoutLimit,
             isFreeLimitReached = !access.hasFullAccess && completed >= freeWorkoutLimit,
@@ -675,7 +804,8 @@ private fun FullAccessState.detailLabel(freeWorkoutLimit: Int): String {
 private fun FullAccessGate.blockedMessage(): String =
     when (this) {
         FullAccessGate.WORKOUT_START -> "You've used your free workouts."
-        FullAccessGate.EXPORT -> "Unlock forever to export your data."
+        FullAccessGate.EXPORT -> "Export is available to everyone."
+        FullAccessGate.IMPORT -> "Unlock forever to import workout data."
         FullAccessGate.BACKUP_LINK -> "Unlock forever to set up backup."
         FullAccessGate.BACKUP_NOW -> "Unlock forever to back up your data."
         FullAccessGate.SYNC_NOW -> "Unlock forever to sync your backup."

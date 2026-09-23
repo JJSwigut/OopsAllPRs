@@ -63,3 +63,11 @@ _Avoid_: Schema version, edit count
 **Record Derivation Version**:
 The rule-set version that produced a progress point or personal record from set performances.
 _Avoid_: Database version, record revision
+
+**Progress Evidence**:
+The recorded sets or completed sessions that support a progress reading. An estimated strength value, work performed, and a completed session are distinct evidence, not interchangeable measures.
+_Avoid_: Overall score, proof of muscle growth
+
+**Work Performed**:
+The sum of external load multiplied by repetitions for an exercise in a session. It describes recorded training work, not a direct measure of strength or physiological adaptation.
+_Avoid_: Strength gained, calories burned

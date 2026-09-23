@@ -1,7 +1,8 @@
 package com.jjswigut.oopsallprs.domain.usecase
 
-import com.jjswigut.oopsallprs.domain.model.CompletedExercise
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.FinishWorkoutOutcome
+import com.jjswigut.oopsallprs.domain.model.FinishPostCommitWarning
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
@@ -19,6 +20,9 @@ import com.jjswigut.oopsallprs.domain.repository.RoutineRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.platform.RestAlertScheduler
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -29,47 +33,39 @@ class RoutineUseCases(
     private val personalRecords: PersonalRecordDerivationUseCase? = null,
     private val preferences: PreferencesRepository? = null,
     private val restNotifications: RestAlertScheduler? = null,
-    private val fullAccess: FullAccessUseCases? = null,
     private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null
 ) {
-    suspend fun finishWorkout(activeWorkoutId: FoundationId, finishedAt: Instant = Clock.System.now()): FoundationResult<CompletedWorkout> {
-        val active = workouts.activeWorkout(activeWorkoutId)
-            ?: return foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
-        val completedId = newFoundationId("completed")
-        val completedExercises = active.exercises.mapNotNull { exercise ->
-            val logged = exercise.sets.filter { it.isLogged }
-            if (logged.isEmpty()) null else CompletedExercise(
-                id = newFoundationId("completed-exercise"),
-                completedWorkoutId = completedId,
-                exerciseCatalogId = exercise.reference.exerciseCatalogId,
-                displayNameSnapshot = exercise.reference.displayNameSnapshot,
-                position = exercise.position,
-                loggedSets = logged,
-                rest = exercise.rest,
-                groupContext = exercise.groupContext
-            )
+    suspend fun finishWorkout(activeWorkoutId: FoundationId, finishedAt: Instant = Clock.System.now()): FoundationResult<FinishWorkoutOutcome> {
+        currentCoroutineContext().ensureActive()
+        val receipt = when (val result = workouts.finishActiveWorkout(activeWorkoutId, finishedAt)) {
+            is FoundationResult.Failure -> return result
+            is FoundationResult.Success -> result.value
         }
-        val effectiveStartedAt = active.effectiveStartedAt(
-            preferences?.startWorkoutTimerWithFirstSet() ?: true
-        )
-        val completed = CompletedWorkout(
-            id = completedId,
-            sourceActiveWorkoutId = active.id,
-            startedAt = effectiveStartedAt,
-            finishedAt = finishedAt,
-            durationMs = finishedAt.toEpochMilliseconds() - effectiveStartedAt.toEpochMilliseconds(),
-            routineId = active.routineId,
-            exercises = completedExercises,
-            createdAt = finishedAt
-        )
-        val result = workouts.finishWorkout(completed)
-        if (result is FoundationResult.Success) {
-            restNotifications?.cancel()
-            activeUx?.clearWorkoutUx(activeWorkoutId, finishedAt)
-            personalRecords?.rebuildFrom(workouts.completedWorkouts())
-            fullAccess?.recordCompletedWorkout(finishedAt)
+        val warnings = mutableListOf<FinishPostCommitWarning>()
+        currentCoroutineContext().ensureActive()
+        if (receipt.newlyCompleted) {
+            try {
+                restNotifications?.cancel()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                warnings += FinishPostCommitWarning.TIMER_CLEANUP_FAILED
+            }
         }
-        return result
+        // A retry may repair derived progress, but never replays accounting or timer cleanup.
+        if (personalRecords != null) {
+            try {
+                if (personalRecords.rebuildFrom(workouts.completedWorkouts()) is FoundationResult.Failure) {
+                    warnings += FinishPostCommitWarning.PROGRESS_REFRESH_FAILED
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                warnings += FinishPostCommitWarning.PROGRESS_REFRESH_FAILED
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        return foundationSuccess(FinishWorkoutOutcome(receipt.workout, receipt.newlyCompleted, warnings))
     }
 
     suspend fun saveCompletedWorkoutAsRoutine(completedWorkoutId: FoundationId, name: String, now: Instant = Clock.System.now()): FoundationResult<ReusableRoutine> {

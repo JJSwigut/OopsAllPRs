@@ -3,6 +3,7 @@ package com.jjswigut.oopsallprs.data.repository
 import com.jjswigut.oopsallprs.data.LoggingConfigurationIdentity
 import com.jjswigut.oopsallprs.data.backup.BackupPackage
 import com.jjswigut.oopsallprs.data.backup.BackupPackageCodec
+import com.jjswigut.oopsallprs.data.backup.BackupSnapshotIdentity
 import com.jjswigut.oopsallprs.data.backup.BackupSnapshotReader
 import com.jjswigut.oopsallprs.data.backup.ExerciseSetDto
 import com.jjswigut.oopsallprs.data.backup.LoggingConfigurationDto
@@ -25,7 +26,11 @@ import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.BackupRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.Clock
+import kotlin.coroutines.CoroutineContext
 
 class SqlBackupRepository(
     private val database: WorkoutDatabase,
@@ -50,53 +55,116 @@ class SqlBackupRepository(
     private val progressQueries get() = database.progressQueriesQueries
     private val loggingQueries get() = database.loggingConfigurationQueriesQueries
 
-    override suspend fun createPackage(): FoundationResult<BackupPackage> = snapshotReader.createPackage()
-    override suspend fun decodePackage(content: String): FoundationResult<BackupPackage> = codec.decode(content)
-    override suspend fun encodePackage(pkg: BackupPackage): FoundationResult<String> = codec.encode(pkg)
-    override suspend fun currentRevision(): BackupRevision = snapshotReader.revision()
-    override suspend fun currentSummary(): SnapshotSummary = snapshotReader.currentSummary()
-
-    override suspend fun restorePlan(pkg: BackupPackage): FoundationResult<BackupRestorePlan> {
-        val validated = when (val result = codec.validate(pkg)) {
-            is FoundationResult.Failure -> return result
-            is FoundationResult.Success -> result.value
+    override suspend fun createPackage(): FoundationResult<BackupPackage> {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        return try {
+            foundationSuccess(snapshotTransaction(context) { captureSnapshot() })
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            context.ensureActive()
+            foundationFailure(FoundationError.Persistence("Backup snapshot failed: ${error.message ?: "unknown error"}"))
         }
-        when (val result = validateConfigurationCompatibility(validated)) {
-            is FoundationResult.Failure -> return result
-            is FoundationResult.Success -> Unit
-        }
-        val localSummary = currentSummary()
-        return foundationSuccess(
-            BackupRestorePlan(
-                backupSummary = validated.summary.toDomain(),
-                localSummary = localSummary,
-                requiresActiveWorkoutWarning = localSummary.hasActiveWorkout && validated.activeWorkout != null,
-                warnings = buildList {
-                    if (localSummary.hasActiveWorkout && validated.activeWorkout != null) {
-                        add("Current active workout will be replaced.")
-                    }
-                    add("A safety backup is created before local data is replaced.")
-                }
-            )
-        )
     }
 
-    override suspend fun restore(pkg: BackupPackage): FoundationResult<BackupRestoreResult> {
+    private fun <T> snapshotTransaction(context: CoroutineContext, block: () -> T): T {
+        context.ensureActive()
+        return database.transactionWithResult {
+            context.ensureActive()
+            val result = block()
+            // Cancellation must be observed before commit so replacement and unlinking roll back.
+            context.ensureActive()
+            result
+        }
+    }
+
+    // Called only inside a synchronous SQL transaction, including restore's write transaction.
+    private fun captureSnapshot(): BackupPackage {
+        val captured = store.readBackupSnapshot(snapshotReader, Clock.System.now())
+        val pkg = captured.copy(lastLocalRevision = BackupSnapshotIdentity.revision(captured))
+        when (val result = codec.validate(pkg)) {
+            is FoundationResult.Failure -> error("Local snapshot is invalid: ${result.error.message}")
+            is FoundationResult.Success -> Unit
+        }
+        return pkg
+    }
+
+    override suspend fun decodePackage(content: String): FoundationResult<BackupPackage> = codec.decode(content)
+    override suspend fun encodePackage(pkg: BackupPackage): FoundationResult<String> = codec.encode(pkg)
+    override suspend fun currentRevision(): BackupRevision = when (val result = createPackage()) {
+        is FoundationResult.Failure -> error(result.error.message)
+        is FoundationResult.Success -> snapshotReader.revision(result.value)
+    }
+    override suspend fun currentSummary(): SnapshotSummary = when (val result = createPackage()) {
+        is FoundationResult.Failure -> error(result.error.message)
+        is FoundationResult.Success -> result.value.summary.toDomain()
+    }
+
+    override suspend fun restorePlan(pkg: BackupPackage): FoundationResult<BackupRestorePlan> {
+        val context = currentCoroutineContext()
+        context.ensureActive()
         val validated = when (val result = codec.validate(pkg)) {
             is FoundationResult.Failure -> return result
             is FoundationResult.Success -> result.value
         }
-        when (val result = validateConfigurationCompatibility(validated)) {
-            is FoundationResult.Failure -> return result
-            is FoundationResult.Success -> Unit
+        return try {
+            snapshotTransaction<FoundationResult<BackupRestorePlan>>(context) {
+                val localSummary = captureSnapshot().summary.toDomain()
+                when (val result = validateConfigurationCompatibility(validated)) {
+                    is FoundationResult.Failure -> return@snapshotTransaction result
+                    is FoundationResult.Success -> Unit
+                }
+                foundationSuccess(BackupRestorePlan(
+                    backupSummary = validated.summary.toDomain(),
+                    localSummary = localSummary,
+                    requiresActiveWorkoutWarning = localSummary.hasActiveWorkout,
+                    warnings = buildList {
+                        if (localSummary.hasActiveWorkout) {
+                            add(if (validated.activeWorkout == null) {
+                                "Current active workout will be removed."
+                            } else {
+                                "Current active workout will be replaced."
+                            })
+                        }
+                        add("A safety backup is created before local data is replaced.")
+                    }
+                ))
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            context.ensureActive()
+            foundationFailure(FoundationError.Persistence("Restore preview failed: ${error.message ?: "unknown error"}"))
         }
-        val localPackage = when (val result = createPackage()) {
+    }
+
+    override suspend fun restore(
+        pkg: BackupPackage,
+        expectedLocalRevision: String?
+    ): FoundationResult<BackupRestoreResult> {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val validated = when (val result = codec.validate(pkg)) {
             is FoundationResult.Failure -> return result
             is FoundationResult.Success -> result.value
         }
-        val localHadActiveWorkout = currentSummary().hasActiveWorkout
         return try {
-            database.transaction {
+            snapshotTransaction<FoundationResult<BackupRestoreResult>>(context) {
+                val localPackage = captureSnapshot()
+                if (expectedLocalRevision != null && expectedLocalRevision != localPackage.lastLocalRevision) {
+                    return@snapshotTransaction foundationFailure(FoundationError.Conflict(
+                        "Local workout data changed after the safety backup. Create a new safety backup before restoring."
+                    ))
+                }
+                when (val result = validateConfigurationCompatibility(validated)) {
+                    is FoundationResult.Failure -> return@snapshotTransaction result
+                    is FoundationResult.Success -> Unit
+                }
+                context.ensureActive()
+                store.initializeLocalCompletionAccounting()
+                // Unlink atomically with replacement; failed relinking must not reuse an old backup.
+                backupQueries.clearSyncState()
                 restoreLoggingConfigurations(validated)
                 clearRestoreTables()
                 restoreFaultInjector?.invoke()
@@ -110,20 +178,23 @@ class SqlBackupRepository(
                 restoreUx(validated)
                 restoreProgress(validated)
                 restoreExports(validated)
-            }
-            foundationSuccess(
-                BackupRestoreResult(
-                    restoredSummary = validated.summary.toDomain(),
+                val restored = captureSnapshot()
+                foundationSuccess(BackupRestoreResult(
+                    restoredSummary = restored.summary.toDomain(),
                     safetyBackup = localPackage,
-                    activeWorkoutReplaced = localHadActiveWorkout && validated.activeWorkout != null
-                )
-            )
+                    activeWorkoutReplaced = localPackage.activeWorkout != null,
+                    restoredLocalRevision = snapshotReader.revision(restored)
+                ))
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (error: Throwable) {
+            context.ensureActive()
             foundationFailure(FoundationError.Persistence("Restore failed: ${error.message ?: "unknown error"}"))
         }
     }
 
-    private suspend fun validateConfigurationCompatibility(pkg: BackupPackage): FoundationResult<Unit> {
+    private fun validateConfigurationCompatibility(pkg: BackupPackage): FoundationResult<Unit> {
         pkg.loggingConfigurations.forEach { dto ->
             val incoming = try {
                 dto.toDomain()
@@ -132,7 +203,7 @@ class SqlBackupRepository(
             }
             val row = loggingQueries.selectLoggingConfiguration(dto.id).executeAsOneOrNull()
             if (row != null) {
-                val stored = store.loggingConfiguration(LoggingConfigurationId(dto.id))
+                val stored = store.readBackupLoggingConfiguration(LoggingConfigurationId(dto.id))
                     ?: return foundationFailure(
                         FoundationError.Validation("Stored logging configuration ${dto.id} is malformed")
                     )
@@ -318,7 +389,8 @@ class SqlBackupRepository(
                 insertActiveExerciseRow(
                     workout.sourceActiveWorkoutId, exercise.id, exercise.exerciseCatalogId,
                     exercise.displayNameSnapshot, null, kind == SetKind.BODYWEIGHT,
-                    legacyMode(kind).name, exercise.position, null, null, null, null,
+                    legacyMode(kind).name, exercise.position, exercise.groupId, exercise.groupPosition,
+                    exercise.groupLabel, exercise.groupRounds,
                     exercise.rest, firstSet.captureConfigurationId
                 )
                 exercise.loggedSets.forEach { set -> insertSetRow(workout.sourceActiveWorkoutId, set) }

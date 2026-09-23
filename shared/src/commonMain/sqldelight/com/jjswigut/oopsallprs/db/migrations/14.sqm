@@ -1,0 +1,3 @@
+-- The outside-app rest timer was introduced before users could make an informed
+-- choice about notification permission. Make it opt-in for existing installs.
+UPDATE user_preferences SET rest_timer_surface_enabled = 0;

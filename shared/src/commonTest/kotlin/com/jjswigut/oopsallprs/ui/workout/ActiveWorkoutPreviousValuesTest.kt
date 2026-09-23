@@ -25,6 +25,7 @@ class ActiveWorkoutPreviousValuesTest {
         assertEquals(SetKind.WEIGHTED, draft?.setKind)
         assertEquals(8, draft?.reps)
         assertEquals(WeightKg(100.0), draft?.weight)
+        assertEquals("Last logged values", draft?.prefillHint)
     }
 
     @Test
@@ -41,6 +42,7 @@ class ActiveWorkoutPreviousValuesTest {
         assertEquals(SetKind.BODYWEIGHT, draft?.setKind)
         assertEquals(11, draft?.reps)
         assertNull(draft?.weight)
+        assertEquals("Last logged values", draft?.prefillHint)
     }
 
     @Test
@@ -56,6 +58,23 @@ class ActiveWorkoutPreviousValuesTest {
         assertEquals(SetKind.WEIGHTED, draft?.setKind)
         assertEquals(5, draft?.reps)
         assertEquals(WeightKg(0.0), draft?.weight)
+        assertNull(draft?.prefillHint)
+    }
+
+    @Test
+    fun editing_a_prefilled_value_removes_the_last_workout_hint() = runTest {
+        val harness = FoundationHarness()
+        harness.completeWeightedWorkout(reps = 8, weight = WeightKg(100.0))
+        val workout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
+        val holder = previousValueHolder(harness)
+        holder.hydrate(workout.id, now = instant(3_100))
+        val exerciseId = holder.addExercise(workout.id, harness.weightedReference).successValue()
+
+        holder.updateDraftReps(exerciseId, 9)
+
+        val draft = holder.state.value.workout?.exerciseBlocks?.single { it.exerciseInstanceId == exerciseId }?.draft
+        assertEquals(9, draft?.reps)
+        assertNull(draft?.prefillHint)
     }
 
     @Test
@@ -99,7 +118,7 @@ private suspend fun FoundationHarness.completeWeightedWorkout(
         position = 0,
         loggedAt = instant(1_200)
     ).successValue()
-    routines.finishWorkout(workout.id, instant(2_000)).successValue()
+    routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 }
 
 private suspend fun FoundationHarness.completeBodyweightWorkout(reps: Int) {
@@ -114,5 +133,5 @@ private suspend fun FoundationHarness.completeBodyweightWorkout(reps: Int) {
         position = 0,
         loggedAt = instant(1_200)
     ).successValue()
-    routines.finishWorkout(workout.id, instant(2_000)).successValue()
+    routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 }

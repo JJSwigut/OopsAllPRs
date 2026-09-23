@@ -340,6 +340,8 @@ private fun RestControls(
     onSetRest: (Int) -> Unit,
     onToggleRest: () -> Unit
 ) {
+    var isRestDialogOpen by remember(exercise.draftId) { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
@@ -355,13 +357,63 @@ private fun RestControls(
                 modifier = Modifier.weight(1f),
                 style = FitTheme.type.body.copy(color = FitTheme.colors.onSurface)
             )
-            FoundationTextAction(if (exercise.rest.isEnabled) "Off" else "On", onToggleRest)
+            if (exercise.rest.isEnabled) {
+                FoundationTextAction("Change", onClick = { isRestDialogOpen = true })
+                FoundationTextAction("Off", onToggleRest)
+            } else {
+                FoundationTextAction("On", onToggleRest)
+            }
         }
-        if (exercise.rest.isEnabled) {
-            RestDurationRoller(
-                seconds = exercise.rest.durationSeconds,
-                onSecondsChange = onSetRest
+    }
+
+    if (isRestDialogOpen) {
+        RoutineRestDialog(
+            initialSeconds = exercise.rest.durationSeconds,
+            onSave = { selectedSeconds ->
+                onSetRest(selectedSeconds)
+                isRestDialogOpen = false
+            },
+            onDismiss = { isRestDialogOpen = false }
+        )
+    }
+}
+
+@Composable
+private fun RoutineRestDialog(
+    initialSeconds: Int,
+    onSave: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedSeconds by remember(initialSeconds) { mutableStateOf(initialSeconds) }
+
+    FitDialog(onDismissRequest = onDismiss) {
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+            FoundationText(
+                text = "Rest duration",
+                style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface)
             )
+            FoundationMutedText(formatRestDurationSeconds(selectedSeconds))
+            RestDurationRoller(
+                seconds = selectedSeconds,
+                onSecondsChange = { selectedSeconds = it }
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)
+            ) {
+                FitButton(
+                    text = "Cancel",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Secondary
+                )
+                FitButton(
+                    text = "Save",
+                    onClick = { onSave(selectedSeconds) },
+                    modifier = Modifier.weight(1f),
+                    style = FitButtonStyle.Primary
+                )
+            }
         }
     }
 }
@@ -406,7 +458,7 @@ private fun RoutineSetRow(
                 FitTextField(
                     value = set.targetDurationMs?.let { formatDurationMs(it) }.orEmpty(),
                     onValueChange = { value -> onDurationChange(parseDurationInput(value)) },
-                    placeholder = "Last time",
+                    placeholder = "Target time",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     selectAllOnFocus = true,
                     modifier = Modifier.weight(1f)
@@ -420,7 +472,7 @@ private fun RoutineSetRow(
                 FitTextField(
                     value = set.targetReps?.toString().orEmpty(),
                     onValueChange = { value -> onRepsChange(value.toIntOrNull()) },
-                    placeholder = "Last reps",
+                    placeholder = "Target reps",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     selectAllOnFocus = true,
                     modifier = Modifier.weight(1f)
@@ -429,7 +481,7 @@ private fun RoutineSetRow(
                     FitTextField(
                         value = set.targetWeight?.value?.trimmedString().orEmpty(),
                         onValueChange = { value -> onWeightChange(value.toDoubleOrNull()?.let(::WeightKg)) },
-                        placeholder = "Last kg",
+                        placeholder = "Target kg",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         selectAllOnFocus = true,
                         modifier = Modifier.weight(1f)

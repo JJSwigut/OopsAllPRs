@@ -8,8 +8,9 @@ import com.jjswigut.oopsallprs.platform.FileExportHandoff
 import com.jjswigut.oopsallprs.platform.BackupDocumentHandoff
 import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
-import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduler
 import com.jjswigut.oopsallprs.ui.designsystem.OopsAllPrsFoundationTheme
+import com.jjswigut.oopsallprs.ui.navigation.ActiveWorkoutOpenRequest
 import com.jjswigut.oopsallprs.ui.navigation.AppShell
 
 @Composable
@@ -18,11 +19,12 @@ fun App(
     fileExportHandoff: FileExportHandoff? = null,
     backupDocumentHandoff: BackupDocumentHandoff? = null,
     fullAccessBilling: FullAccessBillingAdapter? = null,
-    restNotificationScheduler: RestNotificationScheduler? = null,
+    restAlertScheduler: RestAlertScheduler? = null,
+    activeWorkoutOpenRequest: ActiveWorkoutOpenRequest? = null,
     developerToolsEnabled: Boolean = false
 ) {
-    val appState = remember(databaseDriverFactory, fileExportHandoff, backupDocumentHandoff, fullAccessBilling, restNotificationScheduler, developerToolsEnabled) {
-        AppState.create(databaseDriverFactory, fileExportHandoff, backupDocumentHandoff, fullAccessBilling, restNotificationScheduler, developerToolsEnabled)
+    val appState = remember(databaseDriverFactory, fileExportHandoff, backupDocumentHandoff, fullAccessBilling, restAlertScheduler, developerToolsEnabled) {
+        AppState.create(databaseDriverFactory, fileExportHandoff, backupDocumentHandoff, fullAccessBilling, restAlertScheduler, developerToolsEnabled)
     }
     val shellState by appState.navigation.state.collectAsState()
 
@@ -31,6 +33,6 @@ fun App(
         reduceMotion = shellState.reduceMotion,
         hapticsEnabled = shellState.hapticsEnabled
     ) {
-        AppShell(appState)
+        AppShell(appState, activeWorkoutOpenRequest = activeWorkoutOpenRequest)
     }
 }

@@ -23,7 +23,7 @@ class FoundationOfflineFlowTest {
         val bodyweight = harness.setLogging.addExercise(workout.id, harness.bodyweightReference, instant(1_200)).successValue()
         harness.setLogging.confirmSet(workout.id, weighted.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_300))
         harness.setLogging.confirmSet(workout.id, bodyweight.id, SetKind.BODYWEIGHT, 12, null, 0, instant(1_400))
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
         PersonalRecordDerivationUseCase(harness.store).rebuildFrom(listOf(completed))
         val export = ExportService(harness.store).export(ExportType.WORKOUTS, WeightUnit.POUNDS).successValue()
         assertTrue(export.content.contains("BODYWEIGHT"))

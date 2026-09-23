@@ -53,7 +53,7 @@ class TemplateLaunchSeparationTest {
             position = 0,
             loggedAt = instant(1_500)
         ).successValue()
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
         val template = harness.routines.saveCompletedWorkoutAsRoutine(
             completed.id,
             "Upper circuit",
@@ -75,7 +75,7 @@ class TemplateLaunchSeparationTest {
     fun launchedTemplateCreatesPlannedSetsWithoutLoggedTimestamps() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val template = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
 
         val active = harness.lifecycle.startFromRoutine(template.id, instant(4_000)).successValue()

@@ -140,7 +140,8 @@ class ActiveWorkoutStateHolder(
                         reps = previous.reps,
                         weight = previous.weight,
                         durationMs = previous.durationMs,
-                        distanceMeters = previous.distanceMeters
+                        distanceMeters = previous.distanceMeters,
+                        prefillHint = "Last logged values"
                     )
                 }
                 focus = ActiveWorkoutFocus(
@@ -698,6 +699,15 @@ class ActiveWorkoutStateHolder(
     }
 
     fun requestFinish() {
+        if (_state.value.workout?.exerciseBlocks?.any { it.loggedRows.isNotEmpty() } != true) {
+            _state.value = _state.value.copy(
+                isFinishConfirmationVisible = false,
+                isDiscardConfirmationVisible = false,
+                editDraft = null,
+                errorMessage = "Log at least one set before finishing, or discard this workout."
+            )
+            return
+        }
         _state.value = _state.value.copy(
             isFinishConfirmationVisible = true,
             isDiscardConfirmationVisible = false,
@@ -708,6 +718,13 @@ class ActiveWorkoutStateHolder(
 
     fun cancelFinish() {
         _state.value = _state.value.copy(isFinishConfirmationVisible = false, errorMessage = null)
+    }
+
+    fun reportFinishFailure() {
+        _state.value = _state.value.copy(
+            isFinishConfirmationVisible = true,
+            errorMessage = "Couldn't finish the workout. Please try again."
+        )
     }
 
     suspend fun confirmDiscard(now: Instant = Clock.System.now()): FoundationResult<Unit> {
@@ -773,7 +790,7 @@ class ActiveWorkoutStateHolder(
     ) {
         val current = _state.value.workout?.exerciseBlocks?.firstOrNull { it.exerciseInstanceId == exerciseInstanceId }?.draft
             ?: return
-        setDraft(transform(current))
+        setDraft(transform(current).copy(prefillHint = null))
     }
 
     private suspend fun setDraft(draft: SetRowDraft) {

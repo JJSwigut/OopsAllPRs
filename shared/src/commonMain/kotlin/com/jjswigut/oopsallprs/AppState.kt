@@ -12,8 +12,10 @@ import com.jjswigut.oopsallprs.data.repository.SqlSetLedgerRepository
 import com.jjswigut.oopsallprs.data.repository.SqlWorkoutRepository
 import com.jjswigut.oopsallprs.db.WorkoutDatabase
 import com.jjswigut.oopsallprs.dev.DeveloperSeedStateHolder
+import com.jjswigut.oopsallprs.dev.DeveloperSeedOutcome
 import com.jjswigut.oopsallprs.dev.DeveloperSeedUseCase
 import com.jjswigut.oopsallprs.domain.model.ActiveSessionState
+import com.jjswigut.oopsallprs.domain.model.FinishWorkoutOutcome
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.CompletedWorkoutCorrectionUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseCatalogUseCases
@@ -28,6 +30,7 @@ import com.jjswigut.oopsallprs.ui.exercise.ExercisePickerStateHolder
 import com.jjswigut.oopsallprs.ui.exercise.ExerciseManagementStateHolder
 import com.jjswigut.oopsallprs.ui.history.HistoryStateHolder
 import com.jjswigut.oopsallprs.ui.navigation.AppNavigationStateHolder
+import com.jjswigut.oopsallprs.ui.navigation.TopLevelDestination
 import com.jjswigut.oopsallprs.ui.profile.ProfileStateHolder
 import com.jjswigut.oopsallprs.ui.progress.ProgressStateHolder
 import com.jjswigut.oopsallprs.ui.routine.RoutineStateHolder
@@ -38,10 +41,12 @@ import com.jjswigut.oopsallprs.platform.BackupDocumentHandoff
 import com.jjswigut.oopsallprs.platform.BackupDocumentAdapter
 import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.platform.PlatformDatabaseDriverFactory
-import com.jjswigut.oopsallprs.platform.RestNotificationScheduler
+import com.jjswigut.oopsallprs.platform.RestAlertScheduler
 import com.jjswigut.oopsallprs.di.createExerciseLoggingComposition
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -67,6 +72,10 @@ class AppState(
 
     suspend fun hydrate(now: Instant = Clock.System.now()) {
         exerciseCatalog.ensureSeeded(defaultExerciseSeedCsv())
+        val seedResult = developerSeeds?.loadProgressDemoIfEmpty()
+        if (seedResult?.outcome == DeveloperSeedOutcome.LOADED) {
+            fullAccess.enableDeveloperDemoAccess(now)
+        }
         val restored = workoutLifecycle.restoreActiveSession(now)
         _activeSession.value = restored
         workoutHome.hydrate()
@@ -82,6 +91,31 @@ class AppState(
         navigation.hydrate(restored, now)
     }
 
+    suspend fun presentCompletedWorkout(outcome: FinishWorkoutOutcome) {
+        activeWorkout.cancelFinish()
+        _activeSession.value = null
+        navigation.activeSessionChanged(null)
+        history.presentCompletion(outcome)
+        // The saved receipt is visible before any fallible refresh. A failed secondary
+        // operation cannot turn a committed workout into an apparent failed save.
+        val updates: List<suspend () -> Unit> = listOf(
+            { navigation.selectDestination(TopLevelDestination.HISTORY) },
+            { workoutHome.hydrate() },
+            { profile.refreshFullAccess() },
+            { progress.refresh() },
+            { history.refresh() }
+        )
+        for (update in updates) {
+            try {
+                update()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                history.reportCompletionRefreshFailure(outcome.workout.id)
+            }
+        }
+    }
+
     suspend fun checkBackupSyncOnLaunchOrResume() {
         profile.checkLinkedBackup()
     }
@@ -89,7 +123,13 @@ class AppState(
     suspend fun refreshFullAccessEntitlements() {
         fullAccess.refreshEntitlements()
         workoutHome.refreshFullAccess()
-        profile.hydrate()
+        profile.refreshFullAccess()
+    }
+
+    suspend fun observeFullAccessEntitlements() {
+        fullAccess.observeEntitlementChanges().collect {
+            refreshFullAccessEntitlements()
+        }
     }
 
     companion object {
@@ -98,7 +138,7 @@ class AppState(
             fileExportHandoff: FileExportHandoff? = null,
             backupDocumentHandoff: BackupDocumentHandoff? = null,
             fullAccessBilling: FullAccessBillingAdapter? = null,
-            restNotificationScheduler: RestNotificationScheduler? = null,
+            restAlertScheduler: RestAlertScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState =
             create(
@@ -106,7 +146,7 @@ class AppState(
                 fileExportHandoff = fileExportHandoff,
                 backupDocumentAdapter = backupDocumentHandoff,
                 fullAccessBilling = fullAccessBilling,
-                restNotificationScheduler = restNotificationScheduler,
+                restAlertScheduler = restAlertScheduler,
                 developerToolsEnabled = developerToolsEnabled
             )
 
@@ -115,7 +155,7 @@ class AppState(
             fileExportHandoff: FileExportHandoff? = null,
             backupDocumentAdapter: BackupDocumentAdapter? = null,
             fullAccessBilling: FullAccessBillingAdapter? = null,
-            restNotificationScheduler: RestNotificationScheduler? = null,
+            restAlertScheduler: RestAlertScheduler? = null,
             developerToolsEnabled: Boolean = false
         ): AppState {
             val store = SqlFoundationStore(database)
@@ -141,7 +181,7 @@ class AppState(
                 routines = routineRepo,
                 activeUx = workouts,
                 preferences = store,
-                notifications = restNotificationScheduler,
+                notifications = restAlertScheduler,
                 previousDefaults = previousDefaults
             )
             val setLogging = SetLoggingUseCases(
@@ -165,8 +205,7 @@ class AppState(
                 workouts,
                 personalRecordDerivation,
                 store,
-                restNotificationScheduler,
-                fullAccess,
+                restAlertScheduler,
                 exerciseLogging.management
             )
             val activeWorkout = ActiveWorkoutStateHolder(
@@ -203,7 +242,7 @@ class AppState(
                 exerciseManagement = ExerciseManagementStateHolder(exerciseCatalog),
                 exerciseCatalog = exerciseCatalog,
                 routines = RoutineStateHolder(routineUseCases, exerciseCatalog),
-                progress = ProgressStateHolder(progress, workouts, store),
+                progress = ProgressStateHolder(progress, workouts, store, personalRecordDerivation, loggingConfigurations = store),
                 history = HistoryStateHolder(
                     workouts,
                     progress,

@@ -36,7 +36,7 @@ SHOTS = [
         "turn-workouts-into-prs",
         "Turn workouts into PRs",
         "Log sets fast and see records the moment they happen.",
-        "specs/011-milestone-ux-hardening/validation/screenshots/core-14-second-set-logged.png",
+        "assets/store-listing/source/current-active-workout-set-entry.png",
         (8, 14, 23),
         (90, 226, 242),
     ),

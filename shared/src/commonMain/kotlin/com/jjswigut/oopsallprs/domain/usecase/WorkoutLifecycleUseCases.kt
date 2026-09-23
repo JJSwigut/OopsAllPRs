@@ -141,7 +141,10 @@ class WorkoutLifecycleUseCases(
     }
 
     suspend fun restoreActiveSession(now: Instant = Clock.System.now()): ActiveSessionState? {
-        val state = sessions.load() ?: return null
+        val state = sessions.load() ?: run {
+            cancelRestAlert()
+            return null
+        }
         val restEndsAt = state.restEndsAt
         val restAdjusted = if (restEndsAt != null && restEndsAt <= now) {
             cancelRestAlert()
@@ -149,6 +152,8 @@ class WorkoutLifecycleUseCases(
         } else {
             if (restEndsAt != null) {
                 reconcileRestAlert(restEndsAt)
+            } else {
+                cancelRestAlert()
             }
             state
         }
@@ -293,7 +298,7 @@ class WorkoutLifecycleUseCases(
         val request = RestAlertRequest(
             restEndsAt = restEndsAt,
             soundEnabled = preferences?.restSoundEnabled() ?: true,
-            persistentSurfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: true
+            persistentSurfaceEnabled = preferences?.restTimerSurfaceEnabled() ?: false
         )
         if (request == lastRestAlertRequest) return
         scheduler.schedule(

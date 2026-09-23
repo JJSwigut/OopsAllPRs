@@ -1,0 +1,25 @@
+selectCompletedWorkoutsForSource:
+SELECT * FROM completed_workouts
+WHERE source_active_workout_id = ?;
+
+selectCompletionReceipt:
+SELECT * FROM local_workout_completion_receipts
+WHERE source_active_workout_id = ?;
+
+insertCompletionReceipt:
+INSERT OR IGNORE INTO local_workout_completion_receipts(source_active_workout_id)
+VALUES (?);
+
+initializeLegacyFullAccess:
+INSERT OR IGNORE INTO full_access_state(
+    singleton_id, completed_free_workouts, lifetime_active, store_status, last_error, updated_at
+)
+SELECT 1, COUNT(*), 0, 'NOT_CHECKED', NULL, ? FROM completed_workouts;
+
+backfillCompletionReceipts:
+INSERT OR IGNORE INTO local_workout_completion_receipts(source_active_workout_id)
+SELECT DISTINCT source_active_workout_id FROM completed_workouts;
+
+clearCompletedWorkoutSession:
+DELETE FROM active_session_state
+WHERE active_workout_id = ?;

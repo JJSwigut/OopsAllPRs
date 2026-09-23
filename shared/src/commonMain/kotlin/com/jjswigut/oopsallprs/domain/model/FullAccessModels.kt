@@ -14,6 +14,8 @@ enum class FullAccessStatus {
 enum class FullAccessGate {
     WORKOUT_START,
     EXPORT,
+    /** Reconstructs workout history and is intentionally never part of the free export promise. */
+    IMPORT,
     BACKUP_LINK,
     BACKUP_NOW,
     SYNC_NOW,
@@ -62,10 +64,17 @@ data class FullAccessStoreOffer(
     val termsLabel: String
 )
 
+sealed interface FullAccessOfferState {
+    data object Loading : FullAccessOfferState
+    data class Available(val offer: FullAccessStoreOffer) : FullAccessOfferState
+    data class Unavailable(val message: String) : FullAccessOfferState
+}
+
 data class FullAccessEntitlementSnapshot(
     val lifetimeUnlocked: Boolean = false,
     val storeStatus: FullAccessStoreStatus = FullAccessStoreStatus.AVAILABLE,
-    val message: String? = null
+    val message: String? = null,
+    val deliveryToken: String? = null
 )
 
 data class FullAccessGateResult(
@@ -77,7 +86,8 @@ data class FullAccessGateResult(
 fun FullAccessGate.requiredMessage(): String =
     when (this) {
         FullAccessGate.WORKOUT_START -> "Full Access is required to start another workout."
-        FullAccessGate.EXPORT -> "Full Access is required to export your data."
+        FullAccessGate.EXPORT -> "Export is available to everyone."
+        FullAccessGate.IMPORT -> "Full Access is required to import workout data."
         FullAccessGate.BACKUP_LINK -> "Full Access is required to set up backup."
         FullAccessGate.BACKUP_NOW -> "Full Access is required to back up your data."
         FullAccessGate.SYNC_NOW -> "Full Access is required to sync your backup."

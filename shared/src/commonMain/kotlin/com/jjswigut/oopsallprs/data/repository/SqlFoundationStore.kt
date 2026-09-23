@@ -1,6 +1,11 @@
 package com.jjswigut.oopsallprs.data.repository
 
 import com.jjswigut.oopsallprs.data.LoggingConfigurationIdentity
+import com.jjswigut.oopsallprs.data.backup.BackupPackage
+import com.jjswigut.oopsallprs.data.backup.BackupSnapshotReader
+import com.jjswigut.oopsallprs.data.backup.ExportSnapshotDto
+import com.jjswigut.oopsallprs.data.backup.PreferencesSnapshotDto
+import com.jjswigut.oopsallprs.data.backup.toDto
 import com.jjswigut.oopsallprs.data.export.EXPORT_FORMAT_VERSION
 import com.jjswigut.oopsallprs.data.export.durationExportLabel
 import com.jjswigut.oopsallprs.data.export.exportDurationMillis
@@ -80,10 +85,13 @@ import com.jjswigut.oopsallprs.domain.model.WeightStepPreference
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.domain.model.WireCode
 import com.jjswigut.oopsallprs.domain.model.WorkoutStatus
+import com.jjswigut.oopsallprs.domain.model.WorkoutCompletionReceipt
+import com.jjswigut.oopsallprs.domain.model.buildCompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.canonicalExerciseName
 import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
+import com.jjswigut.oopsallprs.domain.model.recordLocalCompletion
 import com.jjswigut.oopsallprs.domain.model.toLegacyLoggingConfiguration
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.CompletedWorkoutCorrectionRepository
@@ -99,12 +107,17 @@ import com.jjswigut.oopsallprs.domain.repository.SetLedgerRepository
 import com.jjswigut.oopsallprs.domain.repository.UserExerciseConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlin.coroutines.CoroutineContext
 
 class SqlFoundationStore(
     private val database: WorkoutDatabase,
-    private val correctionFaultInjector: (() -> Unit)? = null
+    private val correctionFaultInjector: (() -> Unit)? = null,
+    private val completionFaultInjector: (() -> Unit)? = null
 ) : WorkoutRepository,
     CompletedWorkoutCorrectionRepository,
     SessionRepository,
@@ -125,6 +138,7 @@ class SqlFoundationStore(
     private val exerciseQueries get() = database.exerciseQueriesQueries
     private val progressQueries get() = database.progressQueriesQueries
     private val loggingConfigurationQueries get() = database.loggingConfigurationQueriesQueries
+    private val completionQueries get() = database.localCompletionQueriesQueries
 
     init {
         database.transaction {
@@ -133,8 +147,96 @@ class SqlFoundationStore(
                     insertLoggingConfiguration(configuration, sourceCode = LEGACY_SOURCE_CODE, createdAt = 0L)
                 }
             }
+            if (routineQueries.selectCompletedWorkouts().executeAsList().isNotEmpty()) {
+                initializeLocalCompletionAccounting()
+            }
         }
     }
+
+    // The caller owns one synchronous SQL transaction for the entire capture.
+    internal fun readBackupSnapshot(reader: BackupSnapshotReader, now: Instant): BackupPackage {
+        val snapshotQueries = database.backupSnapshotQueriesQueries
+        val coverageProblems = snapshotQueries.selectBackupCoverageProblems().executeAsList()
+        require(coverageProblems.isEmpty()) {
+            "Backup contains unrepresented or orphaned rows: ${coverageProblems.distinct().joinToString()}"
+        }
+        val configurations = loggingConfigurationQueries.selectLoggingConfigurations().executeAsList().map { row ->
+            requireNotNull(row.toLoggingConfigurationOrNull(strict = true)) { "Malformed logging configuration ${row.id}" }
+        }
+        val activeRows = snapshotQueries.selectBackupActiveWorkouts().executeAsList()
+        require(activeRows.size <= 1) { "Backup cannot represent multiple active workouts" }
+        val active = activeRows.singleOrNull()?.let { row ->
+            requireNotNull(row.toActiveWorkoutOrNull(strict = true)) { "Malformed active workout ${row.id}" }
+        }
+        val session = workoutQueries.selectSessionState().executeAsOneOrNull()?.toActiveSessionState()
+        val ux = active?.id?.let { workoutQueries.selectActiveWorkoutUxSession(it.value).executeAsOneOrNull() }
+            ?.toActiveWorkoutUxSession()
+        val drafts = active?.id?.let { workoutQueries.selectActiveSetDrafts(it.value).executeAsList() }.orEmpty().map { row ->
+            requireNotNull(row.toPersistedSetDraftOrNull(strict = true)) { "Malformed active draft ${row.draft_id}" }
+        }
+        val completed = routineQueries.selectCompletedWorkouts().executeAsList().map { row ->
+            requireNotNull(row.toCompletedWorkoutOrNull(strict = true)) { "Malformed completed workout ${row.id}" }
+        }
+        val routines = snapshotQueries.selectBackupRoutines().executeAsList().map { row ->
+            requireNotNull(row.toReusableRoutineOrNull(strict = true)) { "Malformed routine ${row.id}" }
+        }
+        val exercises = snapshotQueries.selectBackupExercises().executeAsList().map { row ->
+            requireNotNull(row.toExerciseCatalogItemOrNull(strict = true)) { "Malformed exercise ${row.id}" }
+        }
+        val userConfigurations = snapshotQueries.selectBackupUserExerciseConfigurations().executeAsList().map { row ->
+            val configuration = requireNotNull(configurations.firstOrNull { it.id.value == row.logging_configuration_id }) {
+                "Unknown user logging configuration ${row.logging_configuration_id}"
+            }
+            UserExerciseConfiguration(
+                exerciseDefinitionId = FoundationId(row.exercise_catalog_id),
+                configuration = configuration,
+                basedOnDefinitionRevision = ExerciseDefinitionRevision(row.based_on_definition_revision),
+                configuredAt = row.updated_at.toInstant()
+            )
+        }.sortedBy { it.exerciseDefinitionId.value }
+        val records = progressQueries.selectPersonalRecords().executeAsList().map { it.toPersonalRecord(strict = true) }
+        val points = progressQueries.selectProgressPoints().executeAsList().map { it.toProgressPoint(strict = true) }
+        val preferences = workoutQueries.selectUserPreferences().executeAsOneOrNull()
+        val exports = progressQueries.selectExportSnapshots().executeAsList().map { row ->
+            require(row.row_count >= 0 && row.format_version > 0) { "Malformed export metadata ${row.id}" }
+            ExportSnapshotDto(
+                id = row.id,
+                exportType = ExportType.valueOf(row.export_type).name,
+                createdAt = row.created_at,
+                weightUnit = WeightUnit.valueOf(row.weight_unit).name,
+                rowCount = row.row_count.toModelInt(strict = true),
+                formatVersion = row.format_version.toModelInt(strict = true)
+            )
+        }
+        return reader.assemblePackage(
+            now = now,
+            preferences = PreferencesSnapshotDto(
+                weightUnit = preferences?.weight_unit?.let(WeightUnit::valueOf)?.name ?: WeightUnit.POUNDS.name,
+                weightStepPounds = preferences?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
+                weightStepKilograms = preferences?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
+                defaultRestSeconds = preferences?.default_rest_seconds?.toModelInt(strict = true) ?: RestConfiguration.DEFAULT_SECONDS,
+                restSoundEnabled = preferences?.rest_sound_enabled?.toBackupFlag() ?: true,
+                startWorkoutTimerWithFirstSet = preferences?.start_timer_on_first_set?.toBackupFlag() ?: true,
+                restTimerSurfaceEnabled = preferences?.rest_timer_surface_enabled?.toBackupFlag() ?: false
+            ),
+            configurations = configurations.map { it.toDto() },
+            userExerciseConfigurations = userConfigurations.map { it.toDto() },
+            exercises = exercises.map { it.toDto() },
+            routines = routines.map { it.toDto() },
+            activeWorkout = active?.toDto(),
+            activeSession = session?.toDto(),
+            activeUxSession = ux?.toDto(),
+            activeSetDrafts = drafts.map { it.toDto() },
+            completed = completed.map { it.toDto() },
+            records = records.map { it.toDto() },
+            points = points.map { it.toDto() },
+            exportMetadata = exports
+        )
+    }
+
+    internal fun readBackupLoggingConfiguration(id: LoggingConfigurationId): LoggingConfiguration? =
+        loggingConfigurationQueries.selectLoggingConfiguration(id.value).executeAsOneOrNull()
+            ?.let { requireNotNull(it.toLoggingConfigurationOrNull(strict = true)) }
 
     override suspend fun loggingConfiguration(id: LoggingConfigurationId): LoggingConfiguration? =
         loggingConfigurationQueries.selectLoggingConfiguration(id.value).executeAsOneOrNull()
@@ -281,91 +383,145 @@ class SqlFoundationStore(
             setQueries.deleteSetsForWorkout(id.value)
             workoutQueries.clearActiveWorkoutDrafts(id.value)
             workoutQueries.clearActiveWorkoutUx(id.value)
+            setQueries.deleteActiveExercisesForWorkout(id.value)
             workoutQueries.deleteActiveWorkout(id.value)
         }
         return foundationSuccess(Unit)
     }
 
-    override suspend fun finishWorkout(workout: CompletedWorkout): FoundationResult<CompletedWorkout> {
+    override suspend fun finishActiveWorkout(
+        id: FoundationId,
+        finishedAt: Instant
+    ): FoundationResult<WorkoutCompletionReceipt> = localAccountingWrite {
+        val activeWorkoutId = id
+        initializeLocalCompletionAccounting()
+        val existing = completionQueries.selectCompletedWorkoutsForSource(activeWorkoutId.value).executeAsList()
+        if (existing.size > 1) {
+            return@localAccountingWrite foundationFailure(FoundationError.Conflict(
+                "Multiple completed workouts reference $activeWorkoutId; completion cannot be retried safely"
+            ))
+        }
+        existing.singleOrNull()?.let { row ->
+            val completed = requireNotNull(row.toCompletedWorkoutOrNull(strict = true))
+            completionQueries.insertCompletionReceipt(activeWorkoutId.value)
+            return@localAccountingWrite foundationSuccess(WorkoutCompletionReceipt(completed, newlyCompleted = false))
+        }
+        val activeRow = workoutQueries.selectActiveWorkout(activeWorkoutId.value).executeAsOneOrNull()
+            ?: return@localAccountingWrite foundationFailure(FoundationError.NotFound("Active workout not found: $activeWorkoutId"))
+        if (activeRow.status != WorkoutStatus.ACTIVE.name) {
+            return@localAccountingWrite foundationFailure(FoundationError.Conflict("Workout is not active: $activeWorkoutId"))
+        }
+        val active = requireNotNull(activeRow.toActiveWorkoutOrNull(strict = true))
+        if (active.loggedSets().isEmpty()) {
+            return@localAccountingWrite foundationFailure(FoundationError.Validation("Log at least one set before finishing"))
+        }
+        val startWithFirstSet = workoutQueries.selectUserPreferences().executeAsOneOrNull()
+            ?.start_timer_on_first_set?.toBackupFlag() ?: true
+        val completed = buildCompletedWorkout(active, newFoundationId("completed"), finishedAt, startWithFirstSet)
+        requireCompletedConfigurations(completed)
+        val alreadyAccounted = completionQueries.selectCompletionReceipt(activeWorkoutId.value).executeAsOneOrNull() != null
+        val access = readLocalFullAccess()
+        persistCompletedWorkout(completed)
+        completionQueries.insertCompletionReceipt(activeWorkoutId.value)
+        if (!alreadyAccounted) {
+            val updated = access.recordLocalCompletion(finishedAt)
+            if (updated !== access) persistFullAccess(updated)
+        }
+        completionFaultInjector?.invoke()
+        foundationSuccess(WorkoutCompletionReceipt(completed, newlyCompleted = true))
+    }
+
+    // History/import persistence is deliberately separate from local trial accounting.
+    override suspend fun finishWorkout(workout: CompletedWorkout): FoundationResult<CompletedWorkout> = localAccountingWrite {
+        initializeLocalCompletionAccounting()
+        requireCompletedConfigurations(workout)
+        persistCompletedWorkout(workout)
+        completionQueries.insertCompletionReceipt(workout.sourceActiveWorkoutId.value)
+        foundationSuccess(workout)
+    }
+
+    private fun requireCompletedConfigurations(workout: CompletedWorkout) {
         workout.exercises.flatMap(CompletedExercise::loggedSets)
             .map(ExerciseSet::captureConfigurationId)
             .distinct()
-            .firstOrNull { loggingConfiguration(it) == null }
-            ?.let {
-                return foundationFailure(FoundationError.Validation("Unknown or malformed logging configuration: $it"))
-            }
-        database.transaction {
-            routineQueries.insertCompletedWorkout(
-                id = workout.id.value,
-                source_active_workout_id = workout.sourceActiveWorkoutId.value,
-                started_at = workout.startedAt.toDbLong(),
-                finished_at = workout.finishedAt.toDbLong(),
-                duration_ms = workout.durationMs,
-                routine_id = workout.routineId?.value,
-                created_at = workout.createdAt.toDbLong()
-            )
-            val source = workoutQueries.selectActiveWorkout(workout.sourceActiveWorkoutId.value).executeAsOneOrNull()
-            if (source == null) {
-                workoutQueries.insertActiveWorkout(
-                    id = workout.sourceActiveWorkoutId.value,
-                    started_at = workout.startedAt.toDbLong(),
-                    routine_id = workout.routineId?.value,
-                    routine_snapshot_name = null,
-                    status = WorkoutStatus.COMPLETED.name,
-                    created_at = workout.startedAt.toDbLong(),
-                    updated_at = workout.finishedAt.toDbLong()
-                )
-            } else {
-                workoutQueries.updateWorkoutStatus(
-                    status = WorkoutStatus.COMPLETED.name,
-                    updated_at = workout.finishedAt.toDbLong(),
-                    id = workout.sourceActiveWorkoutId.value
-                )
-            }
-            workout.exercises.forEach { exercise ->
-                val sourceExerciseId = exercise.loggedSets.firstOrNull()?.exerciseInstanceId ?: exercise.id
-                setQueries.insertActiveExerciseWithLoggingConfiguration(
-                    id = sourceExerciseId.value,
-                    active_workout_id = workout.sourceActiveWorkoutId.value,
-                    exercise_catalog_id = exercise.exerciseCatalogId.value,
-                    display_name_snapshot = exercise.displayNameSnapshot,
-                    equipment_snapshot = null,
-                    is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
-                    position = exercise.position.value.toLong(),
-                    logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
-                    group_id = exercise.groupContext?.groupId?.value,
-                    group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
-                    group_label = exercise.groupContext?.label,
-                    group_rounds = exercise.groupContext?.rounds?.toLong(),
-                    rest_seconds = exercise.rest.durationSeconds.toLong(),
-                    rest_auto_start = exercise.rest.autoStart.toDbLong(),
-                    logging_configuration_id = exercise.loggedSets.firstOrNull()?.captureConfigurationId?.value
-                        ?: exercise.loggedSets
-                            .firstOrNull()
-                            ?.setKind
-                            ?.toLegacyLoggingConfiguration(
-                                hasLegacyLoad = exercise.loggedSets.any {
-                                    it.setKind == SetKind.BODYWEIGHT && it.weight != null
-                                }
-                            )
-                            ?.id
-                            ?.value
-                )
-                exercise.loggedSets.forEach { set ->
-                    setQueries.upsertSet(workout.sourceActiveWorkoutId, set)
+            .forEach { id ->
+                requireNotNull(readBackupLoggingConfiguration(id)) {
+                    "Unknown or malformed logging configuration: $id"
                 }
             }
-            workoutQueries.clearSessionState()
-            workoutQueries.clearActiveWorkoutUx(workout.sourceActiveWorkoutId.value)
-            workoutQueries.clearActiveWorkoutDrafts(workout.sourceActiveWorkoutId.value)
+    }
+
+    private fun persistCompletedWorkout(workout: CompletedWorkout) {
+        routineQueries.insertCompletedWorkout(
+            id = workout.id.value,
+            source_active_workout_id = workout.sourceActiveWorkoutId.value,
+            started_at = workout.startedAt.toDbLong(),
+            finished_at = workout.finishedAt.toDbLong(),
+            duration_ms = workout.durationMs,
+            routine_id = workout.routineId?.value,
+            created_at = workout.createdAt.toDbLong()
+        )
+        val source = workoutQueries.selectActiveWorkout(workout.sourceActiveWorkoutId.value).executeAsOneOrNull()
+        if (source == null) {
+            workoutQueries.insertActiveWorkout(
+                id = workout.sourceActiveWorkoutId.value,
+                started_at = workout.startedAt.toDbLong(),
+                routine_id = workout.routineId?.value,
+                routine_snapshot_name = null,
+                status = WorkoutStatus.COMPLETED.name,
+                created_at = workout.startedAt.toDbLong(),
+                updated_at = workout.finishedAt.toDbLong()
+            )
+        } else {
+            workoutQueries.updateWorkoutStatus(
+                status = WorkoutStatus.COMPLETED.name,
+                updated_at = workout.finishedAt.toDbLong(),
+                id = workout.sourceActiveWorkoutId.value
+            )
         }
-        return foundationSuccess(workout)
+        workout.exercises.forEach { exercise ->
+            val sourceExerciseId = exercise.loggedSets.firstOrNull()?.exerciseInstanceId ?: exercise.id
+            setQueries.insertActiveExerciseWithLoggingConfiguration(
+                id = sourceExerciseId.value,
+                active_workout_id = workout.sourceActiveWorkoutId.value,
+                exercise_catalog_id = exercise.exerciseCatalogId.value,
+                display_name_snapshot = exercise.displayNameSnapshot,
+                equipment_snapshot = null,
+                is_bodyweight = exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT || it.setKind == SetKind.TIMED }.toDbLong(),
+                position = exercise.position.value.toLong(),
+                logging_mode = exercise.loggedSets.loggingMode(exercise.loggedSets.any { it.setKind == SetKind.BODYWEIGHT }).name,
+                group_id = exercise.groupContext?.groupId?.value,
+                group_position = exercise.groupContext?.groupPosition?.value?.toLong(),
+                group_label = exercise.groupContext?.label,
+                group_rounds = exercise.groupContext?.rounds?.toLong(),
+                rest_seconds = exercise.rest.durationSeconds.toLong(),
+                rest_auto_start = exercise.rest.autoStart.toDbLong(),
+                logging_configuration_id = exercise.loggedSets.firstOrNull()?.captureConfigurationId?.value
+                    ?: exercise.loggedSets
+                        .firstOrNull()
+                        ?.setKind
+                        ?.toLegacyLoggingConfiguration(
+                            hasLegacyLoad = exercise.loggedSets.any {
+                                it.setKind == SetKind.BODYWEIGHT && it.weight != null
+                            }
+                        )
+                        ?.id
+                        ?.value
+            )
+            exercise.loggedSets.forEach { set ->
+                setQueries.upsertSet(workout.sourceActiveWorkoutId, set)
+            }
+        }
+        completionQueries.clearCompletedWorkoutSession(workout.sourceActiveWorkoutId.value)
+        workoutQueries.clearActiveWorkoutUx(workout.sourceActiveWorkoutId.value)
+        workoutQueries.clearActiveWorkoutDrafts(workout.sourceActiveWorkoutId.value)
     }
 
     override suspend fun deleteCompletedWorkout(id: FoundationId, now: Instant): FoundationResult<Unit> {
         val completed = routineQueries.selectCompletedWorkout(id.value).executeAsOneOrNull()
             ?: return foundationFailure(FoundationError.NotFound("Completed workout not found: $id"))
         database.transaction {
+            initializeLocalCompletionAccounting()
             setQueries.deleteSetsForWorkout(completed.source_active_workout_id)
             setQueries.deleteActiveExercisesForWorkout(completed.source_active_workout_id)
             routineQueries.deleteCompletedWorkout(id.value)
@@ -707,7 +863,7 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
-            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 0L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
@@ -739,7 +895,7 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
-            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 0L,
             weight_step_lb = if (unit == WeightUnit.POUNDS) normalized else existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = if (unit == WeightUnit.KILOGRAMS) normalized else existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
@@ -765,7 +921,7 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = seconds.toLong(),
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
-            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 0L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
@@ -787,7 +943,7 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = enabled.toDbLong(),
-            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 0L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
@@ -799,7 +955,7 @@ class SqlFoundationStore(
     }
 
     override suspend fun restTimerSurfaceEnabled(): Boolean =
-        workoutQueries.selectUserPreferences().executeAsOneOrNull()?.rest_timer_surface_enabled?.toBooleanFlag() ?: true
+        workoutQueries.selectUserPreferences().executeAsOneOrNull()?.rest_timer_surface_enabled?.toBooleanFlag() ?: false
 
     override suspend fun setRestTimerSurfaceEnabled(enabled: Boolean): FoundationResult<Boolean> {
         val existing = workoutQueries.selectUserPreferences().executeAsOneOrNull()
@@ -831,7 +987,7 @@ class SqlFoundationStore(
             date_format = existing?.date_format,
             default_rest_seconds = existing?.default_rest_seconds ?: DEFAULT_REST_SECONDS,
             rest_sound_enabled = existing?.rest_sound_enabled ?: 1L,
-            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 1L,
+            rest_timer_surface_enabled = existing?.rest_timer_surface_enabled ?: 0L,
             weight_step_lb = existing?.weight_step_lb ?: WeightStepPreference.DEFAULT_POUNDS_STEP,
             weight_step_kg = existing?.weight_step_kg ?: WeightStepPreference.DEFAULT_KILOGRAMS_STEP,
             android_auto_backup_allowed = existing?.android_auto_backup_allowed ?: 1L,
@@ -842,11 +998,36 @@ class SqlFoundationStore(
         return foundationSuccess(enabled)
     }
 
-    override suspend fun loadFullAccess(): FullAccessState =
-        workoutQueries.selectFullAccessState().executeAsOneOrNull()?.toFullAccessState()
-            ?: FullAccessState(completedFreeWorkouts = completedWorkouts().size)
+    override suspend fun loadFullAccess(): FullAccessState {
+        val context = currentCoroutineContext()
+        return localAccountingTransaction(context) {
+            initializeLocalCompletionAccounting()
+            readLocalFullAccess()
+        }
+    }
 
-    override suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState> {
+    override suspend fun updateFullAccess(
+        transform: (FullAccessState) -> FullAccessState
+    ): FoundationResult<FullAccessState> = localAccountingWrite {
+        initializeLocalCompletionAccounting()
+        val current = readLocalFullAccess()
+        val updated = transform(current)
+        foundationSuccess(if (updated === current) current else persistFullAccess(updated))
+    }
+
+    // Call inside the same transaction, before replacing/deleting history or adding a completion.
+    internal fun initializeLocalCompletionAccounting() {
+        if (workoutQueries.selectFullAccessState().executeAsOneOrNull() == null) {
+            // Historical imports and prior charges cannot be distinguished; retain the legacy baseline.
+            completionQueries.initializeLegacyFullAccess(Clock.System.now().toDbLong())
+            completionQueries.backfillCompletionReceipts()
+        }
+    }
+
+    private fun readLocalFullAccess(): FullAccessState =
+        workoutQueries.selectFullAccessState().executeAsOne().toFullAccessState()
+
+    private fun persistFullAccess(state: FullAccessState): FullAccessState {
         val now = state.updatedAt ?: Clock.System.now()
         workoutQueries.upsertFullAccessState(
             completed_free_workouts = state.normalizedCompletedFreeWorkouts.toLong(),
@@ -855,12 +1036,32 @@ class SqlFoundationStore(
             last_error = state.lastError,
             updated_at = now.toDbLong()
         )
-        return foundationSuccess(
-            state.copy(
-                completedFreeWorkouts = state.normalizedCompletedFreeWorkouts,
-                updatedAt = now
-            )
+        return state.copy(
+            completedFreeWorkouts = state.normalizedCompletedFreeWorkouts,
+            updatedAt = now
         )
+    }
+
+    private fun <T> localAccountingTransaction(context: CoroutineContext, block: () -> T): T {
+        context.ensureActive()
+        return database.transactionWithResult {
+            context.ensureActive()
+            val result = block()
+            context.ensureActive()
+            result
+        }
+    }
+
+    private suspend fun <T> localAccountingWrite(block: () -> FoundationResult<T>): FoundationResult<T> {
+        val context = currentCoroutineContext()
+        return try {
+            localAccountingTransaction(context, block)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            context.ensureActive()
+            foundationFailure(FoundationError.Persistence(error.message ?: "Local completion accounting failed"))
+        }
     }
 
     override suspend fun replaceRecords(
@@ -1005,33 +1206,38 @@ class SqlFoundationStore(
         }
     }
 
-    private fun Active_workouts.toActiveWorkoutOrNull(): ActiveWorkout? = runCatching {
+    private fun Active_workouts.toActiveWorkoutOrNull(strict: Boolean = false): ActiveWorkout? = mapStoredRow(strict) {
         ActiveWorkout(
             id = FoundationId(id),
             startedAt = started_at.toInstant(),
             routineId = routine_id?.let(::FoundationId),
             routineSnapshotName = routine_snapshot_name,
-            exercises = activeExercisesFor(FoundationId(id)),
+            exercises = activeExercisesFor(FoundationId(id), strict),
             createdAt = created_at.toInstant(),
             updatedAt = updated_at.toInstant(),
             status = WorkoutStatus.valueOf(status)
         )
-    }.getOrNull()
-
-    private fun activeExercisesFor(activeWorkoutId: FoundationId): List<ActiveExercise> {
-        val setsByExercise = setQueries.selectSetsForWorkout(activeWorkoutId.value)
-            .executeAsList()
-            .map { requireNotNull(it.toExerciseSetOrNull()) }
-            .groupBy { it.exerciseInstanceId }
-        return setQueries.selectActiveExercises(activeWorkoutId.value)
-            .executeAsList()
-            .map { row -> requireNotNull(row.toActiveExerciseOrNull(setsByExercise[FoundationId(row.id)].orEmpty())) }
     }
 
-    private fun Active_exercises.toActiveExerciseOrNull(sets: List<ExerciseSet>): ActiveExercise? = runCatching {
+    private fun activeExercisesFor(activeWorkoutId: FoundationId, strict: Boolean = false): List<ActiveExercise> {
+        val setsByExercise = setQueries.selectSetsForWorkout(activeWorkoutId.value)
+            .executeAsList()
+            .map { requireNotNull(it.toExerciseSetOrNull(strict)) }
+            .groupBy { it.exerciseInstanceId }
+        val rows = setQueries.selectActiveExercises(activeWorkoutId.value).executeAsList()
+        if (strict) require(setsByExercise.keys.all { id -> rows.any { it.id == id.value } }) {
+            "Workout $activeWorkoutId contains sets without an exercise"
+        }
+        return rows.map { row ->
+            requireNotNull(row.toActiveExerciseOrNull(setsByExercise[FoundationId(row.id)].orEmpty(), strict))
+        }
+    }
+
+    private fun Active_exercises.toActiveExerciseOrNull(sets: List<ExerciseSet>, strict: Boolean = false): ActiveExercise? = mapStoredRow(strict) {
         val legacyMode = enumValueOrNull<ExerciseLoggingMode>(logging_mode)
+        if (strict) requireNotNull(legacyMode) { "Malformed exercise logging mode $logging_mode" }
         val fallbackConfiguration = legacyMode?.let(LegacyLoggingConfigurations::from)
-        val configuration = requireNotNull(resolveConfiguration(logging_configuration_id, fallbackConfiguration))
+        val configuration = requireNotNull(resolveConfiguration(logging_configuration_id, fallbackConfiguration, strict))
         val projectedMode = legacyMode
             ?: LegacyLoggingConfigurations.modeFor(configuration.id)
             ?: if (is_bodyweight.toBooleanFlag()) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED
@@ -1041,7 +1247,7 @@ class SqlFoundationStore(
             reference = ExerciseReference(
                 exerciseCatalogId = FoundationId(exercise_catalog_id),
                 displayNameSnapshot = display_name_snapshot,
-                isBodyweight = is_bodyweight.toBooleanFlag(),
+                isBodyweight = is_bodyweight.toModelFlag(strict),
                 loggingMode = projectedMode,
                 equipmentSnapshot = equipment_snapshot ?: exerciseQueries.selectExerciseById(exercise_catalog_id).executeAsOneOrNull()?.equipment,
                 resolvedLoggingConfiguration = ResolvedLoggingConfiguration(
@@ -1049,40 +1255,50 @@ class SqlFoundationStore(
                     source = configurationSource(exercise_catalog_id, configuration.id)
                 )
             ),
-            position = OrderedPosition(position.toInt()),
-            groupContext = groupContext(),
+            position = OrderedPosition(position.toModelInt(strict)),
+            groupContext = groupContext(strict),
             sets = sets.sortedBy { it.position.value },
             rest = RestConfiguration(
-                durationSeconds = rest_seconds.toInt(),
-                autoStart = rest_auto_start.toBooleanFlag()
+                durationSeconds = rest_seconds.toModelInt(strict),
+                autoStart = rest_auto_start.toModelFlag(strict)
             )
         )
-    }.getOrNull()
+    }
 
-    private fun Active_exercises.groupContext(): ActiveExerciseGroupContext? {
+    private fun Active_exercises.groupContext(strict: Boolean = false): ActiveExerciseGroupContext? {
+        if (strict) {
+            val fields = listOf(group_id, group_position, group_label, group_rounds)
+            require(fields.all { it == null } || fields.all { it != null }) { "Incomplete circuit metadata for exercise $id" }
+        }
         val id = group_id ?: return null
         val position = group_position ?: return null
         val label = group_label ?: return null
         val rounds = group_rounds ?: return null
         return ActiveExerciseGroupContext(
             groupId = FoundationId(id),
-            groupPosition = OrderedPosition(position.toInt()),
+            groupPosition = OrderedPosition(position.toModelInt(strict)),
             label = label,
-            rounds = rounds.toInt()
+            rounds = rounds.toModelInt(strict)
         )
     }
 
-    private fun Completed_workouts.toCompletedWorkoutOrNull(): CompletedWorkout? = runCatching {
+    private fun Completed_workouts.toCompletedWorkoutOrNull(strict: Boolean = false): CompletedWorkout? = mapStoredRow(strict) {
         val completedId = FoundationId(id)
         val sourceWorkoutId = FoundationId(source_active_workout_id)
         val loggedSetsByExercise = setQueries.selectLoggedSets(source_active_workout_id)
             .executeAsList()
-            .map { requireNotNull(it.toExerciseSetOrNull()) }
+            .map { requireNotNull(it.toExerciseSetOrNull(strict)) }
             .groupBy { it.exerciseInstanceId }
-        val exercises = setQueries.selectActiveExercises(source_active_workout_id)
-            .executeAsList()
+        val exerciseRows = setQueries.selectActiveExercises(source_active_workout_id).executeAsList()
+        if (strict) require(loggedSetsByExercise.keys.all { id -> exerciseRows.any { it.id == id.value } }) {
+            "Completed workout $id contains sets without an exercise"
+        }
+        val exercises = exerciseRows
             .mapNotNull { exercise ->
                 val sets = loggedSetsByExercise[FoundationId(exercise.id)].orEmpty().sortedBy { it.position.value }
+                if (strict) requireNotNull(exercise.toActiveExerciseOrNull(sets, strict = true)) {
+                    "Malformed completed exercise ${exercise.id}"
+                }
                 if (sets.isEmpty()) {
                     null
                 } else {
@@ -1091,13 +1307,13 @@ class SqlFoundationStore(
                         completedWorkoutId = completedId,
                         exerciseCatalogId = FoundationId(exercise.exercise_catalog_id),
                         displayNameSnapshot = exercise.display_name_snapshot,
-                        position = OrderedPosition(exercise.position.toInt()),
+                        position = OrderedPosition(exercise.position.toModelInt(strict)),
                         loggedSets = sets,
                         rest = RestConfiguration(
-                            durationSeconds = exercise.rest_seconds.toInt(),
-                            autoStart = exercise.rest_auto_start.toBooleanFlag()
+                            durationSeconds = exercise.rest_seconds.toModelInt(strict),
+                            autoStart = exercise.rest_auto_start.toModelFlag(strict)
                         ),
-                        groupContext = exercise.groupContext()
+                        groupContext = exercise.groupContext(strict)
                     )
                 }
             }
@@ -1111,21 +1327,21 @@ class SqlFoundationStore(
             exercises = exercises,
             createdAt = created_at.toInstant()
         )
-    }.getOrNull()
+    }
 
-    private fun Exercise_sets.toExerciseSetOrNull(): ExerciseSet? = runCatching {
+    private fun Exercise_sets.toExerciseSetOrNull(strict: Boolean = false): ExerciseSet? = mapStoredRow(strict) {
         val kind = enumValueOrNull<SetKind>(set_kind) ?: return null
         val configuration = resolveConfiguration(
             capture_configuration_id,
-            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null)
+            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null), strict
         ) ?: return null
         ExerciseSet(
             id = FoundationId(id),
             exerciseInstanceId = FoundationId(exercise_instance_id),
-            position = OrderedPosition(position.toInt()),
+            position = OrderedPosition(position.toModelInt(strict)),
             setKind = kind,
             weight = weight_kg?.let(::WeightKg),
-            reps = reps?.toInt(),
+            reps = reps?.toModelInt(strict),
             durationMs = duration_ms,
             loggedAt = logged_at?.toInstant(),
             createdAt = created_at.toInstant(),
@@ -1133,23 +1349,23 @@ class SqlFoundationStore(
             editedAt = edited_at?.toInstant(),
             captureConfigurationId = configuration.id,
             distanceMeters = distance_m,
-            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome)
+            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome, strict)
         )
-    }.getOrNull()
+    }
 
-    private fun SelectLoggedSets.toExerciseSetOrNull(): ExerciseSet? = runCatching {
+    private fun SelectLoggedSets.toExerciseSetOrNull(strict: Boolean = false): ExerciseSet? = mapStoredRow(strict) {
         val kind = enumValueOrNull<SetKind>(set_kind) ?: return null
         val configuration = resolveConfiguration(
             capture_configuration_id,
-            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null)
+            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null), strict
         ) ?: return null
         ExerciseSet(
             id = FoundationId(id),
             exerciseInstanceId = FoundationId(exercise_instance_id),
-            position = OrderedPosition(position.toInt()),
+            position = OrderedPosition(position.toModelInt(strict)),
             setKind = kind,
             weight = weight_kg?.let(::WeightKg),
-            reps = reps?.toInt(),
+            reps = reps?.toModelInt(strict),
             durationMs = duration_ms,
             loggedAt = logged_at.toInstant(),
             createdAt = created_at.toInstant(),
@@ -1157,9 +1373,9 @@ class SqlFoundationStore(
             editedAt = edited_at?.toInstant(),
             captureConfigurationId = configuration.id,
             distanceMeters = distance_m,
-            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome)
+            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome, strict)
         )
-    }.getOrNull()
+    }
 
     private fun Active_session_state.toActiveSessionState(): ActiveSessionState =
         ActiveSessionState(
@@ -1180,57 +1396,61 @@ class SqlFoundationStore(
             updatedAt = updated_at.toInstant()
         )
 
-    private fun Active_set_drafts.toPersistedSetDraftOrNull(): PersistedSetDraft? = runCatching {
+    private fun Active_set_drafts.toPersistedSetDraftOrNull(strict: Boolean = false): PersistedSetDraft? = mapStoredRow(strict) {
         val kind = enumValueOrNull<SetKind>(set_kind) ?: return null
         val configuration = resolveConfiguration(
             logging_configuration_id,
-            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null)
+            LegacyLoggingConfigurations.from(kind, hasLegacyLoad = kind == SetKind.BODYWEIGHT && weight_kg != null), strict
         ) ?: return null
         PersistedSetDraft(
             draftId = FoundationId(draft_id),
             activeWorkoutId = FoundationId(active_workout_id),
             exerciseInstanceId = FoundationId(exercise_instance_id),
-            position = OrderedPosition(position.toInt()),
+            position = OrderedPosition(position.toModelInt(strict)),
             setKind = kind,
-            reps = reps?.toInt(),
+            reps = reps?.toModelInt(strict),
             weight = weight_kg?.let(::WeightKg),
             durationMs = duration_ms,
             timerStartedAt = timer_started_at?.toInstant(),
             updatedAt = updated_at.toInstant(),
             captureConfigurationId = configuration.id,
             distanceMeters = distance_m,
-            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome)
+            observedEffort = persistedEffort(rpe_tenths, rir, failure_outcome, strict)
         )
-    }.getOrNull()
+    }
 
-    private fun Routines.toReusableRoutineOrNull(): ReusableRoutine? = runCatching {
+    private fun Routines.toReusableRoutineOrNull(strict: Boolean = false): ReusableRoutine? = mapStoredRow(strict) {
         val routineId = FoundationId(id)
         ReusableRoutine(
             id = routineId,
             name = name,
             exercises = routineQueries.selectRoutineExercises(id).executeAsList()
-                .map { requireNotNull(it.toRoutineExerciseOrNull()) },
+                .map { requireNotNull(it.toRoutineExerciseOrNull(strict)) },
             createdAt = created_at.toInstant(),
             updatedAt = updated_at.toInstant(),
             sourceCompletedWorkoutId = source_completed_workout_id?.let(::FoundationId),
             archivedAt = archived_at?.toInstant()
         )
-    }.getOrNull()
+    }
 
-    private fun Routine_exercises.toRoutineExerciseOrNull(): RoutineExercise? = runCatching {
+    private fun Routine_exercises.toRoutineExerciseOrNull(strict: Boolean = false): RoutineExercise? = mapStoredRow(strict) {
+        if (strict) {
+            val fields = listOf(group_id, group_position, group_rounds)
+            require(fields.all { it == null } || fields.all { it != null }) { "Incomplete routine circuit metadata for exercise $id" }
+        }
         val templateRows = routineQueries.selectRoutineSetTemplates(id).executeAsList()
         val plannedSets = templateRows
-            .map { requireNotNull(it.toRoutineSetTemplateOrNull()) }
+            .map { requireNotNull(it.toRoutineSetTemplateOrNull(strict)) }
         val fallbackConfiguration = plannedSets.firstOrNull()?.let { first ->
             LegacyLoggingConfigurations.from(
                 first.setKind,
                 hasLegacyLoad = first.setKind == SetKind.BODYWEIGHT && plannedSets.any { it.targetWeight != null }
             )
         } ?: LegacyLoggingConfigurations.weighted
-        val configuration = requireNotNull(resolveConfiguration(logging_configuration_id, fallbackConfiguration))
+        val configuration = requireNotNull(resolveConfiguration(logging_configuration_id, fallbackConfiguration, strict))
         templateRows.forEach { template ->
             template.logging_configuration_id?.let { persistedId ->
-                val templateConfiguration = requireNotNull(resolveConfiguration(persistedId, null))
+                val templateConfiguration = requireNotNull(resolveConfiguration(persistedId, null, strict))
                 require(templateConfiguration.id == configuration.id) {
                     "Routine template configuration must match its exercise snapshot"
                 }
@@ -1241,41 +1461,42 @@ class SqlFoundationStore(
             routineId = FoundationId(routine_id),
             exerciseCatalogId = FoundationId(exercise_catalog_id),
             displayNameSnapshot = display_name_snapshot,
-            position = OrderedPosition(position.toInt()),
+            position = OrderedPosition(position.toModelInt(strict)),
             groupId = group_id?.let(::FoundationId),
-            groupPosition = group_position?.let { OrderedPosition(it.toInt()) },
-            groupRounds = group_rounds?.toInt(),
+            groupPosition = group_position?.let { OrderedPosition(it.toModelInt(strict)) },
+            groupRounds = group_rounds?.toModelInt(strict),
             plannedSets = plannedSets,
             rest = RestConfiguration(
-                durationSeconds = rest_seconds.toInt(),
-                autoStart = rest_auto_start.toBooleanFlag()
+                durationSeconds = rest_seconds.toModelInt(strict),
+                autoStart = rest_auto_start.toModelFlag(strict)
             ),
             resolvedLoggingConfiguration = ResolvedLoggingConfiguration(
                 configuration = configuration,
                 source = configurationSource(exercise_catalog_id, configuration.id)
             )
         )
-    }.getOrNull()
+    }
 
-    private fun Routine_set_templates.toRoutineSetTemplateOrNull(): RoutineSetTemplate? = runCatching {
+    private fun Routine_set_templates.toRoutineSetTemplateOrNull(strict: Boolean = false): RoutineSetTemplate? = mapStoredRow(strict) {
         RoutineSetTemplate(
             id = FoundationId(id),
             routineExerciseId = FoundationId(routine_exercise_id),
-            position = OrderedPosition(position.toInt()),
+            position = OrderedPosition(position.toModelInt(strict)),
             targetWeight = target_weight_kg?.let(::WeightKg),
-            targetReps = target_reps?.toInt(),
+            targetReps = target_reps?.toModelInt(strict),
             targetDurationMs = target_duration_ms,
             setKind = requireNotNull(enumValueOrNull<SetKind>(set_kind)),
             targetDistanceMeters = target_distance_m,
-            effortTarget = persistedEffortTarget(target_effort_kind, target_rpe_tenths, target_rir)
+            effortTarget = persistedEffortTarget(target_effort_kind, target_rpe_tenths, target_rir, strict)
         )
-    }.getOrNull()
+    }
 
-    private fun Exercise_catalog.toExerciseCatalogItemOrNull(): ExerciseCatalogItem? = runCatching {
+    private fun Exercise_catalog.toExerciseCatalogItemOrNull(strict: Boolean = false): ExerciseCatalogItem? = mapStoredRow(strict) {
         val storedMode = enumValueOrNull<ExerciseLoggingMode>(logging_mode)
+        if (strict) requireNotNull(storedMode) { "Malformed catalog logging mode $logging_mode" }
         val configuration = requireNotNull(resolveConfiguration(
             default_logging_configuration_id,
-            storedMode?.let(LegacyLoggingConfigurations::from)
+            storedMode?.let(LegacyLoggingConfigurations::from), strict
         ))
         val origin = definition_origin?.let {
             requireNotNull(ExerciseDefinitionOrigin.fromWireCode(it))
@@ -1290,11 +1511,11 @@ class SqlFoundationStore(
             exerciseType = exercise_type,
             experienceLevel = experience_level,
             bodyRegion = body_region,
-            isBodyweight = is_bodyweight.toBooleanFlag(),
+            isBodyweight = is_bodyweight.toModelFlag(strict),
             loggingMode = storedMode
                 ?: LegacyLoggingConfigurations.modeFor(configuration.id)
                 ?: if (is_bodyweight.toBooleanFlag()) ExerciseLoggingMode.BODYWEIGHT else ExerciseLoggingMode.WEIGHTED,
-            isUserCreated = is_user_created.toBooleanFlag(),
+            isUserCreated = is_user_created.toModelFlag(strict),
             createdAt = created_at.toInstant(),
             updatedAt = updated_at.toInstant(),
             archivedAt = archived_at?.toInstant(),
@@ -1310,15 +1531,16 @@ class SqlFoundationStore(
             },
             defaultLoggingConfiguration = configuration
         )
-    }.getOrNull()
+    }
 
-    private fun Personal_records.toPersonalRecord(): PersonalRecord {
+    private fun Personal_records.toPersonalRecord(strict: Boolean = false): PersonalRecord {
+        if (strict) require(value_.isFinite()) { "Malformed personal record value $id" }
         val legacyKind = PersonalRecordKind.valueOf(record_kind)
         return PersonalRecord(
             id = FoundationId(id),
             exerciseCatalogId = FoundationId(exercise_catalog_id),
             recordKind = legacyKind,
-            reps = reps?.toInt(),
+            reps = reps?.toModelInt(strict),
             weight = weight_kg?.let(::WeightKg),
             value = value_,
             sourceWorkoutId = FoundationId(source_workout_id),
@@ -1326,11 +1548,12 @@ class SqlFoundationStore(
             achievedAt = achieved_at.toInstant(),
             createdAt = created_at.toInstant(),
             metricCode = validatedProgressMetricCode(requireNotNull(metric_code), legacyKind.name),
-            derivationVersion = requireNotNull(derivation_version).toInt()
+            derivationVersion = requireNotNull(derivation_version).toModelInt(strict)
         )
     }
 
-    private fun Progress_points.toProgressPoint(): ProgressPoint {
+    private fun Progress_points.toProgressPoint(strict: Boolean = false): ProgressPoint {
+        if (strict) require(value_.isFinite()) { "Malformed progress value $id" }
         val legacyMetric = ProgressMetric.valueOf(metric)
         return ProgressPoint(
             id = FoundationId(id),
@@ -1340,10 +1563,10 @@ class SqlFoundationStore(
             metric = legacyMetric,
             value = value_,
             weight = weight_kg?.let(::WeightKg),
-            reps = reps?.toInt(),
+            reps = reps?.toModelInt(strict),
             recordedAt = recorded_at.toInstant(),
             metricCode = validatedProgressMetricCode(requireNotNull(metric_code), legacyMetric.name),
-            derivationVersion = requireNotNull(derivation_version).toInt()
+            derivationVersion = requireNotNull(derivation_version).toModelInt(strict)
         )
     }
 
@@ -1462,14 +1685,15 @@ class SqlFoundationStore(
 
     private fun resolveConfiguration(
         persistedId: String?,
-        legacyFallback: LoggingConfiguration?
+        legacyFallback: LoggingConfiguration?,
+        strict: Boolean = false
     ): LoggingConfiguration? =
         if (persistedId == null) {
             legacyFallback
         } else {
             loggingConfigurationQueries.selectLoggingConfiguration(persistedId)
                 .executeAsOneOrNull()
-                ?.toLoggingConfigurationOrNull()
+                ?.toLoggingConfigurationOrNull(strict)
         }
 
     private fun configurationSource(
@@ -1491,12 +1715,13 @@ class SqlFoundationStore(
     private fun persistedEffort(
         rpeTenths: Long?,
         rir: Long?,
-        failureOutcome: String?
+        failureOutcome: String?,
+        strict: Boolean = false
     ): Effort? {
         if (rpeTenths == null && rir == null && failureOutcome == null) return null
         return Effort(
-            rpeTenths = rpeTenths?.toInt(),
-            rir = rir?.toInt(),
+            rpeTenths = rpeTenths?.toModelInt(strict),
+            rir = rir?.toModelInt(strict),
             failureOutcome = failureOutcome?.let {
                 requireNotNull(FailureOutcome.fromWireCode(it)) { "Unknown failure outcome: $it" }
             }
@@ -1506,15 +1731,16 @@ class SqlFoundationStore(
     private fun persistedEffortTarget(
         kindCode: String?,
         rpeTenths: Long?,
-        rir: Long?
+        rir: Long?,
+        strict: Boolean = false
     ): EffortTarget? {
         if (kindCode == null) {
             require(rpeTenths == null && rir == null) { "Effort target values require a target kind" }
             return null
         }
         return when (requireNotNull(EffortTargetKind.fromWireCode(kindCode))) {
-            EffortTargetKind.RPE -> EffortTarget.Rpe(requireNotNull(rpeTenths).toInt())
-            EffortTargetKind.RIR -> EffortTarget.Rir(requireNotNull(rir).toInt())
+            EffortTargetKind.RPE -> EffortTarget.Rpe(requireNotNull(rpeTenths).toModelInt(strict))
+            EffortTargetKind.RIR -> EffortTarget.Rir(requireNotNull(rir).toModelInt(strict))
             EffortTargetKind.TO_FAILURE -> {
                 require(rpeTenths == null && rir == null)
                 EffortTarget.ToFailure
@@ -1522,7 +1748,7 @@ class SqlFoundationStore(
         }
     }
 
-    private fun Logging_configurations.toLoggingConfigurationOrNull(): LoggingConfiguration? = runCatching {
+    private fun Logging_configurations.toLoggingConfigurationOrNull(strict: Boolean = false): LoggingConfiguration? = mapStoredRow(strict) {
         val measures = loggingConfigurationQueries.selectLoggingConfigurationMeasures(id)
             .executeAsList()
             .map { row ->
@@ -1541,7 +1767,7 @@ class SqlFoundationStore(
             .map { row -> requireNotNull(EffortKind.fromWireCode(row.effort_kind_code)) }
         val configuration = LoggingConfiguration(
             id = LoggingConfigurationId(id),
-            schemaVersion = LoggingSchemaVersion(schema_version.toInt()),
+            schemaVersion = LoggingSchemaVersion(schema_version.toModelInt(strict)),
             measures = measures,
             observedEffort = effortKinds.takeIf(List<EffortKind>::isNotEmpty)?.let(::ObservedEffortSpec)
         )
@@ -1549,7 +1775,7 @@ class SqlFoundationStore(
             "Logging configuration $id content hash does not match its semantic content"
         }
         configuration
-    }.getOrNull()
+    }
 
     private fun insertLoggingConfiguration(
         configuration: LoggingConfiguration,
@@ -1608,6 +1834,21 @@ private typealias ExerciseQueriesAccessor = com.jjswigut.oopsallprs.db.ExerciseQ
 private typealias ProgressQueriesAccessor = com.jjswigut.oopsallprs.db.ProgressQueriesQueries
 
 private fun Instant.toDbLong(): Long = toEpochMilliseconds()
+
+private inline fun <T> mapStoredRow(strict: Boolean, block: () -> T): T? =
+    if (strict) block() else runCatching(block).getOrNull()
+
+private fun Long.toModelInt(strict: Boolean): Int {
+    if (strict) require(this in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) { "Stored integer is out of range" }
+    return toInt()
+}
+
+private fun Long.toBackupFlag(): Boolean {
+    require(this == 0L || this == 1L) { "Stored boolean is not 0 or 1" }
+    return this == 1L
+}
+
+private fun Long.toModelFlag(strict: Boolean): Boolean = if (strict) toBackupFlag() else toBooleanFlag()
 
 private fun Long.toInstant(): Instant = Instant.fromEpochMilliseconds(this)
 

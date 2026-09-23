@@ -54,7 +54,8 @@ enum class ProgressEvidenceMetric(
 object ProgressDerivationVersions {
     const val LEGACY_SET_KIND: Int = 1
     const val CONFIGURATION_CAPTURE: Int = 2
-    const val CURRENT: Int = CONFIGURATION_CAPTURE
+    const val EVIDENCE_LADDER: Int = 3
+    const val CURRENT: Int = EVIDENCE_LADDER
 }
 
 enum class ExportType {

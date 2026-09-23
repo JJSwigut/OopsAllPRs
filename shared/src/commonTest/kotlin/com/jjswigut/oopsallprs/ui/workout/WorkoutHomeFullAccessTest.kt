@@ -1,6 +1,7 @@
 package com.jjswigut.oopsallprs.ui.workout
 
 import com.jjswigut.oopsallprs.data.repository.InMemoryFoundationStore
+import com.jjswigut.oopsallprs.testing.setFullAccessForTest
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.usecase.FullAccessUseCases
@@ -17,7 +18,7 @@ class WorkoutHomeFullAccessTest {
     @Test
     fun workoutStartIsAllowedBeforeDefaultFreeLimit() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(
+        store.setFullAccessForTest(
             FullAccessState(completedFreeWorkouts = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT - 1)
         ).successValue()
         val fullAccess = FullAccessUseCases(store)
@@ -33,7 +34,7 @@ class WorkoutHomeFullAccessTest {
     @Test
     fun workoutStartIsBlockedAtDefaultFreeLimit() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(
+        store.setFullAccessForTest(
             FullAccessState(completedFreeWorkouts = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT)
         ).successValue()
         val fullAccess = FullAccessUseCases(store)
@@ -49,27 +50,25 @@ class WorkoutHomeFullAccessTest {
     }
 
     @Test
-    fun workoutStartCanUseCustomFreeLimit() = runTest {
+    fun workoutStartUsesTheSharedFreeLimitInsteadOfAUiOverride() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(FullAccessState(completedFreeWorkouts = 2)).successValue()
+        store.setFullAccessForTest(
+            FullAccessState(completedFreeWorkouts = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT - 1)
+        ).successValue()
         val fullAccess = FullAccessUseCases(store)
         val lifecycle = WorkoutLifecycleUseCases(store, store, store)
-        val holder = WorkoutHomeStateHolder(
-            lifecycle = lifecycle,
-            fullAccess = fullAccess,
-            freeCompletedWorkoutLimit = 2
-        )
+        val holder = WorkoutHomeStateHolder(lifecycle = lifecycle, fullAccess = fullAccess)
 
         val result = holder.startEmpty()
 
-        assertTrue(result is FoundationResult.Failure)
-        assertTrue(holder.state.value.isFullAccessPaywallVisible)
+        assertTrue(result is FoundationResult.Success)
+        assertFalse(holder.state.value.isFullAccessPaywallVisible)
     }
 
     @Test
     fun paidUserCanStartAfterTrialLimit() = runTest {
         val store = InMemoryFoundationStore()
-        store.saveFullAccess(
+        store.setFullAccessForTest(
             FullAccessState(
                 completedFreeWorkouts = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT,
                 lifetimeUnlocked = true

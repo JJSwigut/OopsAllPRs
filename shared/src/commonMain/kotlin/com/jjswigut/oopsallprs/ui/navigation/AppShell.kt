@@ -55,6 +55,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AppShell(
     appState: AppState,
+    activeWorkoutOpenRequest: ActiveWorkoutOpenRequest? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -68,6 +69,10 @@ fun AppShell(
     val routineState by appState.routines.state.collectAsState()
     val profileState by appState.profile.state.collectAsState()
     val developerSeedState = appState.developerSeeds?.state?.collectAsState()?.value
+    val activeWorkoutRequestGeneration by activeWorkoutOpenRequest
+        ?.generation
+        ?.collectAsState()
+        ?: remember { mutableStateOf(0L) }
     var isDiscardDialogVisible by remember { mutableStateOf(false) }
     val confirmDiscardActiveWorkout: () -> Unit = {
         scope.launch {
@@ -82,12 +87,17 @@ fun AppShell(
         }
     }
 
+    val destinationBackAction = resolveDestinationBackAction(
+        shellState.selectedDestination,
+        progressState,
+        historyState
+    )
     PlatformBackHandler(
         enabled = exerciseManagementState.isOpen ||
             routineState.editorDraft != null ||
             exercisePickerState.isOpen ||
             shellState.isActiveWorkoutPresented ||
-            historyState.selectedSummary != null
+            destinationBackAction != null
     ) {
         when {
             exerciseManagementState.isOpen -> appState.exerciseManagement.close()
@@ -96,24 +106,45 @@ fun AppShell(
             shellState.isActiveWorkoutPresented -> {
                 scope.launch { appState.navigation.dismissActiveWorkout() }
             }
-            historyState.selectedSummary != null -> appState.history.clearSelection()
+            else -> when (destinationBackAction) {
+                DestinationBackAction.CLOSE_PROGRESS_EVIDENCE -> appState.progress.clearEvidence()
+                DestinationBackAction.CLOSE_PROGRESS_READING -> appState.progress.clearReading()
+                DestinationBackAction.CLOSE_PROGRESS_EXERCISE -> appState.progress.clearExerciseSelection()
+                DestinationBackAction.CLOSE_PROGRESS_RECENT_TRAINING_RECORDS -> appState.progress.clearRecentTrainingRecords()
+                DestinationBackAction.CLOSE_HISTORY_DETAIL -> {
+                    appState.routines.cancelTemplateSave()
+                    appState.history.clearSelection()
+                }
+                null -> Unit
+            }
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(activeWorkoutRequestGeneration) {
         appState.hydrate()
-        scope.launch { appState.refreshFullAccessEntitlements() }
+        if (activeWorkoutRequestGeneration > 0) {
+            appState.navigation.presentActiveWorkout()
+        }
+    }
+
+    LaunchedEffect(appState) {
+        appState.observeFullAccessEntitlements()
+    }
+
+    LaunchedEffect(appState) {
+        scope.launch { appState.profile.refreshStoreOffer() }
         scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
     }
 
     LaunchedEffect(shellState.selectedDestination) {
         when (shellState.selectedDestination) {
-            TopLevelDestination.HISTORY -> appState.history.refresh()
+            TopLevelDestination.HISTORY -> appState.history.refreshForDisplay()
             TopLevelDestination.PROGRESS -> appState.progress.refresh()
             TopLevelDestination.TRAIN -> appState.workoutHome.hydrate()
             TopLevelDestination.PROFILE -> {
                 appState.profile.hydrate()
                 scope.launch { appState.refreshFullAccessEntitlements() }
+                scope.launch { appState.profile.refreshStoreOffer() }
                 scope.launch { appState.checkBackupSyncOnLaunchOrResume() }
             }
         }
@@ -297,12 +328,9 @@ fun AppShell(
                     onConfirmFinish = { workoutId ->
                         scope.launch {
                             when (val result = appState.routines.finishWorkout(workoutId)) {
-                                is FoundationResult.Failure -> Unit
+                                is FoundationResult.Failure -> appState.activeWorkout.reportFinishFailure()
                                 is FoundationResult.Success -> {
-                                    appState.hydrate()
-                                    appState.history.presentCompletedWorkout(result.value.id)
-                                    appState.progress.refresh()
-                                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
+                                    appState.presentCompletedWorkout(result.value)
                                 }
                             }
                         }
@@ -553,6 +581,8 @@ private fun DestinationContent(
                     appState.workoutHome.refreshFullAccess()
                 }
             },
+            onRetryStoreOffer = { scope.launch { appState.profile.refreshStoreOffer() } },
+            onDismissFullAccessPaywall = { appState.workoutHome.dismissFullAccessPaywall() },
             onCreateRoutine = {
                 appState.routines.beginCreateRoutine()
             },
@@ -578,19 +608,34 @@ private fun DestinationContent(
             state = historyState,
             weightUnit = profileState.weightUnit,
             templateSaveDraft = routineState.saveDraft,
+            templateSavedName = historyState.selectedSummary?.workoutId?.let { workoutId ->
+                routineState.routines.firstOrNull {
+                    it.id == routineState.lastSavedTemplateId && it.sourceCompletedWorkoutId == workoutId
+                }?.name
+            },
             onSelectWorkout = { workoutId ->
                 scope.launch { appState.history.selectWorkout(workoutId) }
             },
-            onBack = { appState.history.clearSelection() },
+            onBack = {
+                appState.routines.cancelTemplateSave()
+                appState.history.clearSelection()
+            },
             onStartSaveTemplate = { completedWorkoutId ->
                 appState.routines.beginTemplateSave(completedWorkoutId)
             },
             onTemplateNameChange = { appState.routines.updateTemplateName(it) },
+            onCancelTemplateSave = { appState.routines.cancelTemplateSave() },
             onSaveTemplate = {
                 scope.launch {
                     appState.routines.saveTemplate()
-                    appState.workoutHome.hydrate()
                 }
+            },
+            onOpenTrain = {
+                appState.history.clearSelection()
+                scope.launch { appState.navigation.selectDestination(TopLevelDestination.TRAIN) }
+            },
+            onViewProgress = {
+                scope.launch { appState.navigation.selectDestination(TopLevelDestination.PROGRESS) }
             },
             onRequestDeleteWorkout = { appState.history.requestDeleteSelectedWorkout() },
             onCancelDeleteWorkout = { appState.history.cancelDeleteWorkout() },
@@ -638,7 +683,20 @@ private fun DestinationContent(
             onOpenEvidence = { recordId ->
                 scope.launch { appState.progress.openEvidence(recordId) }
             },
-            onCloseEvidence = { appState.progress.clearEvidence() }
+            onCloseEvidence = { appState.progress.clearEvidence() },
+            onSelectReading = { reading -> appState.progress.selectReading(reading) },
+            onCloseReading = { appState.progress.clearReading() },
+            onOpenWorkout = { workoutId ->
+                scope.launch {
+                    appState.history.presentCompletedWorkout(workoutId)
+                    appState.navigation.selectDestination(TopLevelDestination.HISTORY)
+                }
+            },
+            onOpenTrain = {
+                scope.launch { appState.navigation.selectDestination(TopLevelDestination.TRAIN) }
+            },
+            onOpenRecentTrainingRecords = { appState.progress.openRecentTrainingRecords() },
+            onCloseRecentTrainingRecords = { appState.progress.clearRecentTrainingRecords() }
         )
         TopLevelDestination.PROFILE -> ProfileFlow(
             state = profileState,
@@ -709,6 +767,8 @@ private fun DestinationContent(
                     appState.workoutHome.refreshFullAccess()
                 }
             },
+            onRetryStoreOffer = { scope.launch { appState.profile.refreshStoreOffer() } },
+            onDismissUnlock = { appState.profile.dismissUnlockDialog() },
             onStartBackupSetup = { appState.profile.startBackupSetup() },
             onBackupSetupNext = { appState.profile.advanceBackupSetup() },
             onBackupSetupBack = { appState.profile.backUpBackupSetup() },
