@@ -21,12 +21,12 @@ val releaseSigningConfigured = listOf(
 
 android {
     namespace = "com.jjswigut.oopsallprs.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.jjswigut.oopsallprs.android"
         minSdk = 31
-        targetSdk = 35
+        targetSdk = 36
         versionCode = ciVersionCode
         versionName = ciVersionName
         manifestPlaceholders["appLabel"] = "Oops All PRs"
