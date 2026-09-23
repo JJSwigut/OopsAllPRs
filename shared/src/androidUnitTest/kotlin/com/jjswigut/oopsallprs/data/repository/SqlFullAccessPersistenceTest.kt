@@ -14,13 +14,13 @@ class SqlFullAccessPersistenceTest {
     fun completedFreeWorkoutCountPersistsInSqlStore() = runTest {
         val harness = SqlFoundationStoreTestHarness()
         val bundle = harness.repositories()
-        bundle.store.saveFullAccess(
+        bundle.store.updateFullAccess {
             FullAccessState(
                 completedFreeWorkouts = FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT,
                 storeStatus = FullAccessStoreStatus.AVAILABLE,
                 lastError = null
             )
-        ).successValue()
+        }.successValue()
 
         val loaded = SqlFoundationStore(harness.database).loadFullAccess()
 
@@ -33,13 +33,13 @@ class SqlFullAccessPersistenceTest {
     fun lifetimeEntitlementPersistsInSqlStore() = runTest {
         val harness = SqlFoundationStoreTestHarness()
         val bundle = harness.repositories()
-        bundle.store.saveFullAccess(
+        bundle.store.updateFullAccess {
             FullAccessState(
                 completedFreeWorkouts = FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT,
                 lifetimeUnlocked = true,
                 storeStatus = FullAccessStoreStatus.AVAILABLE
             )
-        ).successValue()
+        }.successValue()
 
         val loaded = SqlFoundationStore(harness.database).loadFullAccess()
 
@@ -52,12 +52,12 @@ class SqlFullAccessPersistenceTest {
     fun unpaidStateDoesNotGrantAccess() = runTest {
         val harness = SqlFoundationStoreTestHarness()
         val bundle = harness.repositories()
-        bundle.store.saveFullAccess(
+        bundle.store.updateFullAccess {
             FullAccessState(
                 completedFreeWorkouts = 1,
-                                storeStatus = FullAccessStoreStatus.AVAILABLE
+                storeStatus = FullAccessStoreStatus.AVAILABLE
             )
-        ).successValue()
+        }.successValue()
 
         val loaded = SqlFoundationStore(harness.database).loadFullAccess()
 

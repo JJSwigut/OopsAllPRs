@@ -33,6 +33,7 @@ import platform.Foundation.writeToURL
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UIKit.UIDocumentPickerMode
 import platform.UIKit.UIDocumentPickerViewController
+import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIViewController
 import platform.darwin.NSObject
 import kotlin.coroutines.resume
@@ -59,8 +60,34 @@ actual class RestNotificationScheduler actual constructor(context: Any?) : RestA
     actual override fun cancel() = Unit
 }
 
+@OptIn(ExperimentalForeignApi::class)
 actual class FileExportHandoff actual constructor(context: Any?) {
-    actual fun share(fileName: String, content: String) = Unit
+    private val presenter: UIViewController? = context as? UIViewController
+
+    actual fun share(fileName: String, content: String) {
+        val presenter = requireNotNull(presenter) {
+            "iOS export handoff requires a UIViewController presenter"
+        }
+        val fileUrl = temporaryUrl(fileName)
+        val written = NSString.create(string = content).writeToURL(
+            url = fileUrl,
+            atomically = true,
+            encoding = NSUTF8StringEncoding,
+            error = null
+        )
+        check(written) { "Unable to prepare export file for iOS sharing" }
+        presenter.presentViewController(
+            UIActivityViewController(
+                activityItems = listOf(fileUrl),
+                applicationActivities = null
+            ),
+            animated = true,
+            completion = null
+        )
+    }
+
+    private fun temporaryUrl(fileName: String): NSURL =
+        NSURL.fileURLWithPath(NSTemporaryDirectory() + fileName)
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -236,6 +263,8 @@ actual class BackupDocumentHandoff actual constructor(context: Any?) : BackupDoc
 }
 
 actual class FullAccessBillingHandoff actual constructor(private val context: Any?) : FullAccessBillingAdapter {
+    actual override fun setEntitlementObserver(observer: FullAccessBillingObserver?) = Unit
+
     actual override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>> =
         unavailable()
 

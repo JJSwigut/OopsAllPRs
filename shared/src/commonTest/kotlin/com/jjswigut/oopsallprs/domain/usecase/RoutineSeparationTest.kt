@@ -15,7 +15,7 @@ class RoutineSeparationTest {
     fun completedWorkoutCanBecomeRoutineWithoutLoggedTimestamps() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
         assertEquals(completed.id, routine.sourceCompletedWorkoutId)
         assertTrue(routine.exercises.single().plannedSets.all { it.targetReps != null })
@@ -25,7 +25,7 @@ class RoutineSeparationTest {
     fun ungroupedRoutinesRemainLaunchableAfterGroupMetadataExists() = runTest {
         val harness = FoundationHarness()
         val workoutId = harness.workoutWithLoggedWeightedSet()
-        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workoutId, instant(2_000)).successValue().workout
         val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
 
         val active = harness.lifecycle.startFromRoutine(routine.id, instant(4_000)).successValue()

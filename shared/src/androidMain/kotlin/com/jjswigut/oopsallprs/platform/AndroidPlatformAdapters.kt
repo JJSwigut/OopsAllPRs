@@ -15,6 +15,7 @@ import android.net.Uri
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,7 +29,6 @@ import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
-import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import com.android.billingclient.api.UnfetchedProduct
@@ -44,14 +44,18 @@ import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
-import kotlin.coroutines.resume
+
+const val ACTION_OPEN_ACTIVE_WORKOUT = "com.jjswigut.oopsallprs.OPEN_ACTIVE_WORKOUT"
 
 actual class PlatformDatabaseDriverFactory actual constructor(private val context: Any?) {
     actual fun createDriver(): SqlDriver {
@@ -224,7 +228,11 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, restEndsAt.toEpochMilliseconds(), pendingIntent)
 
         val activeRest = ActiveRestNotification(restEndsAt)
-        pendingActiveRest = activeRest.takeIf { persistentSurfaceEnabled }
+        if (!persistentSurfaceEnabled) {
+            pendingActiveRest = null
+            return RestAlertScheduleResult.SCHEDULED
+        }
+        pendingActiveRest = activeRest
         if (!canPostNotifications(androidContext)) {
             requestNotificationPermission()
             return RestAlertScheduleResult.PERMISSION_DENIED
@@ -260,6 +268,7 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         val manager = notificationManager(androidContext)
         manager.ensureActiveRestChannel()
         val openApp = androidContext.packageManager.getLaunchIntentForPackage(androidContext.packageName)
+            ?.setAction(ACTION_OPEN_ACTIVE_WORKOUT)
             ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val contentIntent = openApp?.let { intent ->
             PendingIntent.getActivity(
@@ -270,9 +279,9 @@ actual class RestNotificationScheduler actual constructor(private val context: A
             )
         }
         val notification = android.app.Notification.Builder(androidContext, CHANNEL_ACTIVE)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Rest timer")
-            .setContentText("Rest in progress")
+            .setSmallIcon(com.jjswigut.oopsallprs.R.drawable.ic_rest_timer)
+            .setContentTitle("Rest")
+            .setContentText("Next set")
             .setCategory(android.app.Notification.CATEGORY_STOPWATCH)
             .setWhen(activeRest.restEndsAt.toEpochMilliseconds())
             .setUsesChronometer(true)
@@ -281,6 +290,10 @@ actual class RestNotificationScheduler actual constructor(private val context: A
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
+            .addExtras(Bundle().apply {
+                // Official public API 36.1 extra; older releases safely ignore the request.
+                putBoolean(REQUEST_PROMOTED_ONGOING_EXTRA, true)
+            })
             .build()
         return try {
             manager.notify(ACTIVE_REST_NOTIFICATION_ID, notification)
@@ -314,7 +327,7 @@ class RestTimerReceiver : BroadcastReceiver() {
         val channelId = if (soundEnabled) CHANNEL_SOUND else CHANNEL_SILENT
         notificationManager.ensureRestChannel(channelId, soundEnabled)
         val notification = android.app.Notification.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.jjswigut.oopsallprs.R.drawable.ic_rest_timer)
             .setContentTitle("Rest complete")
             .setContentText("Time for the next set.")
             .setAutoCancel(true)
@@ -508,17 +521,22 @@ actual class BackupDocumentHandoff actual constructor(private val context: Any?)
 }
 
 actual class FullAccessBillingHandoff actual constructor(private val context: Any?) :
-    FullAccessBillingAdapter,
-    PurchasesUpdatedListener {
+    FullAccessBillingAdapter {
 
     private val androidContext = context as? Context
     private val activity = context as? Activity
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var pendingPurchase: CompletableDeferred<FoundationResult<FullAccessEntitlementSnapshot>>? = null
-    private var pendingConnection: CompletableDeferred<FoundationResult<BillingClient>>? = null
+    private val invalidation = AndroidBillingInvalidation()
+    private var disposed = false
+    private var purchaseInProgress = false
+    private val purchaseRequests = AndroidBillingRequestSlot<FoundationResult<FullAccessEntitlementSnapshot>>()
+    private val connectionRequests = AndroidBillingRequestSlot<FoundationResult<BillingClient>>()
+    private val purchaseUpdates = AndroidBillingPurchaseUpdates(purchaseRequests) {
+        invalidation.invalidate()
+    }
     private val billingClient: BillingClient? = androidContext?.let { ctx ->
         BillingClient.newBuilder(ctx)
-            .setListener(this)
+            .setListener { result, purchases -> onPurchasesUpdated(result, purchases) }
             .enablePendingPurchases(
                 PendingPurchasesParams.newBuilder()
                     .enableOneTimeProducts()
@@ -528,9 +546,47 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
             .build()
     }
 
-    actual override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>> {
+    actual override fun setEntitlementObserver(observer: FullAccessBillingObserver?) {
+        scope.launch {
+            invalidation.setObserver(observer?.let { { it.onEntitlementsChanged() } })
+        }
+    }
+
+    fun onResume() {
+        invalidation.invalidate()
+    }
+
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        invalidation.dispose()
+        purchaseRequests.cancelAll()
+        connectionRequests.cancelAll()
+        scope.cancel()
+        billingClient?.endConnection()
+    }
+
+    private suspend fun <T> billingOperation(block: suspend () -> FoundationResult<T>): FoundationResult<T> =
+        withContext(Dispatchers.Main.immediate) {
+            if (disposed) return@withContext unavailable()
+            val operation = scope.async {
+                try {
+                    block()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    billingFailure(failure, "Google Play Billing could not complete the request.")
+                }
+            }
+            awaitOwnedAndroidBillingOperation(operation)
+        }
+
+    actual override suspend fun loadOffers(): FoundationResult<List<FullAccessStoreOffer>> =
+        billingOperation { loadOffersInternal() }
+
+    private suspend fun loadOffersInternal(): FoundationResult<List<FullAccessStoreOffer>> {
         return when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
-            is FoundationResult.Failure -> foundationSuccess(listOf(fallbackLifetimeOffer()))
+            is FoundationResult.Failure -> result
             is FoundationResult.Success -> {
                 val productDetails = when (val product = result.value.lifetimeProductDetails()) {
                     is FoundationResult.Failure -> return product
@@ -546,17 +602,31 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
     }
 
     actual override suspend fun refreshEntitlements(): FoundationResult<FullAccessEntitlementSnapshot> =
-        entitlementSnapshot()
+        billingOperation { entitlementSnapshot() }
 
     actual override suspend fun restorePurchases(): FoundationResult<FullAccessEntitlementSnapshot> =
-        entitlementSnapshot()
+        billingOperation { entitlementSnapshot() }
 
-    actual override suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot> {
+    actual override suspend fun purchaseLifetimeUnlock(): FoundationResult<FullAccessEntitlementSnapshot> =
+        billingOperation {
+            if (purchaseInProgress) {
+                foundationFailure(FoundationError.Platform("A purchase is already in progress."))
+            } else {
+                purchaseInProgress = true
+                try {
+                    purchaseLifetimeUnlockInternal()
+                } finally {
+                    purchaseInProgress = false
+                }
+            }
+        }
+
+    private suspend fun purchaseLifetimeUnlockInternal(): FoundationResult<FullAccessEntitlementSnapshot> {
         val client = billingClient ?: return unavailable()
         val launchActivity = activity ?: return foundationFailure(
             FoundationError.Platform("Google Play purchases require an Android Activity context.")
         )
-        pendingPurchase?.let {
+        purchaseRequests.pending?.let {
             return foundationFailure(FoundationError.Platform("A purchase is already in progress."))
         }
         val productDetailsQuery = when (val result = queryProductDetails(listOf(lifetimeProductQuery()))) {
@@ -576,7 +646,7 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
             .setOfferToken(selectedOfferToken)
             .build()
         val purchaseResult = CompletableDeferred<FoundationResult<FullAccessEntitlementSnapshot>>()
-        pendingPurchase = purchaseResult
+        purchaseRequests.pending = purchaseResult
         val billingResult = runCatching {
             client.launchBillingFlow(
                 launchActivity,
@@ -585,34 +655,51 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
                     .build()
             )
         }.getOrElse { throwable ->
-            pendingPurchase = null
+            purchaseRequests.clear(purchaseResult)
             return billingFailure(throwable, "Could not launch Google Play purchase flow.")
         }
         if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
-            pendingPurchase = null
+            purchaseRequests.clear(purchaseResult)
             return billingFailure(billingResult, "Could not launch Google Play purchase flow.")
         }
-        return purchaseResult.await()
+        return awaitAndroidBillingResult(
+            PURCHASE_TIMEOUT_MILLIS,
+            "Google Play has not confirmed the purchase yet. It may still complete. Restore purchases to check before trying again."
+        ) {
+            purchaseRequests.await(purchaseResult)
+        }
     }
 
-    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
-        val purchaseResult = pendingPurchase ?: return
-        pendingPurchase = null
-        when (billingResult.responseCode) {
-            BillingClient.BillingResponseCode.OK -> {
-                scope.launch {
-                    purchaseResult.complete(processPurchaseUpdates(purchases.orEmpty()))
+    private fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
+        scope.launch {
+            purchaseUpdates.dispatch(
+                successful = billingResult.responseCode == BillingClient.BillingResponseCode.OK,
+                relevant = purchases.orEmpty().any { LIFETIME_UNLOCK_PRODUCT_ID in it.products }
+            ) { purchaseResult ->
+                when (billingResult.responseCode) {
+                    BillingClient.BillingResponseCode.OK -> {
+                        scope.launch {
+                            try {
+                                purchaseResult.complete(processPurchaseUpdates(purchases.orEmpty()))
+                            } catch (cancelled: CancellationException) {
+                                purchaseResult.cancel(cancelled)
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                purchaseResult.complete(billingFailure(failure, "Could not confirm Google Play purchase."))
+                            }
+                        }
+                    }
+                    BillingClient.BillingResponseCode.USER_CANCELED -> {
+                        purchaseResult.complete(
+                            foundationFailure(FoundationError.Platform("Purchase cancelled."))
+                        )
+                    }
+                    else -> {
+                        purchaseResult.complete(
+                            billingFailure(billingResult, "Google Play purchase failed.")
+                        )
+                    }
                 }
-            }
-            BillingClient.BillingResponseCode.USER_CANCELED -> {
-                purchaseResult.complete(
-                    foundationFailure(FoundationError.Platform("Purchase cancelled."))
-                )
-            }
-            else -> {
-                purchaseResult.complete(
-                    billingFailure(billingResult, "Google Play purchase failed.")
-                )
             }
         }
     }
@@ -677,26 +764,22 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         val params = QueryProductDetailsParams.newBuilder()
             .setProductList(products)
             .build()
-        return suspendCancellableCoroutine { continuation ->
-            runCatching {
-                client.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
-                    if (!continuation.isActive) return@queryProductDetailsAsync
-                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        continuation.resume(
-                            foundationSuccess(
-                                ProductDetailsQuery(
-                                    productDetails = productDetailsResult.productDetailsList,
-                                    unfetchedProducts = productDetailsResult.unfetchedProductList
-                                )
+        return awaitAndroidBillingCallback(
+            NATIVE_TIMEOUT_MILLIS,
+            "Google Play product lookup timed out. Try again."
+        ) { complete ->
+            client.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
+                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    complete(
+                        foundationSuccess(
+                            ProductDetailsQuery(
+                                productDetails = productDetailsResult.productDetailsList,
+                                unfetchedProducts = productDetailsResult.unfetchedProductList
                             )
                         )
-                    } else {
-                        continuation.resume(billingFailure(billingResult, "Could not load Google Play products."))
-                    }
-                }
-            }.onFailure { throwable ->
-                if (continuation.isActive) {
-                    continuation.resume(billingFailure(throwable, "Could not load Google Play products."))
+                    )
+                } else {
+                    complete(billingFailure(billingResult, "Could not load Google Play products."))
                 }
             }
         }
@@ -710,19 +793,15 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(productType)
             .build()
-        return suspendCancellableCoroutine { continuation ->
-            runCatching {
-                client.queryPurchasesAsync(params) { billingResult, purchases ->
-                    if (!continuation.isActive) return@queryPurchasesAsync
-                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        continuation.resume(foundationSuccess(purchases))
-                    } else {
-                        continuation.resume(billingFailure(billingResult, "Could not restore Google Play purchases."))
-                    }
-                }
-            }.onFailure { throwable ->
-                if (continuation.isActive) {
-                    continuation.resume(billingFailure(throwable, "Could not restore Google Play purchases."))
+        return awaitAndroidBillingCallback(
+            NATIVE_TIMEOUT_MILLIS,
+            "Google Play purchase lookup timed out. Try restoring purchases again."
+        ) { complete ->
+            client.queryPurchasesAsync(params) { billingResult, purchases ->
+                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    complete(foundationSuccess(purchases))
+                } else {
+                    complete(billingFailure(billingResult, "Could not restore Google Play purchases."))
                 }
             }
         }
@@ -739,19 +818,15 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         val params = AcknowledgePurchaseParams.newBuilder()
             .setPurchaseToken(purchase.purchaseToken)
             .build()
-        return suspendCancellableCoroutine { continuation ->
-            runCatching {
-                client.acknowledgePurchase(params) { billingResult ->
-                    if (!continuation.isActive) return@acknowledgePurchase
-                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        continuation.resume(foundationSuccess(Unit))
-                    } else {
-                        continuation.resume(billingFailure(billingResult, "Could not acknowledge Google Play purchase."))
-                    }
-                }
-            }.onFailure { throwable ->
-                if (continuation.isActive) {
-                    continuation.resume(billingFailure(throwable, "Could not acknowledge Google Play purchase."))
+        return awaitAndroidBillingCallback(
+            NATIVE_TIMEOUT_MILLIS,
+            "Google Play purchase confirmation timed out. The purchase may still complete. Restore purchases to check."
+        ) { complete ->
+            client.acknowledgePurchase(params) { billingResult ->
+                if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    complete(foundationSuccess(Unit))
+                } else {
+                    complete(billingFailure(billingResult, "Could not acknowledge Google Play purchase."))
                 }
             }
         }
@@ -760,39 +835,46 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
     private suspend fun connectedClient(): FoundationResult<BillingClient> {
         val client = billingClient ?: return unavailable()
         if (client.isReady) return foundationSuccess(client)
-        pendingConnection?.let { return it.await() }
+        connectionRequests.pending?.let { return awaitConnection(it) }
 
         val connection = CompletableDeferred<FoundationResult<BillingClient>>()
-        pendingConnection = connection
+        connectionRequests.pending = connection
         runCatching {
             client.startConnection(object : BillingClientStateListener {
                 override fun onBillingSetupFinished(billingResult: BillingResult) {
-                    if (pendingConnection == connection) {
-                        pendingConnection = null
-                    }
-                    if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                        connection.complete(foundationSuccess(client))
-                    } else {
-                        connection.complete(billingFailure(billingResult, "Could not connect to Google Play Billing."))
+                    scope.launch {
+                        connectionRequests.clear(connection)
+                        if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                            connection.complete(foundationSuccess(client))
+                        } else {
+                            connection.complete(billingFailure(billingResult, "Could not connect to Google Play Billing."))
+                        }
                     }
                 }
 
                 override fun onBillingServiceDisconnected() {
-                    if (pendingConnection == connection) {
-                        pendingConnection = null
+                    scope.launch {
+                        connectionRequests.clear(connection)
+                        connection.complete(
+                            foundationFailure(FoundationError.Platform("Google Play Billing disconnected. Try again."))
+                        )
                     }
-                    connection.complete(
-                        foundationFailure(FoundationError.Platform("Google Play Billing disconnected. Try again."))
-                    )
                 }
             })
         }.onFailure { throwable ->
-            if (pendingConnection == connection) {
-                pendingConnection = null
-            }
+            connectionRequests.clear(connection)
             connection.complete(billingFailure(throwable, "Could not connect to Google Play Billing."))
         }
-        return connection.await()
+        return awaitConnection(connection)
+    }
+
+    private suspend fun awaitConnection(
+        connection: CompletableDeferred<FoundationResult<BillingClient>>
+    ): FoundationResult<BillingClient> = awaitAndroidBillingResult(
+        NATIVE_TIMEOUT_MILLIS,
+        "Connecting to Google Play Billing timed out. Try again."
+    ) {
+        connectionRequests.await(connection)
     }
 
     private fun List<Purchase>.anyActiveProduct(productId: String): Boolean =
@@ -810,23 +892,18 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
         )
 
     private fun ProductDetails.toLifetimeStoreOffer(): FoundationResult<FullAccessStoreOffer> {
-        val selectedOffer = selectLifetimePurchaseOption()
-            ?: return lifetimePurchaseOptionUnavailable()
+        val price = when (val result = AndroidLifetimePurchaseOptionSelector.priceLabel(lifetimePurchaseOptions())) {
+            is FoundationResult.Failure -> return result
+            is FoundationResult.Success -> result.value
+        }
         return foundationSuccess(
             FullAccessStoreOffer(
                 title = "Lifetime",
-                priceLabel = selectedOffer.priceLabel ?: LIFETIME_FALLBACK_PRICE_LABEL,
+                priceLabel = price,
                 termsLabel = LIFETIME_TERMS_LABEL
             )
         )
     }
-
-    private fun fallbackLifetimeOffer(): FullAccessStoreOffer =
-        FullAccessStoreOffer(
-            title = "Lifetime",
-            priceLabel = LIFETIME_FALLBACK_PRICE_LABEL,
-            termsLabel = LIFETIME_TERMS_LABEL
-        )
 
     private fun ProductDetails.selectLifetimePurchaseOption(): AndroidLifetimePurchaseOption? =
         AndroidLifetimePurchaseOptionSelector.select(lifetimePurchaseOptions())
@@ -893,6 +970,7 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
     }
 
     private fun <T> billingFailure(throwable: Throwable, fallback: String): FoundationResult<T> {
+        if (throwable is CancellationException) throw throwable
         val detail = throwable.message?.takeIf { it.isNotBlank() }
         val message = if (detail == null) fallback else "$fallback $detail"
         return foundationFailure(FoundationError.Platform(message))
@@ -900,8 +978,9 @@ actual class FullAccessBillingHandoff actual constructor(private val context: An
 
     private companion object {
         const val LIFETIME_UNLOCK_PRODUCT_ID = FullAccessBillingProductIds.LIFETIME
-        const val LIFETIME_FALLBACK_PRICE_LABEL = "${'$'}14.99"
         const val LIFETIME_TERMS_LABEL = "One-time Google Play purchase."
+        const val NATIVE_TIMEOUT_MILLIS = 15_000L
+        const val PURCHASE_TIMEOUT_MILLIS = 120_000L
     }
 
     private data class ProductDetailsQuery(
@@ -926,3 +1005,4 @@ private const val REST_OPEN_APP_REQUEST_CODE = 9220
 private const val CHANNEL_SOUND = "rest_timer_sound"
 private const val CHANNEL_SILENT = "rest_timer_silent"
 private const val CHANNEL_ACTIVE = "active_rest_timer"
+private const val REQUEST_PROMOTED_ONGOING_EXTRA = "android.requestPromotedOngoing"

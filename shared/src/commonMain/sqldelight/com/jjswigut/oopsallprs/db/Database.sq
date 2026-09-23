@@ -211,7 +211,7 @@ CREATE TABLE user_preferences (
     date_format TEXT,
     default_rest_seconds INTEGER NOT NULL,
     rest_sound_enabled INTEGER NOT NULL DEFAULT 1,
-    rest_timer_surface_enabled INTEGER NOT NULL DEFAULT 1,
+    rest_timer_surface_enabled INTEGER NOT NULL DEFAULT 0,
     weight_step_lb REAL NOT NULL DEFAULT 5.0,
     weight_step_kg REAL NOT NULL DEFAULT 2.5,
     android_auto_backup_allowed INTEGER NOT NULL,
@@ -310,6 +310,13 @@ CREATE TABLE full_access_state (
     last_error TEXT,
     updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE local_workout_completion_receipts (
+    source_active_workout_id TEXT NOT NULL PRIMARY KEY
+);
+
+CREATE INDEX completed_workouts_source_active_id
+ON completed_workouts(source_active_workout_id);
 
 CREATE TRIGGER logging_configurations_no_update
 BEFORE UPDATE ON logging_configurations

@@ -127,6 +127,25 @@ class ProfileStateHolderTest {
     }
 
     @Test
+    fun exportHandoffFailureLeavesRecoverableError() = runTest {
+        val store = InMemoryFoundationStore()
+        val holder = ProfileStateHolder(
+            preferences = store,
+            exports = store,
+            exportHandoff = { error("iOS export handoff requires a UIViewController presenter") }
+        )
+
+        holder.export(ExportType.WORKOUTS)
+
+        assertFalse(holder.state.value.isExporting)
+        assertNull(holder.state.value.lastExport)
+        assertEquals(
+            "iOS export handoff requires a UIViewController presenter",
+            holder.state.value.exportError
+        )
+    }
+
+    @Test
     fun interactionPreferencesUpdateRuntimeState() {
         val holder = ProfileStateHolder()
 

@@ -35,6 +35,59 @@ if ! command -v xcodebuild >/dev/null 2>&1; then
   exit 2
 fi
 
+verify_shared_framework_search_path() {
+  local sdk="$1"
+  local expected_target="$2"
+  local unexpected_target="$3"
+  local settings
+
+  settings="$(
+    xcodebuild \
+      -showBuildSettings \
+      -project iosApp/OopsAllPRs.xcodeproj \
+      -scheme OopsAllPRs \
+      -configuration Release \
+      -sdk "$sdk" \
+      2>/dev/null
+  )"
+
+  if [[ "$settings" != *"shared/build/bin/$expected_target/releaseFramework"* ]] ||
+    [[ "$settings" == *"shared/build/bin/$unexpected_target/releaseFramework"* ]]; then
+    echo "Shared framework search path is wrong for $sdk." >&2
+    echo "Expected only $expected_target, not $unexpected_target." >&2
+    exit 4
+  fi
+}
+
+verify_launch_background() {
+  local plist="iosApp/iosApp/Info.plist"
+  local color_asset="iosApp/iosApp/Assets.xcassets/LaunchBackground.colorset/Contents.json"
+  local configured_name
+  local red
+  local green
+  local blue
+
+  plutil -lint "$plist" >/dev/null
+  configured_name="$(plutil -extract UILaunchScreen.UIColorName raw -o - "$plist")"
+  if [ "$configured_name" != "LaunchBackground" ] || [ ! -f "$color_asset" ]; then
+    echo "iOS launch background must use the LaunchBackground asset." >&2
+    exit 4
+  fi
+
+  red="$(plutil -extract colors.0.color.components.red raw -o - "$color_asset")"
+  green="$(plutil -extract colors.0.color.components.green raw -o - "$color_asset")"
+  blue="$(plutil -extract colors.0.color.components.blue raw -o - "$color_asset")"
+  if [ "$red" != "0.024" ] || [ "$green" != "0.031" ] || [ "$blue" != "0.059" ]; then
+    echo "iOS launch background must match the Fit dark background (#06080F)." >&2
+    exit 4
+  fi
+}
+
+# Device archives and simulator packages must never resolve the same framework binary.
+verify_shared_framework_search_path iphoneos iosArm64 iosSimulatorArm64
+verify_shared_framework_search_path iphonesimulator iosSimulatorArm64 iosArm64
+verify_launch_background
+
 mkdir -p "$artifact_dir"
 rm -rf "$derived_data_path" "$artifact_dir"/OopsAllPRs-release-simulator-*.zip
 

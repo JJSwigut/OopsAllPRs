@@ -47,5 +47,5 @@ private suspend fun FoundationHarness.completedWeightedWorkout(
         position = 0,
         loggedAt = instant(startedAt + 200)
     )
-    routines.finishWorkout(workout.id, instant(finishedAt)).successValue()
+    routines.finishWorkout(workout.id, instant(finishedAt)).successValue().workout
 }

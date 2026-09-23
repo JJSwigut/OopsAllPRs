@@ -1,6 +1,8 @@
 package com.jjswigut.oopsallprs.ui.history
 
 import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.FinishWorkoutOutcome
+import com.jjswigut.oopsallprs.domain.model.FinishPostCommitWarning
 import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.FoundationId
@@ -19,6 +21,7 @@ import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.ui.workout.MeasureInputUpdate
 import com.jjswigut.oopsallprs.ui.workout.SetRowDraft
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -43,7 +46,8 @@ data class HistoryState(
     val selectedSummary: CompletedWorkoutSummary? = null,
     val editDraft: CompletedWorkoutEditDraft? = null,
     val pendingDeleteSummary: CompletedWorkoutSummary? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val completionNotice: String? = null
 )
 
 class HistoryStateHolder(
@@ -55,6 +59,16 @@ class HistoryStateHolder(
 ) {
     private val _state = MutableStateFlow(HistoryState())
     val state: StateFlow<HistoryState> = _state
+
+    suspend fun refreshForDisplay() {
+        try {
+            refresh()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            _state.value = _state.value.copy(errorMessage = "Couldn't refresh history. Try again.")
+        }
+    }
 
     suspend fun refresh() {
         val completed = workouts.completedWorkouts().sortedByDescending { it.finishedAt }
@@ -68,7 +82,10 @@ class HistoryStateHolder(
             },
             editDraft = _state.value.editDraft,
             pendingDeleteSummary = null,
-            errorMessage = null
+            errorMessage = null,
+            completionNotice = _state.value.completionNotice.takeIf {
+                completed.any { it.id == selectedId }
+            }
         )
     }
 
@@ -80,7 +97,10 @@ class HistoryStateHolder(
         } else {
             _state.value.copy(
                 selectedSummary = completed.toSummary(records),
-                errorMessage = null
+                errorMessage = null,
+                completionNotice = _state.value.completionNotice.takeIf {
+                    _state.value.selectedSummary?.workoutId == workoutId
+                }
             )
         }
     }
@@ -90,8 +110,34 @@ class HistoryStateHolder(
         selectWorkout(workoutId)
     }
 
+    // The receipt is already committed; displaying it must not depend on another database read.
+    fun presentCompletion(outcome: FinishWorkoutOutcome) {
+        val completed = (_state.value.completedWorkouts.filterNot { it.id == outcome.workout.id } + outcome.workout)
+            .sortedByDescending { it.finishedAt }
+        _state.value = HistoryState(
+            completedWorkouts = completed,
+            rows = completed.toHistoryRows(),
+            selectedSummary = outcome.workout.toSummary(),
+            completionNotice = outcome.warnings.distinct().map { warning ->
+                when (warning) {
+                    FinishPostCommitWarning.TIMER_CLEANUP_FAILED -> "The rest notification could not be cleared."
+                    FinishPostCommitWarning.PROGRESS_REFRESH_FAILED -> "Personal records could not be updated yet."
+                }
+            }.joinToString(" ", prefix = "Workout saved. ").trimEnd()
+        )
+    }
+
+    fun reportCompletionRefreshFailure(workoutId: FoundationId) {
+        if (_state.value.selectedSummary?.workoutId != workoutId) return
+        val message = "Some views could not refresh. Reopen the app to retry."
+        val existing = _state.value.completionNotice ?: "Workout saved."
+        if (message !in existing) {
+            _state.value = _state.value.copy(completionNotice = "$existing $message")
+        }
+    }
+
     fun clearSelection() {
-        _state.value = _state.value.copy(selectedSummary = null, editDraft = null, errorMessage = null)
+        _state.value = _state.value.copy(selectedSummary = null, editDraft = null, errorMessage = null, completionNotice = null)
     }
 
     suspend fun beginEditing() {

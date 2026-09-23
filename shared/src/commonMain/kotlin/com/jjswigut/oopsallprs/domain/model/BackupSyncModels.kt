@@ -48,6 +48,7 @@ enum class BackupSyncOutcome {
 
 data class BackupSyncState(
     val linkedFile: BackupLinkedFile? = null,
+    // Last successfully synchronized baselines, never merely observed conflict revisions.
     val lastBackupRevision: String? = null,
     val lastBackupTimestamp: Instant? = null,
     val lastLocalRevision: String? = null,
@@ -68,7 +69,10 @@ data class BackupRestorePlan(
 data class BackupRestoreResult(
     val restoredSummary: SnapshotSummary,
     val safetyBackup: BackupPackage,
-    val activeWorkoutReplaced: Boolean
+    val activeWorkoutReplaced: Boolean,
+    // Captured by restore, before returning to the coordinator; may include retained immutable configurations.
+    val restoredLocalRevision: BackupRevision? = null,
+    val syncWarning: String? = null
 )
 
 enum class BackupConflictDecision {

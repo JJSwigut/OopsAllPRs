@@ -67,7 +67,7 @@ class ExercisePickerUxStateTest {
             position = 0,
             loggedAt = instant(1_200)
         ).successValue()
-        harness.routines.finishWorkout(loggedWorkout.id, instant(2_000)).successValue()
+        harness.routines.finishWorkout(loggedWorkout.id, instant(2_000)).successValue().workout
         val activeWorkout = ActiveWorkoutStateHolder(harness.setLogging, harness.lifecycle, harness.store)
         val currentWorkout = harness.lifecycle.startEmpty(instant(3_000)).successValue()
         activeWorkout.hydrate(currentWorkout.id)

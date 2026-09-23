@@ -1,0 +1,16 @@
+CREATE TABLE local_workout_completion_receipts (
+    source_active_workout_id TEXT NOT NULL PRIMARY KEY
+);
+
+CREATE INDEX completed_workouts_source_active_id
+ON completed_workouts(source_active_workout_id);
+
+-- Preserve the legacy history baseline once; historical import/charge provenance is unavailable.
+INSERT OR IGNORE INTO full_access_state(
+    singleton_id, completed_free_workouts, lifetime_active, store_status, last_error, updated_at
+)
+SELECT 1, COUNT(*), 0, 'NOT_CHECKED', NULL, COALESCE(MAX(created_at), 0)
+FROM completed_workouts;
+
+INSERT OR IGNORE INTO local_workout_completion_receipts(source_active_workout_id)
+SELECT DISTINCT source_active_workout_id FROM completed_workouts;

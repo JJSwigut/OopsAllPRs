@@ -2,7 +2,8 @@
 
 GitHub Actions has three workflows:
 
-- `CI`: runs Gradle checks, Android debug/release assembly, and an iOS simulator build for pull requests and pushes to `development` or `main`.
+- `CI`: runs the release-equivalent Android checks and an iOS Release simulator
+  package for pull requests and pushes to `development` or `main`.
 - `Deploy Stores`: runs `tools/release_gate.sh --skip-ios` on pushes to `main`, uploads Android release artifacts and release-gate proof files to GitHub Actions, creates a GitHub Release, attempts a timeout-bounded iOS Release simulator package, uploads Android to Google Play internal testing when secrets exist, and uploads iOS to TestFlight once Apple signing secrets exist.
 - `Google Play Listing`: a manual-only workflow for validating or uploading Android store-presence metadata and artwork. It has no push or pull-request trigger.
 
@@ -21,9 +22,12 @@ Every successful `main` push creates a GitHub Release with an automatic `v1.0.<r
 - Release-gate proof files from `build/release-gate/`.
 - iOS Release simulator zip from `tools/ios_release_package.sh` when the best-effort iOS package job succeeds.
 
-The iOS package job is best-effort while local Release framework linking is slow/unresolved. Android release artifacts and the GitHub Release should still be available when the release gate passes.
+The deployment iOS package job is best-effort only to protect Android/GitHub
+artifact availability from GitHub macOS runner infrastructure failures. Local
+and pull-request CI both require a successful iOS Release simulator package;
+investigate a failed package job before treating an iOS release as ready.
 
-Before promoting `development` to `main`, run `tools/release_gate.sh --android-smoke`. Successful local release gates write `build/release-gate/summary.txt`, `build/release-gate/artifacts.txt`, and `build/release-gate/proof.env` for PR or release notes.
+Before promoting `development` to `main`, run `tools/release_gate.sh --android-smoke`. The iOS portion packages the Release app and runs the local StoreKit entitlement lifecycle smoke. Successful local release gates write `build/release-gate/summary.txt`, `build/release-gate/artifacts.txt`, and `build/release-gate/proof.env` for PR or release notes.
 
 ## Android
 
@@ -70,6 +74,15 @@ ANDROID_PLAY_VALIDATE_ONLY=true tools/fastlane.sh android listing
 
 The lane assembles `fastlane/build/metadata/android` from the source-controlled English listing copy, Play icon, feature graphic, phone screenshots, seven-inch tablet screenshots, and ten-inch tablet screenshots. The generated directories follow Fastlane Supply conventions (`en-US/images/phoneScreenshots`, `sevenInchScreenshots`, and `tenInchScreenshots`). Validation is the lane default and asks Google Play to validate the edit without committing it.
 
+Before preparing the upload, the lane also rejects empty or over-limit listing
+copy and validates the source-controlled Google Play icon, feature graphic,
+phone screenshots, and App Store iPhone screenshots against their expected PNG
+dimensions. Run the local equivalent with:
+
+```sh
+tools/fastlane.sh android listing_package
+```
+
 Fastlane 2.237.0 requires listing-only uploads to identify an existing release even when changelog upload is disabled. Before opening the listing edit, the lane reads version codes from the `internal` track, selects the highest existing version code, and passes that track and version code to Supply. Set `ANDROID_PLAY_LISTING_TRACK` to another populated track only when necessary. Both validation and upload fail before changing listing data if the selected track has no existing release.
 
 To commit only the listing edit, explicitly opt into upload mode:
@@ -92,10 +105,39 @@ The iOS TestFlight job is intentionally skipped until all Apple secrets are pres
 - `IOS_DISTRIBUTION_CERTIFICATE_BASE64`
 - `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`
 - `IOS_PROVISIONING_PROFILE_BASE64`
+- `IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64`
 - `APPLE_TEAM_ID`
 - `KEYCHAIN_PASSWORD`
 
 The App Store Connect app and Apple Developer bundle ID must use `com.jjswigut.oopsallprs.ios`.
+
+### Local StoreKit Fixture
+
+`iosApp/iosApp/FullAccess.storekit` is a local Xcode-only definition of the
+single `lifetime_unlock` non-consumable at the current $14.99 offer. It is not
+an App Store Connect product record, does not ship as a production entitlement,
+and does not contact Apple.
+
+Validate that it still matches the shared product identifier before using it:
+
+```sh
+tools/verify_ios_storekit_fixture.sh
+```
+
+For a developer-side local transaction session, open the project in Xcode,
+select the `OopsAllPRs` scheme, then choose the fixture under **Run > Options >
+StoreKit Configuration**. Use the Xcode StoreKit transaction controls to reset
+state between purchase, cancellation, and restore scenarios. Local StoreKit
+results are not a substitute for Apple sandbox or TestFlight validation.
+
+The shared Debug scheme already references this fixture. The focused
+`OopsAllPRsStoreKitTests` target uses `SKTestSession` to verify purchase,
+entitlement persistence through a fresh StoreKit session, and refund
+revocation. `tools/ios_storekit_smoke.sh` runs this suite and is required by
+the local iOS release gate. It defaults to an iOS 27 `iPhone 18 Pro` simulator;
+use `IOS_STOREKIT_DESTINATION` to select a different installed simulator. The
+local result is still not a substitute for an App Store sandbox purchase or the
+in-app restore-button flow.
 
 Upload only the App Store screenshots:
 
@@ -109,8 +151,8 @@ To create the remaining iOS secrets:
 
 1. Create an App Store Connect API key with App Manager access. Save the key ID, issuer ID, and `.p8` file.
 2. Create or export an Apple Distribution certificate as a `.p12` file and record its password.
-3. Create an App Store provisioning profile for bundle ID `com.jjswigut.oopsallprs.ios` using that distribution certificate.
-4. Base64 encode the `.p8`, `.p12`, and `.mobileprovision` files and add them as the GitHub secrets above.
+3. Create App Store provisioning profiles using that distribution certificate for both `com.jjswigut.oopsallprs.ios` and `com.jjswigut.oopsallprs.ios.RestTimerLiveActivity`.
+4. Base64 encode the `.p8`, `.p12`, and both `.mobileprovision` files, then add them as the GitHub secrets above. Use `IOS_PROVISIONING_PROFILE_BASE64` for the app and `IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_BASE64` for the extension.
 
 Example encoding command:
 

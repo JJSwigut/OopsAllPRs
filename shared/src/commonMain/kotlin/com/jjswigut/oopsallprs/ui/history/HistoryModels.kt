@@ -5,6 +5,7 @@ import com.jjswigut.oopsallprs.domain.model.CompletedWorkout
 import com.jjswigut.oopsallprs.domain.model.ExerciseSet
 import com.jjswigut.oopsallprs.domain.model.Effort
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
 import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
 import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
@@ -14,8 +15,9 @@ import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.domain.model.WireCode
 import com.jjswigut.oopsallprs.ui.common.shortDateLabel
-import com.jjswigut.oopsallprs.ui.common.shortDateTimeLabel
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.abs
 import kotlin.math.round
 import kotlin.math.roundToInt
@@ -62,12 +64,18 @@ data class CompletedPrMarker(
     val value: Double,
     val weight: WeightKg? = null,
     val reps: Int? = null,
-    val achievedAt: Instant
+    val achievedAt: Instant,
+    val recordId: FoundationId,
+    val exerciseCatalogId: FoundationId,
+    val sourceWorkoutId: FoundationId,
+    val sourceSetId: FoundationId,
+    val captureConfigurationId: LoggingConfigurationId
 )
 
 data class HistoryListItem(
     val workoutId: FoundationId,
     val title: String,
+    val dateLabel: String,
     val finishedAt: Instant,
     val durationLabel: String,
     val exerciseCount: Int,
@@ -92,7 +100,9 @@ data class TemplateSaveDraft(
 fun CompletedWorkout.toSummary(
     personalRecords: List<PersonalRecord> = emptyList()
 ): CompletedWorkoutSummary {
-    val recordsBySetId = personalRecords.groupBy { it.sourceSetId }
+    val recordsBySetId = personalRecords
+        .filter { it.sourceWorkoutId == id && it.evidenceMetric() != null }
+        .groupBy { it.sourceSetId }
     val exerciseSummaries = exercises
         .sortedBy { it.position.value }
         .map { it.toSummary(recordsBySetId) }
@@ -120,7 +130,8 @@ fun List<CompletedWorkout>.toHistoryRows(
         val summary = workout.toSummary(personalRecords)
         HistoryListItem(
             workoutId = workout.id,
-            title = workout.finishedAt.shortDateTimeLabel(),
+            title = workout.historyWorkoutTitle(),
+            dateLabel = workout.finishedAt.historyListDateLabel(),
             finishedAt = workout.finishedAt,
             durationLabel = summary.durationLabel,
             exerciseCount = summary.exerciseCount,
@@ -143,7 +154,9 @@ private fun CompletedExercise.toSummary(
     val rows = loggedSets
         .filter { it.loggedAt != null }
         .sortedBy { it.position.value }
-        .map { it.toSummary(recordsBySetId[it.id].orEmpty()) }
+        .map { set ->
+            set.toSummary(recordsBySetId[set.id].orEmpty().filter { it.exerciseCatalogId == exerciseCatalogId })
+        }
     return CompletedExerciseSummary(
         completedExerciseId = id,
         exerciseCatalogId = exerciseCatalogId,
@@ -165,29 +178,51 @@ private fun ExerciseSet.toSummary(records: List<PersonalRecord>): CompletedSetSu
         distanceMeters = distanceMeters,
         observedEffort = observedEffort,
         loggedAt = requireNotNull(loggedAt),
-        prMarkers = records.map { it.toMarker() }
+        prMarkers = records
+            .distinctBy { it.achievementKey(captureConfigurationId) }
+            .map { it.toMarker(captureConfigurationId) }
     )
 
-private fun PersonalRecord.toMarker(): CompletedPrMarker =
+private data class HistoryAchievementKey(
+    val exerciseCatalogId: FoundationId,
+    val sourceWorkoutId: FoundationId,
+    val sourceSetId: FoundationId,
+    val captureConfigurationId: LoggingConfigurationId,
+    val metricCode: WireCode,
+    val reps: Int?,
+    val value: Double,
+    val weight: WeightKg?
+)
+
+private fun PersonalRecord.achievementKey(configurationId: LoggingConfigurationId) = HistoryAchievementKey(
+    exerciseCatalogId, sourceWorkoutId, sourceSetId, configurationId, metricCode, reps, value, weight
+)
+
+private fun PersonalRecord.toMarker(configurationId: LoggingConfigurationId): CompletedPrMarker =
     CompletedPrMarker(
         kind = recordKind,
         metricCode = metricCode,
         label = when (evidenceMetric()) {
             ProgressEvidenceMetric.WEIGHT_FOR_REPS -> {
                 val repsLabel = reps?.let { " x $it" }.orEmpty()
-                "PR ${weight?.value?.formatCompact().orEmpty()}kg$repsLabel"
+                "${reps ?: 0}-rep PR ${weight?.value?.formatCompact(2).orEmpty()}kg$repsLabel"
             }
-            ProgressEvidenceMetric.REPS -> "PR ${reps ?: value.roundToInt()} reps"
-            ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${value.formatCompact()}kg"
+            ProgressEvidenceMetric.REPS -> "PR ${historyCountLabel(reps ?: value.roundToInt(), "rep")}"
+            ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM PR ${value.formatCompact()}kg"
             ProgressEvidenceMetric.VOLUME -> "PR volume ${value.formatCompact()}"
             ProgressEvidenceMetric.LONGEST_DURATION -> "PR ${value.roundToLong().formatDurationMs()}"
             ProgressEvidenceMetric.LONGEST_DISTANCE -> "PR ${value.formatCompact()} m"
-            null -> "PR ${value.formatCompact()}"
+            null -> "Unrecognized record"
         },
         value = value,
         weight = weight,
         reps = reps,
-        achievedAt = achievedAt
+        achievedAt = achievedAt,
+        recordId = id,
+        exerciseCatalogId = exerciseCatalogId,
+        sourceWorkoutId = sourceWorkoutId,
+        sourceSetId = sourceSetId,
+        captureConfigurationId = configurationId
     )
 
 internal fun CompletedSetSummary.historyDisplayLabel(weightUnit: WeightUnit): String {
@@ -196,13 +231,17 @@ internal fun CompletedSetSummary.historyDisplayLabel(weightUnit: WeightUnit): St
     } else {
         " • ${prMarkers.joinToString { it.historyDetailLabel(weightUnit) }}"
     }
+    return historyPerformanceLabel(weightUnit) + prs
+}
+
+internal fun CompletedSetSummary.historyPerformanceLabel(weightUnit: WeightUnit): String {
     val valueLabel = listOfNotNull(
-        reps?.let { "${it.coerceAtLeast(0)} reps" },
+        reps?.let { historyCountLabel(it.coerceAtLeast(0), "rep") },
         weight?.historyWeightLabel(weightUnit),
         durationMs?.formatDurationMs(),
         distanceMeters?.let { "${it.formatCompact()} m" }
     ).plus(listOfNotNull(observedEffort?.historyEffortLabel())).joinToString(" • ").ifEmpty { "Performance unavailable" }
-    return "Set ${position + 1}: $valueLabel$prs"
+    return "Set ${position + 1}: $valueLabel"
 }
 
 private fun Effort.historyEffortLabel(): String = when {
@@ -217,21 +256,83 @@ internal fun CompletedPrMarker.historyLabel(weightUnit: WeightUnit): String =
         ProgressEvidenceMetric.WEIGHT_FOR_REPS -> {
             val weightLabel = (weight ?: WeightKg(value)).historyWeightLabel(weightUnit)
             val repsLabel = reps?.let { " x $it" }.orEmpty()
-            "PR $weightLabel$repsLabel"
+            "${reps ?: 0}-rep PR $weightLabel$repsLabel"
         }
-        ProgressEvidenceMetric.REPS -> "PR ${(reps ?: value.roundToInt()).coerceAtLeast(0)} reps"
-        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "PR e1RM ${WeightKg(value).historyWeightLabel(weightUnit)}"
-        ProgressEvidenceMetric.VOLUME -> "PR volume ${WeightKg(value).historyWeightLabel(weightUnit)}"
+        ProgressEvidenceMetric.REPS -> "PR ${historyCountLabel((reps ?: value.roundToInt()).coerceAtLeast(0), "rep")}"
+        ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX -> "Estimated 1RM PR ${WeightKg(value).historyWeightLabel(weightUnit, decimals = 1)}"
+        ProgressEvidenceMetric.VOLUME -> "PR volume ${WeightKg(value).historyWeightLabel(weightUnit, decimals = 1)}·reps"
         ProgressEvidenceMetric.LONGEST_DURATION -> "PR ${value.roundToLong().formatDurationMs()}"
         ProgressEvidenceMetric.LONGEST_DISTANCE -> "PR ${value.formatCompact()} m"
-        null -> "PR ${value.formatCompact()}"
+        null -> "Unrecognized record"
     }
 
 internal fun CompletedPrMarker.historyDetailLabel(weightUnit: WeightUnit): String =
     "${historyLabel(weightUnit)} • ${achievedAt.shortDateLabel()}"
 
-private fun WeightKg.historyWeightLabel(unit: WeightUnit): String =
-    "${displayValue(unit).formatCompact()} ${unit.abbreviation()}"
+private fun WeightKg.historyWeightLabel(unit: WeightUnit, decimals: Int = 2): String =
+    "${displayValue(unit).formatCompact(decimals)} ${unit.abbreviation()}"
+
+internal fun Instant.historyDateLabel(timeZone: TimeZone = TimeZone.currentSystemDefault()): String =
+    toLocalDateTime(timeZone).let { local ->
+        "${local.dayOfWeek.shortLabel()}, ${local.month.shortLabel()} ${local.dayOfMonth}"
+    }
+
+internal fun Instant.historyDateTimeLabel(timeZone: TimeZone = TimeZone.currentSystemDefault()): String {
+    val local = toLocalDateTime(timeZone)
+    return "${local.date} ${local.hour.toString().padStart(2, '0')}:${local.minute.toString().padStart(2, '0')}"
+}
+
+internal fun Instant.historyListDateLabel(timeZone: TimeZone = TimeZone.currentSystemDefault()): String {
+    val local = toLocalDateTime(timeZone)
+    val hour = local.hour % 12
+    val displayHour = if (hour == 0) 12 else hour
+    val period = if (local.hour < 12) "AM" else "PM"
+    return "${local.dayOfWeek.shortLabel()}, ${local.month.shortLabel()} ${local.dayOfMonth} at $displayHour:${local.minute.toString().padStart(2, '0')} $period"
+}
+
+internal fun CompletedWorkout.historyWorkoutTitle(): String {
+    val exerciseNames = exercises
+        .sortedBy { it.position.value }
+        .map { it.displayNameSnapshot }
+        .filter { it.isNotBlank() }
+        .distinct()
+    return when (exerciseNames.size) {
+        0 -> "Workout"
+        1 -> exerciseNames.single()
+        2 -> exerciseNames.joinToString(" + ")
+        else -> "${exerciseNames.take(2).joinToString(" + ")} +${exerciseNames.size - 2}"
+    }
+}
+
+private fun kotlinx.datetime.DayOfWeek.shortLabel(): String =
+    when (this) {
+        kotlinx.datetime.DayOfWeek.MONDAY -> "Mon"
+        kotlinx.datetime.DayOfWeek.TUESDAY -> "Tue"
+        kotlinx.datetime.DayOfWeek.WEDNESDAY -> "Wed"
+        kotlinx.datetime.DayOfWeek.THURSDAY -> "Thu"
+        kotlinx.datetime.DayOfWeek.FRIDAY -> "Fri"
+        kotlinx.datetime.DayOfWeek.SATURDAY -> "Sat"
+        kotlinx.datetime.DayOfWeek.SUNDAY -> "Sun"
+    }
+
+private fun kotlinx.datetime.Month.shortLabel(): String =
+    when (this) {
+        kotlinx.datetime.Month.JANUARY -> "Jan"
+        kotlinx.datetime.Month.FEBRUARY -> "Feb"
+        kotlinx.datetime.Month.MARCH -> "Mar"
+        kotlinx.datetime.Month.APRIL -> "Apr"
+        kotlinx.datetime.Month.MAY -> "May"
+        kotlinx.datetime.Month.JUNE -> "Jun"
+        kotlinx.datetime.Month.JULY -> "Jul"
+        kotlinx.datetime.Month.AUGUST -> "Aug"
+        kotlinx.datetime.Month.SEPTEMBER -> "Sep"
+        kotlinx.datetime.Month.OCTOBER -> "Oct"
+        kotlinx.datetime.Month.NOVEMBER -> "Nov"
+        kotlinx.datetime.Month.DECEMBER -> "Dec"
+    }
+
+internal fun historyCountLabel(count: Int, singular: String, plural: String = singular + "s"): String =
+    "$count ${if (count == 1) singular else plural}"
 
 private fun WeightUnit.abbreviation(): String =
     when (this) {
@@ -260,10 +361,11 @@ internal fun Long?.formatDurationMs(): String {
     }
 }
 
-private fun Double.formatCompact(): String {
-    val oneDecimal = round(this * 10.0) / 10.0
-    val whole = oneDecimal.roundToInt()
-    return if (abs(oneDecimal - whole.toDouble()) < 0.0001) whole.toString() else oneDecimal.toString()
+private fun Double.formatCompact(decimals: Int = 1): String {
+    val factor = if (decimals == 2) 100.0 else 10.0
+    val rounded = round(this * factor) / factor
+    val whole = rounded.roundToInt()
+    return if (abs(rounded - whole.toDouble()) < 0.0001) whole.toString() else rounded.toString()
 }
 
 private fun PersonalRecord.evidenceMetric(): ProgressEvidenceMetric? =

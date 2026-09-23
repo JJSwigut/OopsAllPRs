@@ -11,6 +11,7 @@ import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.domain.usecase.RoutineUseCases
 import com.jjswigut.oopsallprs.domain.usecase.SetLoggingUseCases
 import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
+import com.jjswigut.oopsallprs.platform.FullAccessBillingAdapter
 import com.jjswigut.oopsallprs.ui.exercise.ExercisePickerStateHolder
 import com.jjswigut.oopsallprs.ui.exercise.ExerciseManagementStateHolder
 import com.jjswigut.oopsallprs.ui.history.HistoryStateHolder
@@ -21,14 +22,17 @@ import com.jjswigut.oopsallprs.ui.routine.RoutineStateHolder
 import com.jjswigut.oopsallprs.ui.workout.ActiveWorkoutStateHolder
 import com.jjswigut.oopsallprs.ui.workout.WorkoutHomeStateHolder
 
-fun testAppState(developerToolsEnabled: Boolean = false): AppState {
-    val store = InMemoryFoundationStore()
+fun testAppState(
+    developerToolsEnabled: Boolean = false,
+    store: InMemoryFoundationStore = InMemoryFoundationStore(),
+    billing: FullAccessBillingAdapter? = null
+): AppState {
     val lifecycle = WorkoutLifecycleUseCases(store, store, store, store)
     val setLogging = SetLoggingUseCases(store, store)
     val activePrFeedback = ActivePrFeedbackUseCase(store)
     val personalRecordDerivation = PersonalRecordDerivationUseCase(store)
-    val fullAccess = FullAccessUseCases(store)
-    val routineUseCases = RoutineUseCases(store, store, store, personalRecordDerivation, fullAccess = fullAccess)
+    val fullAccess = FullAccessUseCases(store, billing)
+    val routineUseCases = RoutineUseCases(store, store, store, personalRecordDerivation)
     val activeWorkout = ActiveWorkoutStateHolder(setLogging, lifecycle, store, activePrFeedback)
     val exerciseCatalog = ExerciseCatalogUseCases(store, store)
     val developerSeeds = if (developerToolsEnabled) {

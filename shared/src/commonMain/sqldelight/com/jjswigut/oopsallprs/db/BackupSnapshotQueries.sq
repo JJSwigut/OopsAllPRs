@@ -1,0 +1,81 @@
+selectBackupExercises:
+SELECT * FROM exercise_catalog
+ORDER BY display_name ASC;
+
+selectBackupRoutines:
+SELECT * FROM routines
+ORDER BY updated_at DESC;
+
+selectBackupUserExerciseConfigurations:
+SELECT * FROM user_exercise_configurations
+ORDER BY exercise_catalog_id ASC;
+
+selectBackupActiveWorkouts:
+SELECT * FROM active_workouts
+WHERE status = 'ACTIVE'
+ORDER BY updated_at DESC;
+
+-- Detect rows outside the parent-scoped reads before they can disappear from a safety copy.
+selectBackupCoverageProblems:
+SELECT 'workout' AS problem FROM active_workouts AS workout
+WHERE workout.status NOT IN ('ACTIVE', 'COMPLETED', 'DISCARDED')
+   OR (workout.status = 'COMPLETED' AND NOT EXISTS (
+       SELECT 1 FROM completed_workouts AS completed
+       WHERE completed.source_active_workout_id = workout.id
+   ))
+UNION ALL
+SELECT 'completed workout' FROM completed_workouts AS completed
+WHERE NOT EXISTS (
+    SELECT 1 FROM active_workouts AS workout
+    WHERE workout.id = completed.source_active_workout_id AND workout.status = 'COMPLETED'
+)
+UNION ALL
+SELECT 'exercise' FROM active_exercises AS exercise
+WHERE NOT EXISTS (SELECT 1 FROM active_workouts AS workout WHERE workout.id = exercise.active_workout_id)
+   OR (NOT EXISTS (
+       SELECT 1 FROM active_workouts AS workout
+       WHERE workout.id = exercise.active_workout_id AND workout.status = 'DISCARDED'
+   ) AND NOT EXISTS (
+       SELECT 1 FROM exercise_catalog AS catalog WHERE catalog.id = exercise.exercise_catalog_id
+   ))
+UNION ALL
+SELECT 'set' FROM exercise_sets AS exercise_set
+WHERE NOT EXISTS (
+    SELECT 1 FROM active_workouts AS workout
+    WHERE workout.id = exercise_set.workout_id AND workout.status = 'DISCARDED'
+) AND (
+    NOT EXISTS (SELECT 1 FROM active_workouts AS workout WHERE workout.id = exercise_set.workout_id)
+    OR NOT EXISTS (
+        SELECT 1 FROM active_exercises AS exercise
+        WHERE exercise.id = exercise_set.exercise_instance_id
+          AND exercise.active_workout_id = exercise_set.workout_id
+    )
+)
+UNION ALL
+SELECT 'routine exercise' FROM routine_exercises AS exercise
+WHERE NOT EXISTS (SELECT 1 FROM routines AS routine WHERE routine.id = exercise.routine_id)
+   OR NOT EXISTS (SELECT 1 FROM exercise_catalog AS catalog WHERE catalog.id = exercise.exercise_catalog_id)
+UNION ALL
+SELECT 'routine template' FROM routine_set_templates AS template
+WHERE NOT EXISTS (SELECT 1 FROM routine_exercises AS exercise WHERE exercise.id = template.routine_exercise_id)
+UNION ALL
+SELECT 'draft' FROM active_set_drafts AS draft
+WHERE NOT EXISTS (
+    SELECT 1 FROM active_workouts AS workout
+    WHERE workout.id = draft.active_workout_id AND workout.status = 'ACTIVE'
+) OR NOT EXISTS (
+    SELECT 1 FROM active_exercises AS exercise
+    WHERE exercise.id = draft.exercise_instance_id AND exercise.active_workout_id = draft.active_workout_id
+)
+UNION ALL
+SELECT 'workout UI state' FROM active_workout_ux_sessions AS ux
+WHERE NOT EXISTS (
+    SELECT 1 FROM active_workouts AS workout
+    WHERE workout.id = ux.active_workout_id AND workout.status = 'ACTIVE'
+)
+UNION ALL
+SELECT 'configuration measure' FROM logging_configuration_measures AS measure
+WHERE NOT EXISTS (SELECT 1 FROM logging_configurations AS configuration WHERE configuration.id = measure.logging_configuration_id)
+UNION ALL
+SELECT 'configuration effort' FROM logging_configuration_effort_kinds AS effort
+WHERE NOT EXISTS (SELECT 1 FROM logging_configurations AS configuration WHERE configuration.id = effort.logging_configuration_id);

@@ -5,6 +5,7 @@ import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
 import com.jjswigut.oopsallprs.domain.usecase.PersonalRecordDerivationUseCase
 import com.jjswigut.oopsallprs.testing.FoundationHarness
 import com.jjswigut.oopsallprs.testing.successValue
+import com.jjswigut.oopsallprs.ui.common.shortDateLabel
 import com.jjswigut.oopsallprs.ui.history.mixedCompletedWorkout
 import com.jjswigut.oopsallprs.ui.history.timedCompletedWorkout
 import kotlinx.coroutines.test.runTest
@@ -32,9 +33,9 @@ class ProgressEvidenceTest {
         val evidence = assertNotNull(holder.state.value.selectedEvidence)
         assertTrue(evidence.isAvailable)
         assertEquals("Bench Press", evidence.sourceExerciseName)
-        assertEquals("Set 1: 5 reps • 220.5 lb", evidence.sourceSetLabel)
+        assertEquals("Set 1: 5 reps • 220.46 lb", evidence.sourceSetLabel)
         assertEquals(completed.id, evidence.sourceWorkoutId)
-        assertEquals("1970-01-01", evidence.achievedDateLabel)
+        assertEquals(record.achievedAt.shortDateLabel(), evidence.achievedDateLabel)
     }
 
     @Test

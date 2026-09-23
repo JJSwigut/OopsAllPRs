@@ -206,6 +206,7 @@ class ActiveWorkoutStateHolderTest {
         val holder = ActiveWorkoutStateHolder(harness.setLogging, lifecycle)
         holder.hydrate(active.id, now = instant(2_100))
 
+        assertEquals("Bodyweight circuit", holder.state.value.workout?.routineName)
         val blocks = holder.state.value.workout!!.exerciseBlocks
         val squat = blocks[0].exerciseInstanceId
         val pushup = blocks[1].exerciseInstanceId

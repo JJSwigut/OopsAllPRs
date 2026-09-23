@@ -18,5 +18,9 @@ Generated store-listing artwork for Oops All PRs.
 ## Source
 
 - `source/oops-dumbbell-cereal-backdrop.png`: AI-generated dumbbell-cereal backdrop used for compositing.
-- Screenshots are sourced from validation captures under `specs/*/validation/screenshots`.
+- Screenshots are sourced from validation captures under `specs/*/validation/screenshots` and the current production active-workout capture in `source/current-active-workout-set-entry.png`.
+- `source/current-active-workout-set-entry.png` is the API 36 production-build
+  first-set-entry proof captured on 2026-09-22. It is used by the first Google
+  Play and App Store panel so the storefront shows the current `Finish workout`
+  flow without an on-screen keyboard.
 - Tablet screenshots are direct captures of the current Android app; their emulator configuration and capture date are documented alongside the files.

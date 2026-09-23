@@ -90,7 +90,6 @@ val foundationModule = module {
             activeUx = get<SqlWorkoutRepository>(),
             personalRecords = get<PersonalRecordDerivationUseCase>(),
             preferences = get<SqlFoundationStore>(),
-            fullAccess = get<FullAccessUseCases>(),
             configurationManagement = get<ExerciseLoggingComposition>().management
         )
     }
@@ -102,6 +101,14 @@ val foundationModule = module {
         )
     }
     single { ExerciseCatalogInitializer(get<SqlExerciseRepository>()) }
-    single { ProgressStateHolder(get<SqlProgressRepository>(), get<SqlWorkoutRepository>(), get<SqlFoundationStore>()) }
+    single {
+        ProgressStateHolder(
+            get<SqlProgressRepository>(),
+            get<SqlWorkoutRepository>(),
+            get<SqlFoundationStore>(),
+            get<PersonalRecordDerivationUseCase>(),
+            loggingConfigurations = get<SqlFoundationStore>()
+        )
+    }
     single { WeightInputUseCases() }
 }

@@ -2,6 +2,7 @@ package com.jjswigut.oopsallprs.ui.navigation
 
 import com.jjswigut.oopsallprs.data.backup.BackupPackageCodec
 import com.jjswigut.oopsallprs.data.backup.BackupSyncCoordinator
+import com.jjswigut.oopsallprs.data.backup.BackupSnapshotIdentity
 import com.jjswigut.oopsallprs.data.backup.FakeBackupRepository
 import com.jjswigut.oopsallprs.data.backup.FakeDocumentAdapter
 import com.jjswigut.oopsallprs.data.backup.FakeSyncRepository
@@ -41,8 +42,8 @@ class AppShellBackupSyncTest {
                 syncRepository = FakeSyncRepository(
                     BackupSyncState(
                         linkedFile = BackupLinkedFile("backup.json", "mem://backup", "memory"),
-                        lastBackupRevision = "local-1",
-                        lastLocalRevision = "local-1",
+                        lastBackupRevision = BackupSnapshotIdentity.revision(pkg),
+                        lastLocalRevision = BackupSnapshotIdentity.revision(pkg),
                         lastOutcome = BackupSyncOutcome.CLEAN,
                         updatedAt = instant(1)
                     )

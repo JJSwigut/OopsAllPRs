@@ -23,7 +23,7 @@ class RoutineRestConfigurationTest {
             instant(1_150)
         ).successValue()
         harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
         val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
 
         val launched = harness.lifecycle.startFromRoutine(routine.id, instant(4_000)).successValue()
@@ -45,7 +45,7 @@ class RoutineRestConfigurationTest {
             instant(1_150)
         ).successValue()
         harness.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 
         val routine = harness.routines.saveCompletedWorkoutAsRoutine(completed.id, "Push", instant(3_000)).successValue()
 

@@ -23,7 +23,8 @@ Notes:
   - Pairing is usually one-time per Mac/Pixel authorization.
   - The pair-ip:port comes from "Pair device with pairing code".
   - The connect-ip:port is the main Wireless debugging address shown after pairing.
-  - The last successful connect-ip:port is saved in .env.pixel-adb, which is ignored by .gitignore.
+  - With no address, the script discovers an already-paired device through ADB mDNS.
+  - The last successful connect-ip:port is a fallback saved in .env.pixel-adb, which is ignored by .gitignore.
 
 Environment overrides:
   ADB=/path/to/adb
@@ -83,34 +84,97 @@ save_serial() {
   mv "$tmp_file" "$CONFIG_FILE"
 }
 
-require_serial() {
-  local serial="${1:-${ADB_WIFI_SERIAL:-}}"
-  if [[ -z "$serial" ]]; then
-    printf 'Missing connect-ip:port. Run pair with a connect address or run connect <ip:port> once.\n\n' >&2
-    usage >&2
-    exit 1
-  fi
-  printf '%s\n' "$serial"
-}
-
 adb_cmd() {
   "$ADB_BIN" "$@"
 }
 
-connect_device() {
-  local serial
-  serial="$(require_serial "${1:-}")"
-  adb_cmd start-server >/dev/null
+is_authorized() {
+  local serial="$1"
+  [[ "$(adb_cmd -s "$serial" get-state 2>/dev/null || true)" == "device" ]]
+}
+
+add_candidate() {
+  local candidate="$1"
+  local existing
+  if [[ -z "$candidate" ]]; then
+    return 0
+  fi
+  for existing in "${candidates[@]}"; do
+    if [[ "$existing" == "$candidate" ]]; then
+      return 0
+    fi
+  done
+  candidates+=("$candidate")
+}
+
+collect_connected_candidates() {
+  local serial state
+  while read -r serial state _; do
+    if [[ "$state" == "device" && "$serial" == *:* ]]; then
+      add_candidate "$serial"
+    fi
+  done < <(adb_cmd devices -l)
+  return 0
+}
+
+collect_mdns_candidates() {
+  local instance service address
+  while read -r instance service address _; do
+    if [[ "$service" == "_adb-tls-connect._tcp" ]]; then
+      # Platform Tools 37+ prints: <instance> <service> <address>.
+      add_candidate "$address"
+    elif [[ "$instance" == *"._adb-tls-connect._tcp."* ]]; then
+      # Older releases print: <instance-and-service> <address>.
+      add_candidate "$service"
+    fi
+  done < <(adb_cmd mdns services 2>/dev/null || true)
+  return 0
+}
+
+try_candidate() {
+  local serial="$1"
+  if is_authorized "$serial"; then
+    ACTIVE_SERIAL="$serial"
+    return 0
+  fi
+
   local output
   output="$(adb_cmd connect "$serial" 2>&1 || true)"
   printf '%s\n' "$output"
-  if [[ "$output" != *"connected to"* && "$output" != *"already connected"* ]]; then
-    printf 'Could not connect to %s.\n' "$serial" >&2
-    exit 1
+  if is_authorized "$serial"; then
+    ACTIVE_SERIAL="$serial"
+    return 0
   fi
-  save_serial "$serial"
-  adb_cmd -s "$serial" wait-for-device
-  printf 'Using wireless device %s\n' "$serial"
+  return 1
+}
+
+connect_device() {
+  local requested="${1:-}"
+  local serial
+  # Bash 3.2 with nounset treats an empty array expansion as unbound.
+  candidates=("")
+  ACTIVE_SERIAL=""
+
+  adb_cmd start-server >/dev/null
+  add_candidate "$requested"
+  collect_connected_candidates
+  add_candidate "${ADB_WIFI_SERIAL:-}"
+  collect_mdns_candidates
+
+  for serial in "${candidates[@]}"; do
+    [[ -n "$serial" ]] || continue
+    if try_candidate "$serial"; then
+      save_serial "$ACTIVE_SERIAL"
+      adb_cmd -s "$ACTIVE_SERIAL" wait-for-device
+      printf 'Using wireless device %s\n' "$ACTIVE_SERIAL"
+      return
+    fi
+  done
+
+  printf 'No authorized wireless Android device was found.\n' >&2
+  printf 'Keep Wireless debugging enabled and the Pixel on the same network.\n' >&2
+  printf 'If this Mac is absent under Paired devices, run the pair command once.\n' >&2
+  exit 1
 }
 
 pair_device() {
@@ -124,34 +188,42 @@ pair_device() {
 
   adb_cmd start-server >/dev/null
   adb_cmd pair "$pair_addr" "$pair_code"
-  if [[ -n "$connect_addr" ]]; then
-    connect_device "$connect_addr"
-  else
-    printf '\nPaired. Now run:\n'
-    printf '  tools/pixel_adb_wifi.sh connect <connect-ip:port>\n'
+  connect_device "$connect_addr"
+}
+
+run_install_task() {
+  local sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+  if [[ -z "$sdk_root" ]]; then
+    sdk_root="$(cd "$(dirname "$ADB_BIN")/.." && pwd)"
   fi
+  (
+    cd "$ROOT_DIR"
+    ANDROID_HOME="$sdk_root" \
+      ANDROID_SDK_ROOT="$sdk_root" \
+      ANDROID_SERIAL="$ACTIVE_SERIAL" \
+      ./gradlew "$INSTALL_TASK"
+  )
 }
 
 install_app() {
-  local serial
-  serial="$(require_serial "${1:-}")"
-  connect_device "$serial"
-  (cd "$ROOT_DIR" && ANDROID_SERIAL="$serial" ./gradlew "$INSTALL_TASK")
+  connect_device "${1:-}"
+  run_install_task
+}
+
+launch_connected_app() {
+  adb_cmd -s "$ACTIVE_SERIAL" shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null
+  printf 'Launched %s on %s\n' "$APP_ID" "$ACTIVE_SERIAL"
 }
 
 launch_app() {
-  local serial
-  serial="$(require_serial "${1:-}")"
-  connect_device "$serial"
-  adb_cmd -s "$serial" shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null
-  printf 'Launched %s on %s\n' "$APP_ID" "$serial"
+  connect_device "${1:-}"
+  launch_connected_app
 }
 
 deploy_app() {
-  local serial
-  serial="$(require_serial "${1:-}")"
-  install_app "$serial"
-  launch_app "$serial"
+  connect_device "${1:-}"
+  run_install_task
+  launch_connected_app
 }
 
 main() {
@@ -178,6 +250,8 @@ main() {
       ;;
     status)
       adb_cmd devices -l
+      printf '\n'
+      adb_cmd mdns services
       ;;
     -h|--help|help|"")
       usage

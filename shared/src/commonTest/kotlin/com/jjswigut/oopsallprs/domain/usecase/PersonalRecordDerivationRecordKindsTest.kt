@@ -27,7 +27,7 @@ class PersonalRecordDerivationRecordKindsTest {
         val bodyweightSet = harness.setLogging
             .confirmSet(workout.id, bodyweight.id, SetKind.BODYWEIGHT, 12, null, 0, instant(1_400))
             .successValue()
-        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = harness.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 
         PersonalRecordDerivationUseCase(harness.store).rebuildFrom(listOf(completed))
 

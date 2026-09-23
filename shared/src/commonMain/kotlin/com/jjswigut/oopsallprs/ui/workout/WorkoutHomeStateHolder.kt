@@ -13,7 +13,6 @@ import com.jjswigut.oopsallprs.domain.usecase.WorkoutLifecycleUseCases
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import com.jjswigut.oopsallprs.ui.history.TemplateListItem
 import com.jjswigut.oopsallprs.ui.history.toTemplateListItem
-import com.jjswigut.oopsallprs.ui.profile.DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -32,10 +31,8 @@ data class WorkoutHomeState(
 class WorkoutHomeStateHolder(
     private val lifecycle: WorkoutLifecycleUseCases,
     private val routines: RoutineUseCases? = null,
-    private val fullAccess: FullAccessUseCases? = null,
-    freeCompletedWorkoutLimit: Int = DEFAULT_FREE_COMPLETED_WORKOUT_LIMIT
+    private val fullAccess: FullAccessUseCases? = null
 ) {
-    private val freeWorkoutLimit = freeCompletedWorkoutLimit.coerceAtLeast(0)
     private val _state = MutableStateFlow(WorkoutHomeState())
     val state: StateFlow<WorkoutHomeState> = _state
 
@@ -46,7 +43,7 @@ class WorkoutHomeStateHolder(
             templates = routines?.listRoutinesByRecentUse().orEmpty().map { it.toTemplateListItem() },
             pendingDeleteTemplate = null,
             fullAccess = accessState,
-            isFullAccessPaywallVisible = if (accessState.canCreateWorkoutData(freeWorkoutLimit)) {
+            isFullAccessPaywallVisible = if (accessState.canStartWorkout()) {
                 false
             } else {
                 _state.value.isFullAccessPaywallVisible
@@ -111,7 +108,7 @@ class WorkoutHomeStateHolder(
             val accessState = access.loadState()
             _state.value = _state.value.copy(
                 fullAccess = accessState,
-                isFullAccessPaywallVisible = if (accessState.canCreateWorkoutData(freeWorkoutLimit)) {
+                isFullAccessPaywallVisible = if (accessState.canStartWorkout()) {
                     false
                 } else {
                     _state.value.isFullAccessPaywallVisible
@@ -162,7 +159,7 @@ class WorkoutHomeStateHolder(
         val access = fullAccess ?: return null
         val accessState = access.loadState()
         _state.value = _state.value.copy(fullAccess = accessState)
-        if (accessState.canCreateWorkoutData(freeWorkoutLimit)) return null
+        if (accessState.canStartWorkout()) return null
         val message = WORKOUT_LIMIT_REACHED_MESSAGE
         _state.value = _state.value.copy(
             isFullAccessPaywallVisible = true,
@@ -175,6 +172,3 @@ class WorkoutHomeStateHolder(
 
 private fun ActiveSessionState?.resumable(): ActiveSessionState? =
     this?.takeIf { it.activeWorkoutId != null }
-
-private fun FullAccessState.canCreateWorkoutData(freeWorkoutLimit: Int): Boolean =
-    hasFullAccess || normalizedCompletedFreeWorkouts < freeWorkoutLimit

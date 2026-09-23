@@ -41,6 +41,11 @@ class BackupSnapshotReader(
     private val revisionCalculator: LocalRevisionCalculator = LocalRevisionCalculator()
 ) {
     suspend fun createPackage(now: Instant = Clock.System.now()): FoundationResult<BackupPackage> {
+        val pkg = readSnapshot(now)
+        return foundationSuccess(pkg.copy(lastLocalRevision = BackupSnapshotIdentity.revision(pkg)))
+    }
+
+    private suspend fun readSnapshot(now: Instant): BackupPackage {
         val activeWorkout = workouts.currentActiveWorkout()
         val session = sessions.load()
         val uxSession: ActiveWorkoutUxSession? = activeWorkout?.id?.let { activeUx.loadUxSession(it) }
@@ -54,75 +59,84 @@ class BackupSnapshotReader(
         }.sortedBy { it.exerciseDefinitionId.value }
         val records = progress.personalRecords()
         val points = progress.progressPoints()
-        val summary = summary(
+        return assemblePackage(
+            now = now,
             activeWorkout = activeWorkout?.toDto(),
             completed = completed.map { it.toDto() },
             routines = routines.map { it.toDto() },
             exercises = exercises.map { it.toDto() },
             records = records.map { it.toDto() },
-            points = points.map { it.toDto() }
-        )
-        val revision = revision(summary)
-        return foundationSuccess(
-            BackupPackage(
-                formatVersion = BACKUP_FORMAT_VERSION,
-                createdAt = now.toBackupMillis(),
-                deviceId = deviceId,
-                lastLocalRevision = revision.value,
-                appSchemaVersion = schemaVersion,
-                summary = summary.toDto(),
-                preferences = PreferencesSnapshotDto(
-                    weightUnit = preferences.weightUnit().name,
-                    weightStepPounds = preferences.weightStep(WeightUnit.POUNDS),
-                    weightStepKilograms = preferences.weightStep(WeightUnit.KILOGRAMS),
-                    defaultRestSeconds = preferences.defaultRestSeconds(),
-                    restSoundEnabled = preferences.restSoundEnabled(),
-                    startWorkoutTimerWithFirstSet = preferences.startWorkoutTimerWithFirstSet(),
-                    restTimerSurfaceEnabled = preferences.restTimerSurfaceEnabled()
-                ),
-                loggingConfigurations = configurations.map { it.toDto() },
-                userExerciseConfigurations = userConfigurations.map { it.toDto() },
-                exercises = exercises.map { it.toDto() },
-                routines = routines.map { it.toDto() },
-                activeWorkout = activeWorkout?.toDto(),
-                activeSession = session?.toDto(),
-                activeUxSession = uxSession?.toDto(),
-                activeSetDrafts = drafts.map { it.toDto() },
-                completedWorkouts = completed.map { it.toDto() },
-                personalRecords = records.map { it.toDto() },
-                progressPoints = points.map { it.toDto() },
-                exportMetadata = emptyList()
-            )
+            points = points.map { it.toDto() },
+            preferences = PreferencesSnapshotDto(
+                weightUnit = preferences.weightUnit().name,
+                weightStepPounds = preferences.weightStep(WeightUnit.POUNDS),
+                weightStepKilograms = preferences.weightStep(WeightUnit.KILOGRAMS),
+                defaultRestSeconds = preferences.defaultRestSeconds(),
+                restSoundEnabled = preferences.restSoundEnabled(),
+                startWorkoutTimerWithFirstSet = preferences.startWorkoutTimerWithFirstSet(),
+                restTimerSurfaceEnabled = preferences.restTimerSurfaceEnabled()
+            ),
+            configurations = configurations.map { it.toDto() },
+            userExerciseConfigurations = userConfigurations.map { it.toDto() },
+            activeSession = session?.toDto(),
+            activeUxSession = uxSession?.toDto(),
+            activeSetDrafts = drafts.map { it.toDto() }
         )
     }
 
-    suspend fun revision(): BackupRevision {
+    // Pure assembly shared by repository-backed reads and synchronous transactional SQL reads.
+    internal fun assemblePackage(
+        now: Instant,
+        preferences: PreferencesSnapshotDto,
+        configurations: List<LoggingConfigurationDto>,
+        userExerciseConfigurations: List<UserExerciseConfigurationDto>,
+        exercises: List<ExerciseCatalogItemDto>,
+        routines: List<RoutineDto>,
+        activeWorkout: ActiveWorkoutDto?,
+        activeSession: ActiveSessionDto?,
+        activeUxSession: ActiveWorkoutUxSessionDto?,
+        activeSetDrafts: List<PersistedSetDraftDto>,
+        completed: List<CompletedWorkoutDto>,
+        records: List<PersonalRecordDto>,
+        points: List<ProgressPointDto>,
+        exportMetadata: List<ExportSnapshotDto> = emptyList()
+    ): BackupPackage = BackupPackage(
+        formatVersion = BACKUP_FORMAT_VERSION,
+        createdAt = now.toBackupMillis(),
+        deviceId = deviceId,
+        lastLocalRevision = "",
+        appSchemaVersion = schemaVersion,
+        summary = summary(activeWorkout, completed, routines, exercises, records, points).toDto(),
+        preferences = preferences,
+        loggingConfigurations = configurations,
+        userExerciseConfigurations = userExerciseConfigurations,
+        exercises = exercises,
+        routines = routines,
+        activeWorkout = activeWorkout,
+        activeSession = activeSession,
+        activeUxSession = activeUxSession,
+        activeSetDrafts = activeSetDrafts,
+        completedWorkouts = completed,
+        personalRecords = records,
+        progressPoints = points,
+        exportMetadata = exportMetadata
+    )
+
+    suspend fun revision(): BackupRevision =
+        revision(readSnapshot(Clock.System.now()))
+
+    suspend fun currentSummary(): SnapshotSummary {
         val activeWorkout = workouts.currentActiveWorkout()?.toDto()
         val completed = workouts.completedWorkouts().map { it.toDto() }
         val routines = routines.routines().map { it.toDto() }
         val exercises = exercises.all().map { it.toDto() }
         val records = progress.personalRecords().map { it.toDto() }
         val points = progress.progressPoints().map { it.toDto() }
-        return revision(summary(activeWorkout, completed, routines, exercises, records, points))
+        return summary(activeWorkout, completed, routines, exercises, records, points)
     }
-
-    suspend fun currentSummary(): SnapshotSummary =
-        revision().summary
 
     fun revision(pkg: BackupPackage): BackupRevision =
-        BackupRevision(
-            value = pkg.lastLocalRevision,
-            timestamp = pkg.createdAt.toBackupInstant(),
-            summary = pkg.summary.toDomain()
-        )
-
-    private fun revision(summary: SnapshotSummary): BackupRevision {
-        val timestamps = mutableListOf<Instant?>(
-            summary.latestUpdatedTimestamp,
-            summary.latestWorkoutTimestamp
-        )
-        return revisionCalculator.revision(summary, timestamps)
-    }
+        revisionCalculator.revision(pkg)
 
     private fun summary(
         activeWorkout: ActiveWorkoutDto?,

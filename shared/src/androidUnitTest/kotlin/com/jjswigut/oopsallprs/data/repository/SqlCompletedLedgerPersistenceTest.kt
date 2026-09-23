@@ -91,7 +91,7 @@ internal suspend fun createCompletedMixedWorkout(
     }
     repos.setLogging.confirmSet(workout.id, weighted.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
     repos.setLogging.confirmSet(workout.id, bodyweight.id, SetKind.BODYWEIGHT, 12, null, 0, instant(1_250)).successValue()
-    val completed = repos.routineUseCases.finishWorkout(workout.id, instant(2_000)).successValue()
+    val completed = repos.routineUseCases.finishWorkout(workout.id, instant(2_000)).successValue().workout
     assertTrue(repos.lifecycle.currentActiveWorkout() == null)
     return completed.id
 }

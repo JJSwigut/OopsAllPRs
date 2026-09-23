@@ -13,10 +13,8 @@ import com.jjswigut.oopsallprs.domain.model.ProgressDerivationVersions
 import com.jjswigut.oopsallprs.domain.model.ProgressEvidenceMetric
 import com.jjswigut.oopsallprs.domain.model.ProgressPoint
 import com.jjswigut.oopsallprs.domain.model.WireCode
-import com.jjswigut.oopsallprs.domain.model.newFoundationId
 import com.jjswigut.oopsallprs.domain.repository.LoggingConfigurationRepository
 import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
-import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class PersonalRecordDerivationUseCase(
@@ -24,9 +22,9 @@ class PersonalRecordDerivationUseCase(
     private val loggingConfigurationRepository: LoggingConfigurationRepository? =
         progressRepository as? LoggingConfigurationRepository
 ) {
-    suspend fun rebuildFrom(workouts: List<CompletedWorkout>) {
+    suspend fun rebuildFrom(workouts: List<CompletedWorkout>): com.jjswigut.oopsallprs.domain.model.FoundationResult<Unit> {
         val snapshot = snapshotFrom(workouts)
-        progressRepository.replaceRecords(snapshot.records, snapshot.points)
+        return progressRepository.replaceRecords(snapshot.records, snapshot.points)
     }
 
     suspend fun snapshotFrom(workouts: List<CompletedWorkout>): DerivedProgressSnapshot {
@@ -51,22 +49,17 @@ class PersonalRecordDerivationUseCase(
 
         val weightedRecords = points
             .filter { it.metricCode == ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode }
-            .groupBy { it.exerciseCatalogId }
+            .groupBy { WeightedRecordBucket(it.exerciseCatalogId, it.reps ?: 0) }
             .values
-            .flatMap { exercisePoints ->
-                exercisePoints.nondominatedWeightedSets { point ->
-                    WeightedSetPerformance(
-                        weightKg = point.weight?.value ?: point.value,
-                        reps = point.reps ?: 0
-                    )
-                }
-            }
+            .flatMap { series -> series.runningBests() }
             .mapNotNull { it.toPersonalRecord() }
 
         val scalarRecords = points
             .filter { it.metricCode != ProgressEvidenceMetric.WEIGHT_FOR_REPS.wireCode }
             .groupBy { it.recordBucket() }
-            .mapNotNull { (_, values) -> values.maxByOrNull(ProgressPoint::value)?.toPersonalRecord() }
+            .values
+            .flatMap { series -> series.runningBests() }
+            .mapNotNull { it.toPersonalRecord() }
 
         return DerivedProgressSnapshot(weightedRecords + scalarRecords, points)
     }
@@ -79,7 +72,7 @@ class PersonalRecordDerivationUseCase(
         val recordSourceSetId = sourceSetId ?: return null
         val evidenceMetric = ProgressEvidenceMetric.fromWireCode(metricCode.value) ?: return null
         return PersonalRecord(
-            id = newFoundationId("pr"),
+            id = FoundationId("pr-${recordSourceSetId.value}-${metricCode.value}-${reps ?: "all"}"),
             exerciseCatalogId = exerciseCatalogId,
             recordKind = evidenceMetric.legacyRecordKind,
             reps = reps,
@@ -88,7 +81,7 @@ class PersonalRecordDerivationUseCase(
             sourceWorkoutId = sourceWorkoutId,
             sourceSetId = recordSourceSetId,
             achievedAt = recordedAt,
-            createdAt = Clock.System.now(),
+            createdAt = recordedAt,
             metricCode = metricCode,
             derivationVersion = derivationVersion
         )
@@ -101,6 +94,24 @@ class PersonalRecordDerivationUseCase(
         val exerciseId: FoundationId,
         val metricCode: WireCode
     )
+
+    private data class WeightedRecordBucket(
+        val exerciseId: FoundationId,
+        val reps: Int
+    )
+}
+
+private fun List<ProgressPoint>.runningBests(): List<ProgressPoint> {
+    var best = Double.NEGATIVE_INFINITY
+    return sortedWith(compareBy<ProgressPoint> { it.recordedAt }.thenBy { it.id.value })
+        .filter { point ->
+            if (point.value > best) {
+                best = point.value
+                true
+            } else {
+                false
+            }
+        }
 }
 
 data class DerivedProgressSnapshot(
@@ -119,7 +130,7 @@ internal data class DerivedSetEvidence(
         fallbackRecordedAt: Instant
     ): ProgressPoint =
         ProgressPoint(
-            id = newFoundationId("progress"),
+            id = FoundationId("progress-${sourceSet.id.value}-${metric.wireCode.value}"),
             exerciseCatalogId = exerciseCatalogId,
             sourceWorkoutId = sourceWorkoutId,
             sourceSetId = sourceSet.id,
@@ -156,11 +167,13 @@ internal object SetProgressEvidenceDerivation {
             val repCount = requireNotNull(repetitions)
             val loadValue = requireNotNull(load).value
             evidence += DerivedSetEvidence(ProgressEvidenceMetric.WEIGHT_FOR_REPS, loadValue, set)
-            evidence += DerivedSetEvidence(
-                ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX,
-                loadValue * (1.0 + repCount.toDouble() / 30.0),
-                set
-            )
+            if (repCount in ESTIMATED_ONE_REP_MAX_REP_RANGE) {
+                evidence += DerivedSetEvidence(
+                    ProgressEvidenceMetric.ESTIMATED_ONE_REP_MAX,
+                    loadValue * (1.0 + repCount.toDouble() / 30.0),
+                    set
+                )
+            }
             evidence += DerivedSetEvidence(
                 ProgressEvidenceMetric.VOLUME,
                 loadValue * repCount.toDouble(),
@@ -189,6 +202,8 @@ internal object SetProgressEvidenceDerivation {
         return evidence
     }
 }
+
+private val ESTIMATED_ONE_REP_MAX_REP_RANGE: IntRange = 1..12
 
 internal suspend fun <K, V> MutableMap<K, V>.getOrPutSuspending(
     key: K,

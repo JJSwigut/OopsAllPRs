@@ -6,6 +6,8 @@ import com.jjswigut.oopsallprs.domain.model.ExerciseLoggingMode
 import com.jjswigut.oopsallprs.domain.model.ExerciseReference
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
+import com.jjswigut.oopsallprs.domain.model.FullAccessState
+import com.jjswigut.oopsallprs.domain.repository.FullAccessRepository
 import com.jjswigut.oopsallprs.domain.model.SetKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.newFoundationId
@@ -26,6 +28,9 @@ const val SAMPLE_CSV: String =
         "\"Cable Row, Seated\",Back,Cable,Pull,Strength,Beginner,Upper Body\n"
 
 fun instant(ms: Long): Instant = Instant.fromEpochMilliseconds(ms)
+
+suspend fun FullAccessRepository.setFullAccessForTest(state: FullAccessState): FoundationResult<FullAccessState> =
+    updateFullAccess { state }
 
 fun <T> FoundationResult<T>.successValue(): T =
     when (this) {

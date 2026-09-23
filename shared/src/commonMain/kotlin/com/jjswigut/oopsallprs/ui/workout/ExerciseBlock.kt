@@ -13,6 +13,7 @@ import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.ds.component.FitCard
 import com.jjswigut.oopsallprs.ds.foundation.pressable
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
+import com.jjswigut.oopsallprs.ui.common.countLabel
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
@@ -94,7 +95,7 @@ private fun ExerciseGroupHeader(group: ExerciseBlockGroupState) {
                 text = group.groupSummary().orEmpty(),
                 style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
             )
-            FoundationMutedText("${group.blocks.size} exercises")
+            FoundationMutedText(group.blocks.size.countLabel("exercise"))
         }
         FoundationMutedText(group.loggedSetCount.setsLabel())
     }

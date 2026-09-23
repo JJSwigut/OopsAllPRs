@@ -4,10 +4,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.jjswigut.oopsallprs.dev.DeveloperSeedOutcome
 import com.jjswigut.oopsallprs.dev.DeveloperSeedScenario
 import com.jjswigut.oopsallprs.dev.DeveloperSeedState
@@ -49,6 +55,8 @@ fun ProfileFlow(
     onReduceMotionChanged: (Boolean) -> Unit,
     onPurchaseLifetimeUnlock: () -> Unit,
     onRestorePurchases: () -> Unit,
+    onRetryStoreOffer: () -> Unit,
+    onDismissUnlock: () -> Unit,
     onExportRequested: (ExportType) -> Unit,
     onStartBackupSetup: () -> Unit,
     onBackupSetupNext: () -> Unit,
@@ -74,7 +82,8 @@ fun ProfileFlow(
         FullAccessCard(
             state = state,
             onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
-            onRestorePurchases = onRestorePurchases
+            onRestorePurchases = onRestorePurchases,
+            onRetryStoreOffer = onRetryStoreOffer
         )
         UnitsCard(
             state = state,
@@ -111,6 +120,30 @@ fun ProfileFlow(
             onReduceMotionChanged = onReduceMotionChanged
         )
         PrivacyCard(onPrivacyPolicy)
+    }
+
+    if (state.isUnlockDialogVisible && !state.fullAccessStatus.hasFullAccess) {
+        FitDialog(
+            onDismissRequest = onDismissUnlock,
+            modifier = Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState())
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+                SectionLabel("Lifetime Unlock")
+                FoundationMutedText(FULL_ACCESS_BENEFITS_SUMMARY)
+                FullAccessPurchaseOptions(
+                    state.fullAccessStatus,
+                    onPurchaseLifetimeUnlock,
+                    onRestorePurchases,
+                    onRetryStoreOffer
+                )
+                FitButton(
+                    text = "Not now",
+                    onClick = onDismissUnlock,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitButtonStyle.Secondary
+                )
+            }
+        }
     }
 
     if (state.isWeightStepPickerVisible) {
@@ -170,56 +203,24 @@ private fun WorkoutTimerCard(
 private fun FullAccessCard(
     state: ProfileState,
     onPurchaseLifetimeUnlock: () -> Unit,
-    onRestorePurchases: () -> Unit
+    onRestorePurchases: () -> Unit,
+    onRetryStoreOffer: () -> Unit
 ) {
     val access = state.fullAccessStatus
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
-            SectionLabel("Unlock")
+            SectionLabel(if (access.hasFullAccess) "Full Access" else "Lifetime Unlock")
             StatusRow("Status", access.statusLabel)
             FoundationMutedText(access.detailLabel)
-            when {
-                access.hasFullAccess -> FoundationMutedText("Unlimited logging is available forever.")
-                access.isFreeLimitReached -> {
-                    FoundationText(
-                        text = "You've used your free workouts.",
-                        style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface)
-                    )
-                    FoundationMutedText("Unlock unlimited workout logging forever.")
-                    FoundationMutedText(access.termsLabel)
-                    StatusRow("Price", access.offerLabel)
-                    FitButton(
-                        text = if (access.isStoreBusy) "Working" else "Unlock forever",
-                        onClick = onPurchaseLifetimeUnlock,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !access.isStoreBusy,
-                        style = FitButtonStyle.Primary
-                    )
-                    FitButton(
-                        text = if (access.isStoreBusy) "Working" else "Restore purchase",
-                        onClick = onRestorePurchases,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !access.isStoreBusy,
-                        style = FitButtonStyle.Secondary
-                    )
-                }
-                else -> FoundationMutedText("Keep logging. Unlock appears when the free workout limit is reached.")
-            }
-            if (!access.hasFullAccess && !access.isFreeLimitReached) {
-                FitButton(
-                    text = if (access.isStoreBusy) "Working" else "Restore purchase",
-                    onClick = onRestorePurchases,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !access.isStoreBusy,
-                    style = FitButtonStyle.Secondary
+            if (!access.hasFullAccess) {
+                FullAccessPurchaseOptions(
+                    access,
+                    onPurchaseLifetimeUnlock,
+                    onRestorePurchases,
+                    onRetryStoreOffer
                 )
-            }
-            FoundationMutedText("Purchases restore through the app store used to buy them.")
-            access.error?.let { message ->
-                FoundationText(
-                    text = message,
-                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
-                )
+            } else {
+                access.storeMessage?.let { FoundationMutedText(it) }
             }
         }
     }
@@ -498,7 +499,7 @@ private fun RestPreferencesCard(
                 onCheckedChange = onRestSoundChanged
             )
             ToggleRow(
-                label = "Show active timer outside app",
+                label = "Show rest timer outside app",
                 value = if (state.restTimerSurfaceEnabled) "On" else "Off",
                 checked = state.restTimerSurfaceEnabled,
                 onCheckedChange = onRestTimerSurfaceChanged
@@ -644,13 +645,18 @@ private fun ExportCard(
     state: ProfileState,
     onExportRequested: (ExportType) -> Unit
 ) {
+    var isPickerVisible by remember { mutableStateOf(false) }
     FitCard(glow = FitTheme.glow.none) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             SectionLabel("Export")
-            ExportButton("Workouts", state.isExporting) { onExportRequested(ExportType.WORKOUTS) }
-            ExportButton("Routines", state.isExporting) { onExportRequested(ExportType.ROUTINES) }
-            ExportButton("Exercises", state.isExporting) { onExportRequested(ExportType.EXERCISES) }
-            ExportButton("PRs", state.isExporting) { onExportRequested(ExportType.PERSONAL_RECORDS) }
+            FoundationMutedText("Save a copy of your training data as a file.")
+            FitButton(
+                text = if (state.isExporting) "Exporting" else "Export data",
+                onClick = { isPickerVisible = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isExporting,
+                style = FitButtonStyle.Secondary
+            )
             state.lastExport?.let { result ->
                 FoundationMutedText(
                     "${result.type.displayName()} export: ${result.rowCount} rows, ${result.weightUnit.abbreviation()}"
@@ -661,6 +667,36 @@ private fun ExportCard(
                 FoundationText(
                     text = message,
                     style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
+                )
+            }
+        }
+    }
+    if (isPickerVisible) {
+        FitDialog(onDismissRequest = { isPickerVisible = false }) {
+            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+                SectionLabel("Export data")
+                FoundationMutedText("Choose the data you want to save. You can export another file afterward.")
+                ExportButton("Workouts", state.isExporting) {
+                    isPickerVisible = false
+                    onExportRequested(ExportType.WORKOUTS)
+                }
+                ExportButton("Routines", state.isExporting) {
+                    isPickerVisible = false
+                    onExportRequested(ExportType.ROUTINES)
+                }
+                ExportButton("Exercises", state.isExporting) {
+                    isPickerVisible = false
+                    onExportRequested(ExportType.EXERCISES)
+                }
+                ExportButton("Personal records", state.isExporting) {
+                    isPickerVisible = false
+                    onExportRequested(ExportType.PERSONAL_RECORDS)
+                }
+                FitButton(
+                    text = "Cancel",
+                    onClick = { isPickerVisible = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitButtonStyle.Secondary
                 )
             }
         }

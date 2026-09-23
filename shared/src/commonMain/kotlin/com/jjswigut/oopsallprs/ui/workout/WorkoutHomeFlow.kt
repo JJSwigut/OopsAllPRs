@@ -3,6 +3,8 @@ package com.jjswigut.oopsallprs.ui.workout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +12,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,15 +22,18 @@ import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.ds.component.FitButton
 import com.jjswigut.oopsallprs.ds.component.FitButtonStyle
 import com.jjswigut.oopsallprs.ds.component.FitCard
-import com.jjswigut.oopsallprs.ds.component.FitListRow
+import com.jjswigut.oopsallprs.ds.component.FitDialog
 import com.jjswigut.oopsallprs.ds.component.FitStartButton
 import com.jjswigut.oopsallprs.ds.theme.FitTheme
 import com.jjswigut.oopsallprs.ui.accessibility.foundationTouchTarget
+import com.jjswigut.oopsallprs.ui.common.countLabel
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
 import com.jjswigut.oopsallprs.ui.profile.ProfileFullAccessStatus
+import com.jjswigut.oopsallprs.ui.profile.FullAccessPurchaseOptions
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WorkoutHomeFlow(
     state: WorkoutHomeState,
@@ -35,6 +42,8 @@ fun WorkoutHomeFlow(
     onStartRoutine: (FoundationId) -> Unit,
     onPurchaseLifetimeUnlock: () -> Unit = {},
     onRestorePurchases: () -> Unit = {},
+    onRetryStoreOffer: () -> Unit = {},
+    onDismissFullAccessPaywall: () -> Unit = {},
     onCreateRoutine: () -> Unit = {},
     onEditRoutine: (FoundationId) -> Unit = {},
     onRequestDeleteTemplate: (FoundationId) -> Unit = {},
@@ -46,34 +55,20 @@ fun WorkoutHomeFlow(
         val hasActiveSession = state.activeSession != null
         Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(bottom = if (state.activeSession == null && state.templates.isEmpty()) FitTheme.spacing.xxxl else FitTheme.spacing.xs),
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(top = FitTheme.spacing.xl, bottom = FitTheme.spacing.xl),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
         ) {
-            if (state.activeSession == null && state.templates.isEmpty()) {
-                FitCard(glow = FitTheme.glow.none) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
-                        ) {
-                            FoundationText("Today", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-                            FoundationMutedText("No active workout")
-                        }
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
-                        ) {
-                            FoundationText("0", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
-                            FoundationMutedText("routines")
-                        }
+            Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                FoundationText("Train", style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
+                FoundationMutedText(
+                    when {
+                        hasActiveSession -> "A workout is already in progress"
+                        state.templates.isEmpty() -> "Start your first workout"
+                        else -> "Start fresh or use a saved template"
                     }
-                }
+                )
             }
             if (state.templates.isNotEmpty()) {
                 FitCard(glow = FitTheme.glow.none) {
@@ -93,20 +88,32 @@ fun WorkoutHomeFlow(
                             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
                         ) {
                             items(state.templates, key = { it.templateId.value }) { template ->
-                                FitListRow(
-                                    onClick = if (hasActiveSession) null else {
-                                        { onStartRoutine(template.templateId) }
-                                    }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = FitTheme.size.touchMin),
+                                    verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
                                 ) {
                                     Column(
-                                        modifier = Modifier.weight(1f),
                                         verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
                                     ) {
                                         FoundationText(template.name, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-                                        FoundationMutedText("${template.exerciseCount} exercises • ${template.setTargetCount} planned sets")
+                                        FoundationMutedText(
+                                            "${template.exerciseCount.countLabel("exercise")} • " +
+                                                template.setTargetCount.countLabel("planned set", "planned sets")
+                                        )
                                     }
-                                    FoundationTextAction("Edit", onClick = { onEditRoutine(template.templateId) })
-                                    FoundationTextAction("Delete", onClick = { onRequestDeleteTemplate(template.templateId) })
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm),
+                                        verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)
+                                    ) {
+                                        if (!hasActiveSession) {
+                                            FoundationTextAction("Start", onClick = { onStartRoutine(template.templateId) })
+                                        }
+                                        FoundationTextAction("Edit", onClick = { onEditRoutine(template.templateId) })
+                                        FoundationTextAction("Delete", onClick = { onRequestDeleteTemplate(template.templateId) })
+                                    }
                                 }
                             }
                         }
@@ -138,7 +145,7 @@ fun WorkoutHomeFlow(
                 }
                 if (!hasActiveSession) {
                     FitStartButton(
-                        text = "Start workout",
+                        text = "Start empty workout",
                         onClick = onStartEmpty,
                         modifier = Modifier.foundationTouchTarget("Start empty workout")
                     )
@@ -148,7 +155,7 @@ fun WorkoutHomeFlow(
                     FitStartButton(
                         text = "Start workout",
                         onClick = onStartEmpty,
-                        modifier = Modifier.foundationTouchTarget("Start empty workout")
+                        modifier = Modifier.foundationTouchTarget("Start workout")
                     )
                     FitButton(
                         text = "Create routine",
@@ -158,13 +165,6 @@ fun WorkoutHomeFlow(
                     )
                 }
             }
-            if (state.isFullAccessPaywallVisible) {
-                FullAccessRequiredCard(
-                    access = fullAccessStatus,
-                    onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
-                    onRestorePurchases = onRestorePurchases
-                )
-            }
             state.errorMessage?.let { message ->
                 FoundationText(
                     text = message,
@@ -172,46 +172,40 @@ fun WorkoutHomeFlow(
                 )
             }
         }
+        if (state.isFullAccessPaywallVisible) {
+            FullAccessRequiredDialog(
+                access = fullAccessStatus,
+                onPurchaseLifetimeUnlock = onPurchaseLifetimeUnlock,
+                onRestorePurchases = onRestorePurchases,
+                onRetryStoreOffer = onRetryStoreOffer,
+                onDismiss = onDismissFullAccessPaywall
+            )
+        }
     }
 }
 
 @Composable
-private fun FullAccessRequiredCard(
+private fun FullAccessRequiredDialog(
     access: ProfileFullAccessStatus,
     onPurchaseLifetimeUnlock: () -> Unit,
-    onRestorePurchases: () -> Unit
+    onRestorePurchases: () -> Unit,
+    onRetryStoreOffer: () -> Unit,
+    onDismiss: () -> Unit
 ) {
-    FitCard(glow = FitTheme.glow.none) {
+    FitDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState())
+    ) {
         Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
             FoundationText("You've used your free workouts.", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
             FoundationMutedText("Unlock unlimited workout logging forever.")
-            FoundationMutedText(access.termsLabel)
-            FoundationMutedText("Price ${access.offerLabel}")
-            Row(
+            FullAccessPurchaseOptions(access, onPurchaseLifetimeUnlock, onRestorePurchases, onRetryStoreOffer)
+            FitButton(
+                text = "Not now",
+                onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
-            ) {
-                FitButton(
-                    text = if (access.isStoreBusy) "Working" else "Unlock forever",
-                    onClick = onPurchaseLifetimeUnlock,
-                    modifier = Modifier.weight(1f),
-                    enabled = !access.isStoreBusy,
-                    style = FitButtonStyle.Primary
-                )
-                FitButton(
-                    text = "Restore purchase",
-                    onClick = onRestorePurchases,
-                    modifier = Modifier.weight(1f),
-                    enabled = !access.isStoreBusy,
-                    style = FitButtonStyle.Secondary
-                )
-            }
-            access.error?.let { error ->
-                FoundationText(
-                    text = error,
-                    style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
-                )
-            }
+                style = FitButtonStyle.Secondary
+            )
         }
     }
 }

@@ -11,4 +11,20 @@ class WorkoutElapsedFormattingTest {
         assertEquals("1:01", formatElapsed(61_000))
         assertEquals("1:01:01", formatElapsed(3_661_000))
     }
+
+    @Test
+    fun activeWorkoutExplainsThatTimingBeginsWithTheFirstLoggedSet() {
+        assertEquals("Starts with first set", workoutElapsedLabel(isTimerStarted = false, elapsedMillis = 0))
+        assertEquals("1:01", workoutElapsedLabel(isTimerStarted = true, elapsedMillis = 61_000))
+    }
+
+    @Test
+    fun exercisesDoNotMakeAnUnstartedTimerLookStuck() {
+        assertEquals(
+            "The workout timer starts when you log your first set.",
+            workoutTimerStartHint(hasExercises = true, isTimerStarted = false)
+        )
+        assertEquals(null, workoutTimerStartHint(hasExercises = false, isTimerStarted = false))
+        assertEquals(null, workoutTimerStartHint(hasExercises = true, isTimerStarted = true))
+    }
 }

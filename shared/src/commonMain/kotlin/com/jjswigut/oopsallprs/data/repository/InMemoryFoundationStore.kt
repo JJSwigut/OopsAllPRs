@@ -21,6 +21,9 @@ import com.jjswigut.oopsallprs.domain.model.ExportFile
 import com.jjswigut.oopsallprs.domain.model.ExportSnapshot
 import com.jjswigut.oopsallprs.domain.model.ExportType
 import com.jjswigut.oopsallprs.domain.model.FullAccessState
+import com.jjswigut.oopsallprs.domain.model.WorkoutCompletionReceipt
+import com.jjswigut.oopsallprs.domain.model.buildCompletedWorkout
+import com.jjswigut.oopsallprs.domain.model.recordLocalCompletion
 import com.jjswigut.oopsallprs.domain.model.FoundationId
 import com.jjswigut.oopsallprs.domain.model.FoundationResult
 import com.jjswigut.oopsallprs.domain.model.LegacyLoggingConfigurations
@@ -54,6 +57,12 @@ import com.jjswigut.oopsallprs.domain.repository.WorkoutRepository
 import com.jjswigut.oopsallprs.domain.repository.UserExerciseConfigurationRepository
 import com.jjswigut.oopsallprs.domain.validation.FoundationError
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class InMemoryFoundationStore :
     WorkoutRepository,
@@ -89,8 +98,10 @@ class InMemoryFoundationStore :
     private var defaultRestSeconds = RestConfiguration.DEFAULT_SECONDS
     private var restSoundEnabled = true
     private var startTimerWithFirstSetPreference = true
-    private var restTimerSurfaceEnabled = true
-    private var fullAccessState = FullAccessState()
+    private var restTimerSurfaceEnabled = false
+    private var fullAccessState: FullAccessState? = null
+    private val accountingMutex = Mutex()
+    private val accountedCompletionSources = mutableSetOf<FoundationId>()
 
     override suspend fun createActiveWorkout(workout: ActiveWorkout): FoundationResult<ActiveWorkout> {
         if (activeWorkouts.values.any { it.status.name == "ACTIVE" }) {
@@ -118,13 +129,53 @@ class InMemoryFoundationStore :
         return foundationSuccess(Unit)
     }
 
-    override suspend fun finishWorkout(workout: CompletedWorkout): FoundationResult<CompletedWorkout> {
+    override suspend fun finishActiveWorkout(
+        id: FoundationId,
+        finishedAt: Instant
+    ): FoundationResult<WorkoutCompletionReceipt> = accountingMutex.withLock {
+        currentCoroutineContext().ensureActive()
+        val existing = completedWorkouts.values.filter { it.sourceActiveWorkoutId == id }
+        if (existing.size > 1) {
+            return@withLock foundationFailure(FoundationError.Conflict("Multiple completed workouts reference $id"))
+        }
+        existing.singleOrNull()?.let { completed ->
+            initializeLocalCompletionAccounting()
+            accountedCompletionSources += id
+            return@withLock foundationSuccess(WorkoutCompletionReceipt(completed, newlyCompleted = false))
+        }
+        val active = activeWorkouts[id]
+            ?: return@withLock foundationFailure(FoundationError.NotFound("Active workout not found: $id"))
+        if (active.status.name != "ACTIVE") {
+            return@withLock foundationFailure(FoundationError.Conflict("Workout is not active: $id"))
+        }
+        if (active.loggedSets().isEmpty()) {
+            return@withLock foundationFailure(FoundationError.Validation("Log at least one set before finishing"))
+        }
+        val completed = buildCompletedWorkout(active, newFoundationId("completed"), finishedAt, startTimerWithFirstSetPreference)
+        currentCoroutineContext().ensureActive()
+        // Capture the legacy fallback before inserting this completion.
+        val access = initializeLocalCompletionAccounting()
+        val updated = if (id in accountedCompletionSources) access else access.recordLocalCompletion(finishedAt)
+        persistCompletedWorkout(completed)
+        accountedCompletionSources += id
+        fullAccessState = updated
+        foundationSuccess(WorkoutCompletionReceipt(completed, newlyCompleted = true))
+    }
+
+    override suspend fun finishWorkout(workout: CompletedWorkout): FoundationResult<CompletedWorkout> = accountingMutex.withLock {
+        currentCoroutineContext().ensureActive()
+        initializeLocalCompletionAccounting()
+        persistCompletedWorkout(workout)
+        accountedCompletionSources += workout.sourceActiveWorkoutId
+        foundationSuccess(workout)
+    }
+
+    private fun persistCompletedWorkout(workout: CompletedWorkout) {
         completedWorkouts[workout.id] = workout
         activeWorkouts.remove(workout.sourceActiveWorkoutId)
         activeSessionState = activeSessionState?.takeIf { it.activeWorkoutId != workout.sourceActiveWorkoutId }
         activeUxSessions.remove(workout.sourceActiveWorkoutId)
         activeSetDrafts.entries.removeAll { it.value.activeWorkoutId == workout.sourceActiveWorkoutId }
-        return foundationSuccess(workout)
     }
 
     override suspend fun deleteCompletedWorkout(id: FoundationId, now: kotlinx.datetime.Instant): FoundationResult<Unit> {
@@ -464,14 +515,33 @@ class InMemoryFoundationStore :
         return foundationSuccess(enabled)
     }
 
-    override suspend fun loadFullAccess(): FullAccessState = fullAccessState
+    override suspend fun loadFullAccess(): FullAccessState = accountingMutex.withLock { currentFullAccess() }
 
-    override suspend fun saveFullAccess(state: FullAccessState): FoundationResult<FullAccessState> {
-        val normalized = state.copy(
-            completedFreeWorkouts = state.normalizedCompletedFreeWorkouts
-        )
-        fullAccessState = normalized
-        return foundationSuccess(normalized)
+    override suspend fun updateFullAccess(transform: (FullAccessState) -> FullAccessState): FoundationResult<FullAccessState> =
+        accountingMutex.withLock {
+            try {
+                currentCoroutineContext().ensureActive()
+                val state = transform(currentFullAccess())
+                val normalized = state.copy(completedFreeWorkouts = state.normalizedCompletedFreeWorkouts)
+                currentCoroutineContext().ensureActive()
+                fullAccessState = normalized
+                foundationSuccess(normalized)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                foundationFailure(FoundationError.Persistence(error.message ?: "Could not update full access"))
+            }
+        }
+
+    private fun currentFullAccess(): FullAccessState = fullAccessState ?: FullAccessState(
+        completedFreeWorkouts = completedWorkouts.size.coerceAtMost(com.jjswigut.oopsallprs.domain.model.FULL_ACCESS_FREE_COMPLETED_WORKOUT_LIMIT)
+    )
+
+    private fun initializeLocalCompletionAccounting(): FullAccessState = currentFullAccess().also { state ->
+        if (fullAccessState == null) {
+            accountedCompletionSources += completedWorkouts.values.map { it.sourceActiveWorkoutId }
+            fullAccessState = state
+        }
     }
 
     override suspend fun replaceRecords(

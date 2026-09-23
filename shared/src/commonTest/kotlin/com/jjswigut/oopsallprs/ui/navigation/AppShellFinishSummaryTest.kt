@@ -25,12 +25,38 @@ class AppShellFinishSummaryTest {
             instant(1_100)
         ).successValue()
         appState.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
-        val completed = appState.routines.finishWorkout(workout.id, instant(2_000)).successValue()
+        val completed = appState.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
 
         appState.history.presentCompletedWorkout(completed.id)
         appState.navigation.selectDestination(TopLevelDestination.HISTORY, instant(2_200))
 
         assertEquals(TopLevelDestination.HISTORY, appState.navigation.state.value.selectedDestination)
         assertNotNull(appState.history.state.value.selectedSummary)
+    }
+
+    @Test
+    fun savedTemplateHandoffLeavesHistoryDetailBeforeOpeningTrain() = runTest {
+        val appState = testAppState()
+        val workout = appState.workoutLifecycle.startEmpty(instant(1_000)).successValue()
+        val exercise = appState.setLogging.addExercise(
+            workout.id,
+            com.jjswigut.oopsallprs.domain.model.ExerciseReference(
+                com.jjswigut.oopsallprs.domain.model.FoundationId("exercise-bench"),
+                "Bench Press",
+                isBodyweight = false
+            ),
+            instant(1_100)
+        ).successValue()
+        appState.setLogging.confirmSet(workout.id, exercise.id, SetKind.WEIGHTED, 5, WeightKg(100.0), 0, instant(1_200)).successValue()
+        val completed = appState.routines.finishWorkout(workout.id, instant(2_000)).successValue().workout
+
+        appState.history.presentCompletedWorkout(completed.id)
+        appState.navigation.selectDestination(TopLevelDestination.HISTORY, instant(2_200))
+
+        appState.history.clearSelection()
+        appState.navigation.selectDestination(TopLevelDestination.TRAIN, instant(2_300))
+
+        assertEquals(TopLevelDestination.TRAIN, appState.navigation.state.value.selectedDestination)
+        kotlin.test.assertNull(appState.history.state.value.selectedSummary)
     }
 }

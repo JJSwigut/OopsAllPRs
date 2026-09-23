@@ -18,4 +18,6 @@ class DeveloperSeedStateHolder(
         )
         return result
     }
+
+    suspend fun loadProgressDemoIfEmpty(): DeveloperSeedResult = useCase.loadProgressDemoIfEmpty()
 }
