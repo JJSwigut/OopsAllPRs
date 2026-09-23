@@ -137,6 +137,8 @@ class GooglePlayListingTest < Minitest::Test
       },
       build_options.fetch(:export_options).fetch(:provisioningProfiles)
     )
+    assert_includes build_options.fetch(:xcargs), "IOS_APP_PROVISIONING_PROFILE_NAME=\"Oops All PRs App Store\""
+    assert_includes build_options.fetch(:xcargs), "IOS_LIVE_ACTIVITY_PROVISIONING_PROFILE_NAME=\"Oops All PRs Rest Timer App Store\""
     assert_equal "/tmp/OopsAllPRs.ipa", upload_options.fetch(:ipa)
   end
 
