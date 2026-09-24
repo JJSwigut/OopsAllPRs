@@ -267,17 +267,7 @@ actual class RestNotificationScheduler actual constructor(private val context: A
         val androidContext = context as? Context ?: return false
         val manager = notificationManager(androidContext)
         manager.ensureActiveRestChannel()
-        val openApp = androidContext.packageManager.getLaunchIntentForPackage(androidContext.packageName)
-            ?.setAction(ACTION_OPEN_ACTIVE_WORKOUT)
-            ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        val contentIntent = openApp?.let { intent ->
-            PendingIntent.getActivity(
-                androidContext,
-                REST_OPEN_APP_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
+        val contentIntent = activeWorkoutContentIntent(androidContext)
         val notification = android.app.Notification.Builder(androidContext, CHANNEL_ACTIVE)
             .setSmallIcon(com.jjswigut.oopsallprs.R.drawable.ic_rest_timer)
             .setContentTitle("Rest")
@@ -331,6 +321,7 @@ class RestTimerReceiver : BroadcastReceiver() {
             .setContentTitle("Rest complete")
             .setContentText("Time for the next set.")
             .setAutoCancel(true)
+            .setContentIntent(activeWorkoutContentIntent(context))
             .build()
         try {
             notificationManager.notify(REST_NOTIFICATION_ID, notification)
@@ -367,6 +358,19 @@ class RestTimerReceiver : BroadcastReceiver() {
 
 private fun notificationManager(context: Context): NotificationManager =
     context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+private fun activeWorkoutContentIntent(context: Context): PendingIntent? {
+    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        ?.setAction(ACTION_OPEN_ACTIVE_WORKOUT)
+        ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        ?: return null
+    return PendingIntent.getActivity(
+        context,
+        REST_OPEN_APP_REQUEST_CODE,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+}
 
 private fun NotificationManager.ensureActiveRestChannel() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || getNotificationChannel(CHANNEL_ACTIVE) != null) return

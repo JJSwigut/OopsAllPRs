@@ -147,27 +147,29 @@ private fun RecentTrainingCard(
     onOpenRecords: () -> Unit
 ) {
     FitCard(modifier = Modifier.fillMaxWidth(), glow = FitTheme.glow.none) {
-        SectionLabel("Recent training")
-        if (review == null || review.completedWorkoutCount == 0) {
-            FoundationText("No completed workouts in the last 7 days.", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-            FoundationMutedText("Your history and progress are still here.")
-            FitButton(
-                text = "Plan next workout",
-                onClick = onOpenTrain,
-                modifier = Modifier.fillMaxWidth(),
-                style = FitButtonStyle.Primary
-            )
-        } else {
-            FoundationText(review.window.label, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
-            FoundationMutedText(review.factsLabel())
-            if (review.personalRecords.isNotEmpty()) {
-                FoundationText(
-                    "${review.personalRecords.size} new ${if (review.personalRecords.size == 1) "record" else "records"}",
-                    style = FitTheme.type.label.copy(color = FitTheme.colors.accent)
+        Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)) {
+            SectionLabel("Recent training")
+            if (review == null || review.completedWorkoutCount == 0) {
+                FoundationText("No completed workouts in the last 7 days.", style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                FoundationMutedText("Your history and progress are still here.")
+                FitButton(
+                    text = "Plan next workout",
+                    onClick = onOpenTrain,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = FitButtonStyle.Primary
                 )
-                FoundationTextAction("View records", onOpenRecords)
+            } else {
+                FoundationText(review.window.label, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                FoundationMutedText(review.factsLabel())
+                if (review.personalRecords.isNotEmpty()) {
+                    FoundationText(
+                        "${review.personalRecords.size} new ${if (review.personalRecords.size == 1) "record" else "records"}",
+                        style = FitTheme.type.label.copy(color = FitTheme.colors.accent)
+                    )
+                    FoundationTextAction("View records", onOpenRecords)
+                }
+                FoundationTextAction("Train", onOpenTrain)
             }
-            FoundationTextAction("Train", onOpenTrain)
         }
     }
 }
