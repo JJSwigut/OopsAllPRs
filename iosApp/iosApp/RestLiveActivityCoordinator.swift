@@ -1,26 +1,35 @@
 import ActivityKit
 import Foundation
+import UserNotifications
 import shared
 
-final class RestLiveActivityCoordinator: NSObject, RestAlertScheduler {
+final class RestLiveActivityCoordinator: NSObject, RestAlertScheduler, UNUserNotificationCenterDelegate {
+    private let activeWorkoutOpenRequest: ActiveWorkoutOpenRequest
     private let operationLock = NSLock()
     private var operationTail: Task<Void, Never>?
     private var expiryTask: Task<Void, Never>?
+    private var notificationVersion = 0
+
+    init(activeWorkoutOpenRequest: ActiveWorkoutOpenRequest) {
+        self.activeWorkoutOpenRequest = activeWorkoutOpenRequest
+        super.init()
+        UNUserNotificationCenter.current().delegate = self
+    }
 
     func schedule(
         restEndsAt: Kotlinx_datetimeInstant,
         soundEnabled: Bool,
         persistentSurfaceEnabled: Bool
     ) -> RestAlertScheduleResult {
-        _ = soundEnabled
         let endsAt = Date(timeIntervalSince1970: Double(restEndsAt.toEpochMilliseconds()) / 1_000)
+        scheduleCompletionNotification(at: endsAt, soundEnabled: soundEnabled)
         guard persistentSurfaceEnabled, endsAt > Date() else {
-            cancel()
+            endLiveActivity()
             return .scheduled
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            cancel()
-            return .permissionDenied
+            endLiveActivity()
+            return .scheduled
         }
 
         let state = RestActivityAttributes.ContentState(startedAt: Date(), endsAt: endsAt)
@@ -35,11 +44,64 @@ final class RestLiveActivityCoordinator: NSObject, RestAlertScheduler {
     }
 
     func cancel() {
+        operationLock.lock()
+        notificationVersion += 1
+        operationLock.unlock()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.completionNotificationId])
+        endLiveActivity()
+    }
+
+    private func endLiveActivity() {
         cancelExpiryTask()
         enqueueOperation {
             await Self.endAllActivities(content: nil)
         }
     }
+
+    private func scheduleCompletionNotification(at endsAt: Date, soundEnabled: Bool) {
+        let center = UNUserNotificationCenter.current()
+        operationLock.lock()
+        notificationVersion += 1
+        let version = notificationVersion
+        operationLock.unlock()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.completionNotificationId])
+        guard endsAt > Date() else { return }
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            guard let self, granted else { return }
+            self.operationLock.lock()
+            let isCurrent = self.notificationVersion == version
+            self.operationLock.unlock()
+            guard isCurrent else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Rest complete"
+            content.body = "Time for the next set."
+            if soundEnabled { content.sound = .default }
+            let delay = max(1, endsAt.timeIntervalSinceNow)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+            center.add(UNNotificationRequest(identifier: Self.completionNotificationId, content: content, trigger: trigger))
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.notification.request.identifier == Self.completionNotificationId {
+            activeWorkoutOpenRequest.request()
+        }
+        completionHandler()
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    private static let completionNotificationId = "rest-complete"
 
     private func enqueueOperation(_ operation: @escaping () async -> Void) {
         operationLock.lock()

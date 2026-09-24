@@ -44,6 +44,7 @@ import com.jjswigut.oopsallprs.ds.theme.FitTheme
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationMutedText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationText
 import com.jjswigut.oopsallprs.ui.designsystem.FoundationTextAction
+import com.jjswigut.oopsallprs.ui.progress.toProgressPrRow
 import kotlinx.coroutines.delay
 
 @Composable
@@ -110,6 +111,7 @@ fun ActiveWorkoutFlow(
     val displayWeightStep = weightStepAmount
     var isOrganizerOpen by remember(state.workout?.workoutId) { mutableStateOf(false) }
     var settingsExerciseId by remember(state.workout?.workoutId) { mutableStateOf<FoundationId?>(null) }
+    var recordsExerciseId by remember(state.workout?.workoutId) { mutableStateOf<FoundationId?>(null) }
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -230,6 +232,7 @@ fun ActiveWorkoutFlow(
                 onAdjustActiveRest = onAdjustActiveRest,
                 onSkipActiveRest = onSkipActiveRest,
                 onFocusExercise = onFocusExercise,
+                onShowRecords = { recordsExerciseId = it },
                 showExerciseOverview = state.isExerciseOverviewVisible,
                 weightUnit = weightUnit,
                 weightStepAmount = displayWeightStep,
@@ -262,6 +265,42 @@ fun ActiveWorkoutFlow(
                 onSaveAsDefault = { onSaveConfigurationAsDefault(block.exerciseInstanceId) },
                 onDismiss = { settingsExerciseId = null }
             )
+        }
+
+    state.workout?.exerciseBlocks
+        ?.firstOrNull { it.exerciseInstanceId == recordsExerciseId }
+        ?.let { block ->
+            val records = state.personalRecords
+                .filter { it.exerciseCatalogId == block.exerciseCatalogId }
+                .sortedWith(compareBy({ it.metricCode.value }, { it.reps ?: 0 }))
+                .map { it.toProgressPrRow(block.displayName, weightUnit) }
+            FitDialog(onDismissRequest = { recordsExerciseId = null }) {
+                Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)) {
+                    FoundationText(block.displayName, style = FitTheme.type.title.copy(color = FitTheme.colors.onSurface))
+                    FoundationMutedText("Personal records")
+                    if (records.isEmpty()) {
+                        FoundationMutedText("No records for this exercise yet.")
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                            verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.sm)
+                        ) {
+                            items(records, key = { it.recordId.value }) { record ->
+                                Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
+                                    FoundationText(record.kindLabel, style = FitTheme.type.label.copy(color = FitTheme.colors.onSurface))
+                                    FoundationMutedText("${record.valueLabel} • ${record.achievedDateLabel}")
+                                }
+                            }
+                        }
+                    }
+                    FitButton(
+                        text = "Done",
+                        onClick = { recordsExerciseId = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        style = FitButtonStyle.Primary
+                    )
+                }
+            }
         }
 }
 
@@ -650,6 +689,7 @@ private fun ActiveWorkoutBottomBar(
     onAdjustActiveRest: (Int) -> Unit,
     onSkipActiveRest: () -> Unit,
     onFocusExercise: (FoundationId) -> Unit,
+    onShowRecords: (FoundationId) -> Unit,
     showExerciseOverview: Boolean,
     weightUnit: WeightUnit,
     weightStepAmount: Double,
@@ -840,6 +880,7 @@ private fun ActiveWorkoutBottomBar(
 
             focusedBlock?.let { block ->
                 LoggingContextHeader(block = block, workout = workout)
+                FoundationTextAction("PRs", onClick = { onShowRecords(block.exerciseInstanceId) })
             }
             focusedBlock?.let { block ->
                 SetRow(
