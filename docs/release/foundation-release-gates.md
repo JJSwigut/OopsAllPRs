@@ -2,7 +2,8 @@
 
 ## Android Backup and Permissions
 
-- Android Auto Backup is enabled for database and shared preference domains through `androidApp/src/main/res/xml/backup_rules.xml`.
+- Android Auto Backup is enabled for database and shared preference domains. Android 12 and later use `androidApp/src/main/res/xml/data_extraction_rules.xml` for cloud backup and device transfer. The legacy `fullBackupContent` file remains aligned if support is later broadened to older Android versions.
+- The persisted `android_auto_backup_allowed` preference does not change Android OS backup behavior. The manifest and extraction rules control that behavior, so changing the backup policy requires updating both rule files and the privacy disclosures.
 - Notification permission is declared for future rest-complete notification scheduling.
 - Rest notification scheduling remains behind shared platform adapters.
 

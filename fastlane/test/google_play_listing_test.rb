@@ -152,3 +152,49 @@ class GooglePlayListingTest < Minitest::Test
     previous.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
   end
 end
+
+class AndroidReleaseTest < Minitest::Test
+  def test_internal_lane_requires_android_upload_signing
+    error = assert_raises(RuntimeError) do
+      with_environment(
+        "ANDROID_VERSION_CODE" => "1101",
+        "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" => "test-credential",
+        "ANDROID_UPLOAD_KEYSTORE_PATH" => "",
+        "ANDROID_UPLOAD_KEYSTORE_PASSWORD" => "",
+        "ANDROID_UPLOAD_KEY_ALIAS" => "",
+        "ANDROID_UPLOAD_KEY_PASSWORD" => ""
+      ) do
+        instance_exec(&FASTLANE_LANES.fetch([:android, :internal]))
+      end
+    end
+
+    assert_includes error.message, "ANDROID_UPLOAD_KEYSTORE_PATH is required"
+  end
+
+  def test_internal_lane_rejects_a_missing_upload_keystore_file
+    error = assert_raises(RuntimeError) do
+      with_environment(
+        "ANDROID_VERSION_CODE" => "1101",
+        "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" => "test-credential",
+        "ANDROID_UPLOAD_KEYSTORE_PATH" => "/missing/android-upload-keystore.jks",
+        "ANDROID_UPLOAD_KEYSTORE_PASSWORD" => "test-password",
+        "ANDROID_UPLOAD_KEY_ALIAS" => "test-alias",
+        "ANDROID_UPLOAD_KEY_PASSWORD" => "test-password"
+      ) do
+        instance_exec(&FASTLANE_LANES.fetch([:android, :internal]))
+      end
+    end
+
+    assert_includes error.message, "ANDROID_UPLOAD_KEYSTORE_PATH does not point to a file"
+  end
+
+  private
+
+  def with_environment(values)
+    previous = values.to_h { |key, _value| [key, ENV[key]] }
+    values.each { |key, value| ENV[key] = value }
+    yield
+  ensure
+    previous.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+  end
+end

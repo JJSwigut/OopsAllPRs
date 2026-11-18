@@ -151,6 +151,15 @@ platform :android do
     package_name = ENV.fetch("ANDROID_PACKAGE_NAME", "com.jjswigut.oopsallprs.android")
     track = ENV.fetch("ANDROID_PLAY_TRACK", "internal")
 
+    %w[
+      ANDROID_UPLOAD_KEYSTORE_PATH
+      ANDROID_UPLOAD_KEYSTORE_PASSWORD
+      ANDROID_UPLOAD_KEY_ALIAS
+      ANDROID_UPLOAD_KEY_PASSWORD
+    ].each { |name| require_env!(name) }
+    keystore_path = ENV.fetch("ANDROID_UPLOAD_KEYSTORE_PATH")
+    UI.user_error!("ANDROID_UPLOAD_KEYSTORE_PATH does not point to a file") unless File.file?(keystore_path)
+
     require_env!("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
 
     gradle(
