@@ -27,13 +27,18 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
       - name: Run release-equivalent Android checks
         run: tools/release_gate.sh --skip-ios
 
   ios:
     name: iOS Release simulator package
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,5 +52,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Link shared iOS Release framework
+        run: ./gradlew --no-daemon :shared:linkReleaseFrameworkIosSimulatorArm64
+
       - name: Build iOS Release simulator package
-        run: IOS_RELEASE_TIMEOUT_SECONDS=1080 tools/ios_release_package.sh
+        run: IOS_RELEASE_TIMEOUT_SECONDS=1800 tools/ios_release_package.sh

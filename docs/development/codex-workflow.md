@@ -163,7 +163,7 @@ Setup-only work such as fetching refs, creating a branch, switching worktrees, i
 
 Use the smallest credible verification for a feature, then broaden when shared behavior changes.
 
-Baseline Android checks:
+Baseline Android checks (requires JDK 17 and Ruby 3.1 or newer):
 
 ```bash
 tools/release_gate.sh --skip-ios
