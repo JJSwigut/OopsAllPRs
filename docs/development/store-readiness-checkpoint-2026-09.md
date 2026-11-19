@@ -17,6 +17,12 @@ statuses as current.
 - The repository has current platform release configuration and store artwork;
   this does not prove that either store's app record, declarations, products, or
   production listing is ready for review.
+- The owner confirmed on 2026-11-19 that system-managed backups are intended on
+  both platforms. Android Auto Backup covers the database and shared
+  preferences; iOS stores the database in the default `Application Support`
+  container without a backup exclusion. Both store privacy disclosures must
+  describe that OS-managed backup. `fastlane/test/system_backup_policy_test.rb`
+  guards this configuration.
 - Google Play Console and App Store Connect still require an owner-side review
   of the open items below before any public submission. The exact remaining
   console tasks may have changed since the observations recorded here.

@@ -51,6 +51,7 @@ echo "Release gate started: $started_at" | tee "$summary_path"
 git status --short --branch | tee -a "$summary_path"
 
 ruby fastlane/test/google_play_listing_test.rb
+ruby fastlane/test/system_backup_policy_test.rb
 ruby tools/validate_google_play_assets.rb
 
 ./gradlew --no-daemon \

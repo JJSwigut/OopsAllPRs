@@ -71,11 +71,18 @@ The app targets API 36, which meets Google Play's current target requirement for
 new apps and updates. Confirm the target requirement again before each store
 submission because Google Play updates this policy over time.
 
+System-managed backups are the confirmed product policy on both platforms:
+keep them enabled and describe them accurately in both stores.
+
 Android Auto Backup includes the app database and shared preferences for cloud
 backup and device transfer, subject to the user's Android backup settings. The
-Play Data Safety form and linked privacy policy must accurately describe this
-platform-managed backup. The in-app `android_auto_backup_allowed` database
-field does not currently toggle OS backup behavior.
+in-app `android_auto_backup_allowed` database field does not currently toggle OS
+backup behavior; the manifest and extraction rules control it.
+
+iOS keeps the SQLDelight database in the default `Application Support` container
+with no backup exclusion, so device and iCloud backups include it. The Play Data
+Safety form and the App Store privacy answers must disclose that the OS may back
+up workout data off the device.
 
 Validate the source-controlled listing dimensions and prepare the exact Supply directory without contacting Google Play:
 
@@ -179,12 +186,15 @@ requirements. This Linux repository session cannot inspect the final Xcode
 archive; add `PrivacyInfo.xcprivacy` only if the app or an embedded SDK requires
 one, with declarations that match the actual binary.
 
-Also confirm the SQLDelight database's resolved iOS container path and backup
-exclusion state on a device. Apple includes app data stored in `Documents` and
-`Application Support` in device backups by default. Align the App Store privacy
-answers and policy with the actual iCloud/device-backup behavior on both
-platforms; do not claim app-only local storage without accounting for those
-system-managed backups.
+The intended behavior is system-managed backup on both platforms: Apple
+includes app data stored in `Documents` and `Application Support` in device
+backups by default, and this app does not exclude its database. Confirm on a
+device that the SQLDelight database resolves under the iOS app container's
+`Application Support` directory and that its backup state is not excluded, then
+align the App Store privacy answers and policy with that iCloud/device-backup
+behavior; do not claim app-only local storage without accounting for those
+system-managed backups. `ruby fastlane/test/system_backup_policy_test.rb` guards
+the source configuration for both platforms.
 
 To create the remaining iOS secrets:
 
