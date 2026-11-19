@@ -103,7 +103,7 @@ jobs:
     name: iOS release simulator package
     needs: tests
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -117,8 +117,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Link shared iOS Release framework
+        run: ./gradlew --no-daemon :shared:linkReleaseFrameworkIosSimulatorArm64
+
       - name: Build iOS release simulator app
-        run: IOS_RELEASE_TIMEOUT_SECONDS=1080 tools/ios_release_package.sh
+        run: IOS_RELEASE_TIMEOUT_SECONDS=1800 tools/ios_release_package.sh
 
       - name: Upload iOS release simulator artifact
         uses: actions/upload-artifact@v4
