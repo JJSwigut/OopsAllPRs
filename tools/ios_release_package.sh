@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-max_seconds="${IOS_RELEASE_TIMEOUT_SECONDS:-900}"
+max_seconds="${IOS_RELEASE_TIMEOUT_SECONDS:-1800}"
 derived_data_path="${IOS_DERIVED_DATA_PATH:-$repo_root/build/ios-derived-release}"
 artifact_dir="${IOS_RELEASE_ARTIFACT_DIR:-$repo_root/build/release-artifacts}"
 product_dir="$derived_data_path/Build/Products/Release-iphonesimulator"
@@ -14,7 +14,7 @@ Usage: tools/ios_release_package.sh
 Builds and packages the iOS Release simulator app.
 
 Environment:
-  IOS_RELEASE_TIMEOUT_SECONDS=900
+  IOS_RELEASE_TIMEOUT_SECONDS=1800
   IOS_DERIVED_DATA_PATH=build/ios-derived-release
   IOS_RELEASE_ARTIFACT_DIR=build/release-artifacts
 

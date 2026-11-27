@@ -5,6 +5,7 @@ GitHub Actions has three workflows:
 - `CI`: runs the release-equivalent Android checks and an iOS Release simulator
   package for pull requests and pushes to `development` or `main`.
 - `Deploy Stores`: runs `tools/release_gate.sh --skip-ios` on pushes to `main`, uploads Android release artifacts and release-gate proof files to GitHub Actions, creates a GitHub Release, attempts a timeout-bounded iOS Release simulator package, uploads Android to Google Play internal testing when secrets exist, and uploads iOS to TestFlight once Apple signing secrets exist.
+- The iOS TestFlight job also requires the iOS Release simulator package job to pass. A package failure still allows the GitHub Release to carry available Android artifacts, but it skips TestFlight.
 - `Google Play Listing`: a manual-only workflow for validating or uploading Android store-presence metadata and artwork. It has no push or pull-request trigger.
 
 Manual dispatch accepts:
@@ -22,10 +23,17 @@ Every successful `main` push creates a GitHub Release with an automatic `v1.0.<r
 - Release-gate proof files from `build/release-gate/`.
 - iOS Release simulator zip from `tools/ios_release_package.sh` when the best-effort iOS package job succeeds.
 
+Android version codes and iOS build numbers use `1000 + (100 × workflow run number) + run attempt`, reserving up to 99 attempts for a rerun without reusing a store build number. The Android version name and automatic GitHub Release tag continue to use `1.0.<run-number + 1000>`; the Android version code is the separate monotonically increasing Play identifier.
+
+Before uploading, confirm each computed store build number is higher than any
+previously uploaded build that was assigned manually in Play Console or App
+Store Connect.
+
 The deployment iOS package job is best-effort only to protect Android/GitHub
-artifact availability from GitHub macOS runner infrastructure failures. Local
-and pull-request CI both require a successful iOS Release simulator package;
-investigate a failed package job before treating an iOS release as ready.
+artifact availability from GitHub macOS runner infrastructure failures. The
+TestFlight job is gated on that package succeeding. Local and pull-request CI
+also require a successful iOS Release simulator package; investigate a failed
+package job before treating an iOS release as ready.
 
 Before promoting `development` to `main`, run `tools/release_gate.sh --android-smoke`. The iOS portion packages the Release app and runs the local StoreKit entitlement lifecycle smoke. Successful local release gates write `build/release-gate/summary.txt`, `build/release-gate/artifacts.txt`, and `build/release-gate/proof.env` for PR or release notes.
 
@@ -58,6 +66,23 @@ The Google Play service account needs Play Console access for:
 - `Manage store presence` for listing image and screenshot uploads
 
 The deploy workflow skips Android store upload with a GitHub Actions notice until all required Android secrets are present. The Play Console app must exist before the first Fastlane upload. Use package name `com.jjswigut.oopsallprs.android`.
+
+The app targets API 36, which meets Google Play's current target requirement for
+new apps and updates. Confirm the target requirement again before each store
+submission because Google Play updates this policy over time.
+
+System-managed backups are the confirmed product policy on both platforms:
+keep them enabled and describe them accurately in both stores.
+
+Android Auto Backup includes the app database and shared preferences for cloud
+backup and device transfer, subject to the user's Android backup settings. The
+in-app `android_auto_backup_allowed` database field does not currently toggle OS
+backup behavior; the manifest and extraction rules control it.
+
+iOS keeps the SQLDelight database in the default `Application Support` container
+with no backup exclusion, so device and iCloud backups include it. The Play Data
+Safety form and the App Store privacy answers must disclose that the OS may back
+up workout data off the device.
 
 Validate the source-controlled listing dimensions and prepare the exact Supply directory without contacting Google Play:
 
@@ -146,6 +171,30 @@ tools/fastlane.sh ios listing
 ```
 
 This lane uses only the App Store Connect API secrets above; it does not need the distribution certificate or provisioning profile because it does not upload a build. Set `IOS_APP_VERSION` if Fastlane should target a specific editable App Store version.
+
+The source tree contains six 6.9-inch iPhone screenshots but no App Store
+text-metadata package. Complete and review the title, subtitle, description,
+keywords, support contact/URL, privacy policy URL, age rating, privacy answers,
+availability, price, copyright, and export-compliance declarations in App
+Store Connect. The repository does not establish the current state of those
+console fields. Review the app's `lifetime_unlock` product and sandbox purchase
+requirements in [billing setup](../../specs/025-full-access-payments/billing-setup.md).
+
+Before the first iOS upload, build the signed device archive on macOS and inspect
+its embedded SDKs for Apple privacy-manifest and required-reason API
+requirements. This Linux repository session cannot inspect the final Xcode
+archive; add `PrivacyInfo.xcprivacy` only if the app or an embedded SDK requires
+one, with declarations that match the actual binary.
+
+The intended behavior is system-managed backup on both platforms: Apple
+includes app data stored in `Documents` and `Application Support` in device
+backups by default, and this app does not exclude its database. Confirm on a
+device that the SQLDelight database resolves under the iOS app container's
+`Application Support` directory and that its backup state is not excluded, then
+align the App Store privacy answers and policy with that iCloud/device-backup
+behavior; do not claim app-only local storage without accounting for those
+system-managed backups. `ruby fastlane/test/system_backup_policy_test.rb` guards
+the source configuration for both platforms.
 
 To create the remaining iOS secrets:
 
