@@ -16,6 +16,7 @@ import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationId
 import com.jjswigut.oopsallprs.domain.model.LoggingConfigurationSource
 import com.jjswigut.oopsallprs.domain.model.MeasureKind
 import com.jjswigut.oopsallprs.domain.model.OrderedPosition
+import com.jjswigut.oopsallprs.domain.model.PersonalRecord
 import com.jjswigut.oopsallprs.domain.model.PersistedSetDraft
 import com.jjswigut.oopsallprs.domain.model.RestConfiguration
 import com.jjswigut.oopsallprs.domain.model.SetKind
@@ -24,6 +25,7 @@ import com.jjswigut.oopsallprs.domain.model.foundationFailure
 import com.jjswigut.oopsallprs.domain.model.foundationSuccess
 import com.jjswigut.oopsallprs.domain.repository.ActiveWorkoutUxRepository
 import com.jjswigut.oopsallprs.domain.repository.PreferencesRepository
+import com.jjswigut.oopsallprs.domain.repository.ProgressRepository
 import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.usecase.ExerciseLoggingConfigurationUseCases
 import com.jjswigut.oopsallprs.domain.usecase.PreviousWorkoutDefaultsUseCase
@@ -45,7 +47,8 @@ data class ActiveWorkoutState(
     val isExerciseOverviewVisible: Boolean = false,
     val isDiscardConfirmationVisible: Boolean = false,
     val isFinishConfirmationVisible: Boolean = false,
-    val canUndoLastSet: Boolean = false
+    val canUndoLastSet: Boolean = false,
+    val personalRecords: List<PersonalRecord> = emptyList()
 )
 
 class ActiveWorkoutStateHolder(
@@ -55,7 +58,8 @@ class ActiveWorkoutStateHolder(
     private val activePrFeedback: ActivePrFeedbackUseCase? = null,
     private val previousDefaults: PreviousWorkoutDefaultsUseCase? = null,
     private val configurationManagement: ExerciseLoggingConfigurationUseCases? = null,
-    private val preferences: PreferencesRepository? = null
+    private val preferences: PreferencesRepository? = null,
+    private val progress: ProgressRepository? = null
 ) {
     private val drafts = linkedMapOf<FoundationId, SetRowDraft>()
     private val prFeedbackBySetId = linkedMapOf<FoundationId, ActivePrFeedback>()
@@ -81,6 +85,7 @@ class ActiveWorkoutStateHolder(
         }
 
         hydrateConfigurations(workout)
+        val personalRecords = progress?.personalRecords().orEmpty()
         startTimerWithFirstSet = preferences?.startWorkoutTimerWithFirstSet() ?: true
         hydrateDrafts(workout)
         hydrateConfigurationPreferences(workout)
@@ -98,6 +103,7 @@ class ActiveWorkoutStateHolder(
         }
         val session = lifecycle.restoreActiveSession(now)?.takeIf { it.activeWorkoutId == workoutId }
         publish(workout, now, session)
+        _state.value = _state.value.copy(personalRecords = personalRecords)
         val focusedBlock = _state.value.workout?.exerciseBlocks?.firstOrNull {
             it.exerciseInstanceId == focus?.exerciseInstanceId
         }

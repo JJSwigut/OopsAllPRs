@@ -57,7 +57,7 @@ fun WorkoutHomeFlow(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(top = FitTheme.spacing.xl, bottom = FitTheme.spacing.xl),
+                .padding(top = FitTheme.spacing.xl, bottom = if (hasActiveSession) FitTheme.spacing.xl else 112.dp),
             verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.md)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(FitTheme.spacing.xs)) {
@@ -143,20 +143,8 @@ fun WorkoutHomeFlow(
                         }
                     }
                 }
-                if (!hasActiveSession) {
-                    FitStartButton(
-                        text = "Start empty workout",
-                        onClick = onStartEmpty,
-                        modifier = Modifier.foundationTouchTarget("Start empty workout")
-                    )
-                }
             } else {
                 if (!hasActiveSession) {
-                    FitStartButton(
-                        text = "Start workout",
-                        onClick = onStartEmpty,
-                        modifier = Modifier.foundationTouchTarget("Start workout")
-                    )
                     FitButton(
                         text = "Create routine",
                         onClick = onCreateRoutine,
@@ -171,6 +159,17 @@ fun WorkoutHomeFlow(
                     style = FitTheme.type.caption.copy(color = FitTheme.colors.danger)
                 )
             }
+        }
+        if (!hasActiveSession) {
+            FitStartButton(
+                text = if (state.templates.isEmpty()) "Start workout" else "Start empty workout",
+                onClick = onStartEmpty,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = FitTheme.spacing.xl)
+                    .foundationTouchTarget("Start empty workout")
+            )
         }
         if (state.isFullAccessPaywallVisible) {
             FullAccessRequiredDialog(

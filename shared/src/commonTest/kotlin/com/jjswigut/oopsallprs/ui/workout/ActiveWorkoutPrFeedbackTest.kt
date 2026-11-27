@@ -4,6 +4,8 @@ import com.jjswigut.oopsallprs.domain.usecase.ActivePrFeedbackUseCase
 import com.jjswigut.oopsallprs.domain.model.ActivePrFeedback
 import com.jjswigut.oopsallprs.domain.model.ActivePrFeedbackKind
 import com.jjswigut.oopsallprs.domain.model.FoundationId
+import com.jjswigut.oopsallprs.domain.model.PersonalRecord
+import com.jjswigut.oopsallprs.domain.model.PersonalRecordKind
 import com.jjswigut.oopsallprs.domain.model.WeightKg
 import com.jjswigut.oopsallprs.domain.model.WeightUnit
 import com.jjswigut.oopsallprs.testing.FoundationHarness
@@ -15,6 +17,35 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 class ActiveWorkoutPrFeedbackTest {
+    @Test
+    fun activeWorkoutLoadsExistingRecordsForSelectedExercise() = runTest {
+        val harness = FoundationHarness()
+        val workout = harness.lifecycle.startEmpty(instant(1_000)).successValue()
+        val exerciseId = harness.weightedReference.exerciseCatalogId
+        val record = PersonalRecord(
+            id = FoundationId("record-1"),
+            exerciseCatalogId = exerciseId,
+            recordKind = PersonalRecordKind.WEIGHT_FOR_REPS,
+            reps = 5,
+            weight = WeightKg(100.0),
+            value = 100.0,
+            sourceWorkoutId = FoundationId("previous-workout"),
+            sourceSetId = FoundationId("previous-set"),
+            achievedAt = instant(500),
+            createdAt = instant(500)
+        )
+        harness.store.replaceRecords(listOf(record), emptyList()).successValue()
+        val holder = ActiveWorkoutStateHolder(
+            harness.setLogging,
+            harness.lifecycle,
+            progress = harness.store
+        )
+
+        holder.hydrate(workout.id)
+
+        assertEquals(listOf(record), holder.state.value.personalRecords)
+    }
+
     @Test
     fun confirmedRecordSetRendersInlineFeedbackOnLoggedRow() = runTest {
         val harness = FoundationHarness()

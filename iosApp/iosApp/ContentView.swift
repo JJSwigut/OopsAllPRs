@@ -32,7 +32,7 @@ struct SharedAppView: UIViewControllerRepresentable {
         } else {
             billingAdapter = nil
         }
-        let restAlertScheduler = RestLiveActivityCoordinator()
+        let restAlertScheduler = RestLiveActivityCoordinator(activeWorkoutOpenRequest: activeWorkoutOpenRequest)
         let sharedController = IosAppViewControllerFactory().create(
             context: container,
             developerToolsEnabled: developerToolsEnabled,
