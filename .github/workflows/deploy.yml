@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      publish_android_only:
+        description: "Upload to Google Play internal testing only"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -101,6 +106,7 @@ jobs:
 
   ios-package:
     name: iOS release simulator package
+    if: github.event_name == 'push' || !inputs.publish_android_only
     needs: tests
     runs-on: macos-latest
     timeout-minutes: 45
@@ -134,7 +140,7 @@ jobs:
     name: Android internal testing
     needs: tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.publish_stores
+    if: github.event_name == 'push' || inputs.publish_stores || inputs.publish_android_only
     env:
       ANDROID_PACKAGE_NAME: com.jjswigut.oopsallprs.android
       ANDROID_PLAY_TRACK: internal
@@ -214,7 +220,7 @@ jobs:
       - tests
       - ios-package
     runs-on: macos-latest
-    if: (github.event_name == 'push' || inputs.publish_stores) && needs.ios-package.result == 'success'
+    if: (github.event_name == 'push' || (inputs.publish_stores && !inputs.publish_android_only)) && needs.ios-package.result == 'success'
     env:
       IOS_BUNDLE_ID: com.jjswigut.oopsallprs.ios
       IOS_MARKETING_VERSION: "1.0"
